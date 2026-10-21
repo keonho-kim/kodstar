@@ -1,0 +1,26 @@
+[package]
+name = "kodstar-cli"
+description = "Command-line frontend for KodStar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "kodstar"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+kodstar-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[lints]
+workspace = true

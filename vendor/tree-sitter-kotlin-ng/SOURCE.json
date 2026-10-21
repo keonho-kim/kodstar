@@ -1,0 +1,24 @@
+{
+  "upstream_version": "1.1.0",
+  "upstream_revision": "77dd60ea0a9003ce062c9728a513ffe1aaff8c82",
+  "upstream_crate_sha256": "e800ebbda938acfbf224f4d2c34947a31994b1295ee6e819b65226c7b51b4450",
+  "generator": "tree-sitter 0.26.10",
+  "abi": 14,
+  "manifest_adjustment": "Omit the unused upstream README reference.",
+  "files": {
+    "Cargo.toml": "2e1fdfbb29afa9f493bf6cdc55a2e4f5c7dbf62496f6b3a6864eccf75f4ee680",
+    "grammar.js": "b18784eac9637ec9d2673e6a49b0baaa772dbec8429d40fec8f11d7067ca39ea",
+    "tree-sitter.json": "d4f3dd0850836457ede7ee82e3f1b8803bd40343b9b17af7e02741ff4daf6fcb",
+    "bindings/rust/lib.rs": "1e3ede5fbdb4106d84452424d796facd175b130e0c55d6b3887809e9642d0fcc",
+    "bindings/rust/build.rs": "8f497bb1459c09529efecfb9ae0dbc6e6f3c5892911e535f6551e15337d2cd6c",
+    "src/scanner.c": "164c2bb928d23765ed38c3a322deaef9b52d6e147cec7cdf45add90d4fa6101c",
+    "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+    "src/tree_sitter/array.h": "31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c",
+    "src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+    "src/parser.c": "470f6f52bcd3ca84b07a7c12d7d9a3e21b45157a68f41e9cd2959fe1fc9d5d53",
+    "src/node-types.json": "a89f67d15508ecbb249c4c464fea3f9f7fd95c575e2a1e4024e6322bfd725683",
+    "src/grammar.json": "72292eeefa087b2f36649a3840c86ea258e0dd74f64fbb1b03d25d0997cd740f",
+    "LICENSE": "0eea8dc45e89deeb03c7799bbbc7b4688f365fb274562f4540ecfebdea82e727",
+    "patch.json": "a62881de4ac9c18dfea52a5f2bda9ae4f4c6f2a40110cbf17899ffd5555e2a6e"
+  }
+}

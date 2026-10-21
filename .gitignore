@@ -1,0 +1,19 @@
+/target/
+**/*.rs.bk
+.DS_Store
+.idea/
+.vscode/
+
+# Local credentials and environment overrides.
+.env
+.env.*
+!.env.example
+
+# Local analysis caches and verification output; small fixtures remain trackable.
+/.kodstar/
+/tmp/
+/artifacts/
+
+# VS Code adapter development output
+/editors/vscode/node_modules/
+/editors/vscode/dist/

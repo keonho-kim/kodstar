@@ -1,0 +1,11 @@
+{
+  "reason": "Kotlin classMemberDeclarations permits optional semis; retain every complete member on one line.",
+  "specification": "https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-classMemberDeclarations",
+  "replacements": [
+    {
+      "before": "repeat(seq($.class_member_declaration, $._class_member_semi))",
+      "after": "repeat(seq($.class_member_declaration, optional($._class_member_semi)))",
+      "occurrences": 2
+    }
+  ]
+}

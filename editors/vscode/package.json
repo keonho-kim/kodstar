@@ -1,0 +1,126 @@
+{
+    "name": "kodstar-vscode",
+    "displayName": "KodStar",
+    "description": "Local source relationships from the KodStar engine",
+    "version": "0.1.0",
+    "private": true,
+    "engines": {
+        "vscode": "^1.100.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "extensionKind": [
+        "workspace"
+    ],
+    "main": "./dist/src/extension.js",
+    "activationEvents": [
+        "onView:kodstar.relations"
+    ],
+    "capabilities": {
+        "virtualWorkspaces": false,
+        "untrustedWorkspaces": {
+            "supported": false,
+            "description": "KodStar launches a configurable local CLI executable."
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p .",
+        "test": "npm run compile && node --test dist/test/*.test.js",
+        "format:check": "prettier --check src test package.json tsconfig.json"
+    },
+    "devDependencies": {
+        "typescript": "7.0.2",
+        "@types/vscode": "1.100.0",
+        "@types/node": "22.20.5",
+        "prettier": "3.9.10"
+    },
+    "contributes": {
+        "commands": [
+            {
+                "command": "kodstar.build",
+                "title": "KodStar: Build index"
+            },
+            {
+                "command": "kodstar.symbols",
+                "title": "KodStar: Show symbols"
+            },
+            {
+                "command": "kodstar.related",
+                "title": "KodStar: Show relationships"
+            },
+            {
+                "command": "kodstar.deps",
+                "title": "KodStar: Show dependencies"
+            },
+            {
+                "command": "kodstar.refs",
+                "title": "KodStar: Show references"
+            },
+            {
+                "command": "kodstar.explain",
+                "title": "KodStar: Explain relationships"
+            },
+            {
+                "command": "kodstar.impact",
+                "title": "KodStar: Show impact candidates"
+            },
+            {
+                "command": "kodstar.filters",
+                "title": "KodStar: Set relationship filters"
+            },
+            {
+                "command": "kodstar.restart",
+                "title": "KodStar: Restart engine session"
+            }
+        ],
+        "views": {
+            "explorer": [
+                {
+                    "id": "kodstar.relations",
+                    "name": "KodStar"
+                }
+            ]
+        },
+        "menus": {
+            "view/title": [
+                {
+                    "command": "kodstar.symbols",
+                    "when": "view == kodstar.relations",
+                    "group": "navigation"
+                },
+                {
+                    "command": "kodstar.related",
+                    "when": "view == kodstar.relations",
+                    "group": "navigation"
+                },
+                {
+                    "command": "kodstar.filters",
+                    "when": "view == kodstar.relations",
+                    "group": "navigation"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "KodStar",
+            "properties": {
+                "kodstar.executable": {
+                    "type": "string",
+                    "default": "kodstar",
+                    "scope": "machine-overridable",
+                    "description": "KodStar executable on this workspace host."
+                }
+            }
+        },
+        "viewsWelcome": [
+            {
+                "view": "kodstar.relations",
+                "contents": "Open a saved source file.\n[Build index](command:kodstar.build)\n[Show symbols](command:kodstar.symbols)"
+            }
+        ]
+    },
+    "prettier": {
+        "printWidth": 100
+    },
+    "publisher": "kodstar-local"
+}
