@@ -8,6 +8,28 @@ use kodstar_core::*;
 use std::fs;
 
 #[test]
+fn cache_use_refreshes_its_timestamp_without_changing_registration() -> TestResult {
+    let project = Project::new()?;
+    project.write("main.rs", "fn target() {}")?;
+    let report = project.build(false)?;
+    let path = std::path::Path::new(&report.cache).join("project.json");
+    let registration = fs::read(&path)?;
+    let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)?
+        .set_modified(old)?;
+
+    project.query(Query::Symbols {
+        file: "main.rs".into(),
+    })?;
+
+    assert_eq!(fs::read(&path)?, registration);
+    assert!(fs::metadata(&path)?.modified()? > old);
+    Ok(())
+}
+
+#[test]
 fn cache_dry_run_and_cleanup_preserve_configuration_and_unknown_data() -> TestResult {
     let project = Project::new()?;
     project.write("main.rs", "fn target() {}")?;
@@ -127,7 +149,9 @@ fn capacity_gc_removes_the_oldest_unused_cache_first() -> TestResult {
         let mut record: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
         record["last_used"] = seconds.into();
         fs::write(&path, serde_json::to_vec(&record)?)?;
-        fs::File::open(path)?
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)?
             .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))?;
     }
     let mut total = 0;

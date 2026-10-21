@@ -117,6 +117,7 @@ impl CacheStore {
         let directory = self.home.join(cache_key(root));
         if create {
             let mut builder = DirBuilder::new();
+            builder.recursive(false);
             #[cfg(unix)]
             {
                 use std::os::unix::fs::DirBuilderExt;
@@ -242,7 +243,10 @@ impl ProjectCache {
 
     pub(crate) fn touch(&self) -> Result<()> {
         let path = self.directory.join("project.json");
-        File::open(&path)
+        // Windows requires a writable handle to update file timestamps.
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
             .and_then(|file| file.set_modified(SystemTime::now()))
             .map_err(|error| Error::io("record cache use", &path, error))
     }
