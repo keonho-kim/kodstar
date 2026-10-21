@@ -9,7 +9,8 @@
 고정 toolchain과 component는 [rust-toolchain.toml](../rust-toolchain.toml),
 edition과 최소 Rust 버전은 [Cargo.toml](../Cargo.toml)에 정의한다.
 [rustup](https://rust-lang.github.io/rustup/installation/index.html)과 네이티브 C 빌드 도구가 필요하다.
-macOS는 Xcode Command Line Tools, Linux는 C toolchain, Windows MSVC target은 Visual Studio C++ Build Tools를 준비한다.
+실행 지원 대상은 macOS와 Linux이며, Windows는 지원하지 않는다.
+macOS는 Xcode Command Line Tools, Linux는 C toolchain을 준비한다.
 
 저장소 루트에서 고정 toolchain을 설치하고 선택을 확인한다.
 
@@ -41,7 +42,7 @@ cargo build --workspace --locked
 cargo build --workspace --release --locked
 ```
 
-Windows 실행 파일에는 `.exe`를 붙인다. 명령·옵션·종료 코드·최신성은
+명령·옵션·종료 코드·최신성은
 [CLI 계약](../kodstar-spec.md#7-cli-명령어-전체)에서 확인한다.
 
 ## 설정 예제
@@ -89,8 +90,7 @@ cargo test -p kodstar-core --test engine --locked
 cargo test -p kodstar-core --test engine --locked ejs
 ```
 
-[CI](../.github/workflows/ci.yml)는 Linux에서 formatting·Clippy를, Linux·macOS·Windows에서
-테스트·빌드와 에디터 adapter 검사를 실행하도록 구성한다. 수행 결과는 해당 실행의 로그로 확인한다.
+빌드와 검증은 개발 환경에서 수행한다. GitHub Actions CI는 사용하지 않는다.
 문서 변경은 내용·참조·앵커·diff를 확인한다.
 산출물은 `target/`, 임시 검증 결과는 `tmp/` 또는 `artifacts/`에 두며,
 소형 회귀 fixture는 이를 소비하는 테스트와 함께 관리한다.
@@ -148,8 +148,7 @@ python3 scripts/generate_kotlin.py --tree-sitter ./tmp/tree-sitter-cli/bin/tree-
 
 ## VS Code adapter 개발
 
-에디터 패키지는 Node.js·npm을 사용한다. CI의 Node 버전은
-[workflow](../.github/workflows/ci.yml), VS Code API 범위와 개발 의존성은
+에디터 개발에는 Node.js 22와 npm을 사용한다. VS Code API 범위와 개발 의존성은
 [package.json](../editors/vscode/package.json)에 정의한다.
 Rust 실행 파일을 먼저 빌드한 뒤 저장소 루트에서 실행한다.
 

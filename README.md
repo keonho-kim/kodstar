@@ -3,6 +3,8 @@
 Rust로 작성한 로컬 소스코드 관계 분석 엔진과 CLI입니다. 공식 Tree-sitter로 구문 사실을 추출하고,
 SQLite에 저장한 관계를 조회합니다.
 
+실행 지원 대상은 **macOS와 Linux**입니다. **Windows는 지원하지 않습니다.**
+
 ## 시작
 
 [rust-toolchain.toml](rust-toolchain.toml)의 toolchain과 네이티브 C 빌드 도구를 준비한 뒤
@@ -16,7 +18,6 @@ cargo build --workspace --locked
 ./target/debug/kodstar explain /work/project/src/api.rs caller --root /work/project
 ```
 
-Windows 실행 파일은 `target/debug/kodstar.exe`입니다.
 프로젝트 안에서는 등록된 상위 루트를 선택하므로 상대 파일 경로를 사용할 수 있습니다.
 조회와 `watch`를 사용하기 전에 `build`로 초기 인덱스를 만듭니다.
 
