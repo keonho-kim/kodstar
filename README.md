@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="docs/assets/kodstar-boot-logo.png" width="680" alt="KodStar — a gold star and orbital wordmark inspired by vintage PC boot screens" />
+  <img src="docs/assets/kodstar-boot-logo.png" width="680" alt="kod with a raised gold outline star, with kodstar in small gray type below" />
 </p>
-
-<h1 align="center">KodStar</h1>
 
 <p align="center">
   <strong>Follow the code. Keep the history.</strong><br />
@@ -18,6 +16,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
+  <a href="#command-reference">Commands</a> ·
   <a href="#examples">Examples</a> ·
   <a href="#supported-languages">Languages</a> ·
   <a href="#documentation-and-development">Documentation</a>
@@ -25,7 +24,7 @@
 
 ---
 
-**KodStar** is a source-code relationship analysis engine and CLI written in Rust.
+**kod<sup>☆</sup>** is a source-code relationship analysis engine and CLI written in Rust.
 It extracts syntax facts with official **Tree-sitter** parsers and stores relationships and analysis state in **SQLite**.
 Follow calls, references, and dependencies, while automatic checkpoints preserve changes observed as you use the CLI.
 
@@ -79,7 +78,7 @@ For automation, review the path before using `kodstar init /work/your-project --
 ### 3. Explore your code
 
 Replace the example file paths and function names with ones from your project.
-Inside a project, KodStar selects the registered ancestor root, so you can use relative paths.
+Inside a project, kod<sup>☆</sup> selects the registered ancestor root, so you can use relative paths.
 
 ```bash
 # List symbols defined in a file
@@ -92,6 +91,74 @@ kodstar explain src/api.rs caller
 # Search definitions by name
 kodstar search target
 ```
+
+## Command reference
+
+Replace `<file>`, `<symbol>`, and other placeholders with your own values. Square brackets mark optional arguments.
+A `<revision>` is a checkpoint ID or a saved checkpoint name.
+
+### Initialize and explore
+
+| Command | Purpose |
+|---|---|
+| `kodstar init [path]` | Initialize local history and analyze the project; update an existing project. |
+| `kodstar init [path] --full` | Re-extract all source files into a new analysis generation. |
+| `kodstar init [path] --verify` | Verify source content hashes during synchronization. |
+| `kodstar symbols <file>` | List definitions in a file. |
+| `kodstar list <file>` | List directly connected files. |
+| `kodstar search <name>` | Find definitions by exact name. |
+| `kodstar search <prefix> --prefix` | Find definitions whose names start with a prefix. |
+| `kodstar related <file> <symbol>` | Show incoming and outgoing relationships. |
+| `kodstar deps <file> <symbol>` | Show outgoing dependencies. |
+| `kodstar refs <file> <symbol>` | Show incoming references. |
+| `kodstar explain <file> <symbol>` | Explain definitions and relationship evidence. |
+| `kodstar impact <file> [symbol]` | Find static impact candidates for a file or symbol. |
+| `kodstar impact --since <revision>` | Inspect the impact of changes since a checkpoint. |
+| `kodstar path <file::symbol> <file::symbol>` | Find a shortest directed relationship path between two symbols. |
+
+### Local history and branches
+
+| Command | Purpose |
+|---|---|
+| `kodstar history` | List checkpoints reachable from the current branch, newest first. |
+| `kodstar history save <name>` | Capture the current source state and name its checkpoint. |
+| `kodstar history diff` | Compare the current checkpoint with its parent. |
+| `kodstar history diff --from <revision> --to <revision>` | Compare two saved checkpoints; both options are required together. |
+| `kodstar history restore <revision> [path]` | Restore all tracked files or a selected path, preserving current changes first. |
+| `kodstar history upgrade` | Verify, upgrade, and repack history storage. |
+| `kodstar branch` | List local branches and their checkpoints. |
+| `kodstar branch create <name>` | Preserve current changes and create a branch without switching to it. |
+| `kodstar branch switch <name>` | Preserve current changes and switch branches. |
+| `kodstar branch delete <name>` | Delete a branch reference other than the current branch. |
+
+### Status, diagnostics, and caches
+
+| Command | Purpose |
+|---|---|
+| `kodstar status` | Show project, checkpoint, analysis generation, freshness, and coverage. |
+| `kodstar doctor` | Diagnose history and index integrity, compatibility, and analysis failures. |
+| `kodstar languages` | Show actual language capabilities and limitations. |
+| `kodstar cache list` | List cache locations, sizes, and usage state. |
+| `kodstar cache clean` | Remove the current project's inactive analysis cache. |
+| `kodstar cache clean --all` | Remove inactive analysis caches for all projects. |
+| `kodstar cache gc` | Remove eligible caches according to retention and size policies. |
+| `kodstar cache gc --dry-run` | Preview cache cleanup candidates. |
+
+### Watching, integration, and installation
+
+| Command | Purpose |
+|---|---|
+| `kodstar watch` | Watch saved files and synchronize changes until stopped. |
+| `kodstar serve --stdio` | Serve structured requests over stdin/stdout for external tools. |
+| `kodstar uninstall` | Remove the installation, managed settings, caches, and all registered project histories after confirmation. |
+| `kodstar --help` | Show the command list and general help. |
+| `kodstar <command> --help` | Show a command's arguments and available options. |
+| `kodstar --version` | Show CLI and engine versions. |
+
+Query commands support `--format text|json|jsonl|tsv`, `--rev <revision>` for saved analysis,
+and `--no-refresh` to skip change checks. Use `--root <path>` on project commands to select a project explicitly.
+For subcommands, put options after the subcommand, for example `kodstar history diff --root /work/your-project`.
+See the [CLI specification](kodstar-spec.md#7-cli-명령어-전체) for complete behavior and limits.
 
 ## Examples
 
@@ -123,8 +190,9 @@ kodstar history save baseline
 # After editing code, run another query to synchronize changes
 kodstar search target
 
-# Compare against the saved checkpoint and inspect change impact
-kodstar history diff --from baseline
+# Name the updated checkpoint, compare, and inspect change impact
+kodstar history save after-edit
+kodstar history diff --from baseline --to after-edit
 kodstar impact --since baseline
 
 # Query a saved checkpoint and restore a file
@@ -141,7 +209,7 @@ kodstar branch
 ```
 
 Restore and branch switching preserve current changes first. When resuming an interrupted operation,
-KodStar stops if it detects conflicting external edits. See the [local history contract](kodstar-spec.md#7-cli-명령어-전체) for details.
+kod<sup>☆</sup> stops if it detects conflicting external edits. See the [local history contract](kodstar-spec.md#7-cli-명령어-전체) for details.
 
 ### Watch files and connect external tools
 
@@ -155,27 +223,9 @@ kodstar serve --stdio
 
 JSON, JSONL, TSV, and stdio contracts are defined in the [specification](kodstar-spec.md).
 
-<details>
-<summary>Command overview</summary>
-
-| Purpose | Commands |
-|---|---|
-| Initialization and analysis updates | `init`, `init --full`, `init --verify` |
-| Definitions and name search | `symbols`, `list`, `search` |
-| Relationships, explanations, and impact | `related`, `deps`, `refs`, `explain`, `impact`, `path` |
-| Local history | `history`, `history save/diff/restore/upgrade` |
-| Local branches | `branch`, `branch create/switch/delete` |
-| Status and diagnostics | `status`, `doctor`, `languages` |
-| Cache management | `cache list/clean/gc` |
-| Tool integration | `watch`, `serve --stdio` |
-
-Run `kodstar <command> --help` to see the options for each command.
-
-</details>
-
 ## Supported languages
 
-KodStar provides selected static analysis rules for **19 languages** and **6 component and template formats**.
+kod<sup>☆</sup> provides selected static analysis rules for **19 languages** and **6 component and template formats**.
 
 | Category | Languages and formats |
 |---|---|
@@ -236,7 +286,7 @@ kodstar uninstall
 ```
 
 For automation, use `kodstar uninstall --yes`. Active sessions, modified installation records, or unknown data
-cause uninstall to stop with a diagnostic. If a project has moved, use KodStar once at its new location to update its registration before uninstalling.
+cause uninstall to stop with a diagnostic. If a project has moved, use kod<sup>☆</sup> once at its new location to update its registration before uninstalling.
 
 </details>
 

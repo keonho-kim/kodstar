@@ -1,13 +1,16 @@
 Generator: built-in image_gen (imagegen skill)
 Asset: docs/assets/kodstar-boot-logo.png
+Mode: edit
+Input: docs/assets/kodstar-boot-logo.png from commit 752b0d778bb498e2b595b852e721ab82f53a8ddf
 
 Use case: logo-brand
-Asset type: a finished logo lockup for the GitHub README of the open-source developer tool KodStar.
-Primary request: create an original KodStar logo evoking the beloved gold Energy Star emblem shown during early 1990s PC BIOS / POST startup screens.
-Scene/backdrop: a flat, solid near-black background, clean rectangular canvas.
-Subject: the exact word "KodStar" in confident flowing, slanted monoline lettering, integrated with one large open-outline five-point star and an elegant sweeping orbital arc. Recall vintage BIOS badge line art, with subtle stepped raster edges, but keep the letters immediately readable at small sizes.
-Style/medium: restrained retro computer insignia, one-ink golden-yellow line work, simple silhouette, polished wordmark, authentic early-PC character; flat graphic rather than a photograph or 3D render.
-Composition/framing: wide horizontal lockup, approximately 3:1 aspect ratio, ideally 1536 by 512 pixels. The complete mark sits centered and fills most of the canvas, with comfortable but modest black clearance on all sides. The star sits toward the right of the lettering and the orbital curve visually unifies the word and star.
-Color palette: warm golden yellow #F5D34E on near-black #080B0A. Use essentially two flat colors, with minimal antialiasing.
-Text (verbatim): "KodStar" (K o d S t a r). No additional text.
-Constraints: sharp, readable, distinctive and usable as a repository logo. Maintain a simple outline star and sweeping arc. No Intel or EPA lettering, no certification claims, no other logos, no decorative UI, no mockup frame, no watermark, no extra slogans, no gradients, no dramatic glow.
+Asset type: revised GitHub README logo lockup for the existing developer tool KodStar.
+Input image: the provided local image is the edit target and style reference.
+Primary request: replace the primary word "KodStar" with the exact lowercase word "kod", and replace the enormous baseline star with a SMALL five-point outline star raised like a superscript immediately to the upper right of the d. Add the exact lowercase word "kodstar" on a separate line centered beneath the primary mark.
+Preserve: near-black flat background, warm gold lettering, restrained 1990s BIOS / Energy Star boot-screen nostalgia, gently slanted flowing lettering, subtle stepped raster edges, and a simple orbital arc tying the lettering to the star.
+Primary typography: exactly "kod" (k o d), ALL LOWERCASE, prominent and immediately readable. The star is a graphic mark, not an additional letter. It is about 25–30% of the main lettering height and sits at the upper-right shoulder of the d, slightly above the ascender. Do not retain the old giant star.
+Secondary typography: exactly "kodstar" (k o d s t a r), ALL LOWERCASE, on its OWN LINE beneath the primary mark. Small understated clean monospaced lettering, about 18–20% of the primary lettering height, light muted gray #A8ADB3, centered under the full primary mark with a clear line break and modest vertical spacing. This is a quiet name label, not a slogan.
+Composition: a balanced centered horizontal lockup, approximately 3:1 canvas. Main gold kod and small elevated star above, small gray kodstar below. Comfortable modest margins. Keep the arc subtle and confined to the primary mark so it does not cross the gray label.
+Palette: warm gold #F5D34E for kod, star and arc; light muted gray #A8ADB3 for the separate kodstar label; solid near-black #080B0A background.
+Text verbatim, two lines: first line "kod", second line "kodstar". No other words.
+Avoid: uppercase letters, writing out KodStar, large star at the baseline, extra asterisks, extra symbols, duplicate words, Intel or EPA text, certification claims, gradients, 3D, dramatic glow, watermark, mockup framing.

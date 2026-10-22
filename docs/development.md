@@ -1,4 +1,4 @@
-# 개발과 검증
+# kod<sup>☆</sup> 개발과 검증
 
 이 문서는 환경 준비, 빌드·검증, 의존성 관리와 포팅 근거를 다룬다.
 제품 계약은 [기능 명세](../kodstar-spec.md), 코드 구조는 [아키텍처](architecture.md),
@@ -162,7 +162,7 @@ SQLite page·freelist·table 크기와 보존 payload를 포함한다. `dbstat` 
 실제 사용자 캐시·이력을 이 방식으로 열지 않는다. 분석 범위·스킵·미해결 수를 함께 확인하고,
 변경 확인 포함 시간과 순수 조회를 구분한다. 분석 규칙 변경은 증분·전체 결과 일치도 검증한다.
 
-Fossil 비교는 같은 추적 파일·변경 순서·내구성 조건으로 수행하고 KodStar의 분석 비용을 별도로 제시한다.
+Fossil 비교는 같은 추적 파일·변경 순서·내구성 조건으로 수행하고 kod<sup>☆</sup>의 분석 비용을 별도로 제시한다.
 복원한 바이트·경로·속성을 비교해야 하며 서로 다른 저장 형식의 내부 해시를 직접 비교하지 않는다.
 Fossil 실행 비교는 아직 수행하지 않았다.
 
@@ -598,7 +598,7 @@ python3 scripts/grammars/kotlin.py --tree-sitter ./tmp/tree-sitter-cli/bin/tree-
 아래 표는 선정 범위의 규칙군과 직접 소유 모듈을 연결한다. 부분 구현을 완료로 계산하지 않는다.
 원본의 전역 유일 이름 추측·유사도 병합은 명시적 근거·후보·미해결로 대체하며, 원본에 없는 기능은 추가 요구로 구분한다.
 
-| 규칙군 | 고정 원본 근거 | KodStar 소유 경로 (`src/` 기준) | 현재 미검증·부분 범위 |
+| 규칙군 | 고정 원본 근거 | kod<sup>☆</sup> 소유 경로 (`src/` 기준) | 현재 미검증·부분 범위 |
 |---|---|---|---|
 | 공통 이름·binding | `extractors/models.py`, `resolution.py` | `domain/facts`, `parse`, `analysis/resolve` | namespace·가시성·선언/정의 대응 |
 | Python | `engine.py::_python_*`, `_resolve_python_member_calls` | `parse/python`, `resolve/python`, `returns` | fixture yield local·동적 callable·동적 decorator·완전한 추론 |
