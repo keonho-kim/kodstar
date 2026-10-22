@@ -26,7 +26,7 @@ fn watching_publishes_saved_changes_and_finishes_on_cancellation() -> TestResult
             Ok(())
         }
         fn row(&mut self, row: &QueryRow) -> Result<()> {
-            if let QueryRow::Build(report) = row {
+            if let QueryRow::Init(report) = row {
                 self.rows += 1;
                 self.last = report.generation;
                 if self.rows == 1 {

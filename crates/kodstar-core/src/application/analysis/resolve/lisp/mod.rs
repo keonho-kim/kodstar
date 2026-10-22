@@ -11,7 +11,7 @@ use rusqlite::params;
 
 impl Lookup<'_, '_> {
     fn lisp_reader_package(&self, context: &FileContext, scope: u32) -> Result<String> {
-        Ok(self.connection.query_row(
+        Ok(self.connection.cached_row(
             "WITH RECURSIVE parents(id,depth) AS (VALUES(?2,0)
             UNION ALL
             SELECT s.parent,p.depth+1
@@ -79,7 +79,7 @@ impl Lookup<'_, '_> {
         key: &str,
         external_only: bool,
     ) -> Result<()> {
-        self.connection.execute(
+        self.connection.cached_execute(
             include_str!("accessible.sql"),
             params![
                 context.package,
@@ -103,7 +103,7 @@ impl Lookup<'_, '_> {
     }
 
     fn lisp_found(&self) -> Result<bool> {
-        Ok(self.connection.query_row(
+        Ok(self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
             [],
             |r| r.get(0),
@@ -115,7 +115,7 @@ impl Lookup<'_, '_> {
         context: &FileContext,
         package: &str,
     ) -> Result<()> {
-        self.connection.execute("INSERT OR IGNORE INTO resolution_candidates SELECT s.id FROM bindings b JOIN symbols s ON s.file_id=b.file_id AND s.local_id=b.target_local JOIN files f ON f.id=b.file_id WHERE b.kind='lisp_pkg_def' AND b.module_name=?1 AND f.package=?2",params![package,context.package])?;
+        self.connection.cached_execute("INSERT OR IGNORE INTO resolution_candidates SELECT s.id FROM bindings b JOIN symbols s ON s.file_id=b.file_id AND s.local_id=b.target_local JOIN files f ON f.id=b.file_id WHERE b.kind='lisp_pkg_def' AND b.module_name=?1 AND f.package=?2",params![package,context.package])?;
         let found = self.lisp_found()?;
         self.dependency("lisp_package", package, found)?;
         self.rule = "lisp_package_declaration";

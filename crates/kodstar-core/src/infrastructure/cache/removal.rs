@@ -51,7 +51,7 @@ pub(crate) fn remove(
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Ok(Removal::Protected("unknown_data"));
     }
-    let Some(lease) = FileLock::try_acquire(&directory.join("lease.lock"), false)? else {
+    let Some(_lease) = FileLock::try_acquire(&directory.join("lease.lock"), false)? else {
         return Ok(Removal::Protected("active"));
     };
     let inspection = inspection::inspect(&directory, cancel, None)?;
@@ -66,8 +66,6 @@ pub(crate) fn remove(
         return Err(Error::operation("cache root changed before removal"));
     }
     cancel.check()?;
-    // The exclusive registry prevents new leases. Close the lease handle before unlinking on Windows.
-    drop(lease);
     for name in MANAGED_FILES
         .iter()
         .copied()

@@ -17,7 +17,7 @@ impl Lookup<'_, '_> {
     ) -> Result<bool> {
         let frame = self.external_scope()?;
         self.type_expression(context, scope, position, "Environment", depth + 1)?;
-        let established: bool = self.connection.query_row(
+        let established: bool = self.connection.cached_row(
             "SELECT NOT EXISTS(SELECT 1 FROM resolution_candidates)
              AND EXISTS(SELECT 1 FROM resolution_externals WHERE scope=?1 AND key=?2)
              AND NOT EXISTS(SELECT 1 FROM resolution_externals WHERE scope=?1 AND key<>?2)",
@@ -25,7 +25,7 @@ impl Lookup<'_, '_> {
             |r| r.get(0),
         )?;
         self.connection
-            .execute("DELETE FROM resolution_candidates", [])?;
+            .cached_execute("DELETE FROM resolution_candidates", [])?;
         self.finish_external_scope(frame, false)?;
         Ok(established)
     }

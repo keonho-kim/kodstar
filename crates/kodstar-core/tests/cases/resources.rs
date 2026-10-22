@@ -10,21 +10,22 @@ use std::fs;
 #[test]
 fn cached_rows_exceeding_the_read_budget_return_a_limit_and_incomplete_summary() -> TestResult {
     let project = Project::new()?;
-    project.write("large.rs", &format!("fn {}() {{}}", "a".repeat(600_000)))?;
+    project.write("large.rs", &format!("fn {}() {{}}", "a".repeat(1_800_000)))?;
     let build_config = project.directory.join("build.toml");
-    fs::write(&build_config, "fact_batch_bytes = 2097152\n")?;
+    fs::write(&build_config, "jobs = 1\nfact_batch_bytes = 8388608\n")?;
     let mut options = project.options();
     options.config = Some(build_config);
-    project.engine.build(
+    project.engine.init(
         &options,
-        BuildOptions::default(),
+        InitOptions::default(),
         &Cancellation::default(),
         &mut |_| Ok(()),
     )?;
     let read_config = project.directory.join("read.toml");
     fs::write(
         &read_config,
-        "jobs = 1\nmax_file_bytes = 1048576\nmemory_budget = 4194304\nfact_batch_bytes = 512\nqueue_bytes = 1024\ndb_cache_bytes = 1024\n",
+        // Cover history/snapshot caches while keeping the combined symbol row above the read limit.
+        "jobs = 1\nmax_file_bytes = 1048576\nmemory_budget = 12582912\nfact_batch_bytes = 512\nqueue_bytes = 1024\ndb_cache_bytes = 1024\n",
     )?;
     options.config = Some(read_config);
     let mut sink = Collected::default();
@@ -93,9 +94,9 @@ fn panicking_progress_rolls_back_and_joins_owned_workers() -> TestResult {
         ),
     )?;
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        project.engine.build(
+        project.engine.init(
             &project.options(),
-            BuildOptions::default(),
+            InitOptions::default(),
             &Cancellation::default(),
             &mut |_| -> Result<()> { panic!("consumer progress failure") },
         )

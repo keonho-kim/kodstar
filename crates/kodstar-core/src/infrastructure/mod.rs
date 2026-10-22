@@ -7,7 +7,9 @@
 
 pub(crate) mod cache;
 pub(crate) mod formats;
+pub(crate) mod history;
 pub(crate) mod index;
+pub(crate) mod installation;
 pub(crate) mod languages;
 pub(crate) mod parse;
 pub(crate) mod scan;

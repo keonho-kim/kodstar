@@ -19,7 +19,7 @@ fn sigint_finishes_watch_and_returns_130() -> support::TestResult {
     use std::time::Duration;
     let project = support::Project::new()?;
     project.write("fn target() {}")?;
-    assert!(project.run(&["build"])?.status.success());
+    assert!(project.run(&["init"])?.status.success());
     let mut child = project
         .command()
         .args(["watch", "--format", "jsonl"])

@@ -6,10 +6,10 @@
 use super::{FileContext, Lookup, callable_values, context, inputs, prepared};
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
-use rusqlite::Connection;
+use crate::infrastructure::index::cached::Sql as Connection;
 
 pub(super) fn run<'conn>(
-    connection: &'conn Connection,
+    connection: &Connection<'conn>,
     cancel: &Cancellation,
     prepared: &prepared::Prepared<'conn>,
     merged: bool,
@@ -25,7 +25,8 @@ pub(super) fn run<'conn>(
         "relation IN ('inherits','implements','mixes_in')",
         "relation NOT IN ('inherits','implements','mixes_in')",
     ] {
-        let mut facts = connection.prepare(&format!("SELECT id,file_id,scope_id,expression,relation,start_byte,source_id,language FROM facts WHERE {filter}{phase} ORDER BY id"))?;
+        let mut facts = connection.cached_prepare(&format!("SELECT id,file_id,scope_id,expression,relation,start_byte,source_id,language FROM facts WHERE {filter}{phase}
+            AND NOT (language='go' AND relation='implements' AND expression LIKE '@go-interface:%') ORDER BY id"))?;
         let mut rows = facts.query([])?;
         while let Some(row) = rows.next()? {
             cancel.check()?;
@@ -47,9 +48,8 @@ pub(super) fn run<'conn>(
             let Some(context) = current_context.as_ref() else {
                 continue;
             };
-            connection.execute_batch(
-                "DELETE FROM resolution_candidates; DELETE FROM resolution_externals;",
-            )?;
+            connection.cached_execute("DELETE FROM resolution_candidates", [])?;
+            connection.cached_execute("DELETE FROM resolution_externals", [])?;
             let mut lookup = Lookup {
                 connection,
                 fact: Some(fact),

@@ -14,11 +14,11 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         if self.namespace == Namespace::Types {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id IN (
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE id IN (
                 SELECT s.id FROM symbols s WHERE s.kind NOT IN ('class','trait','type','enum','struct','interface')
                 OR EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='value_object'))",[])?;
         } else {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id IN (
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE id IN (
                 SELECT s.id FROM symbols s WHERE s.kind IN ('class','trait','type','enum','struct','interface')
                 AND NOT EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='value_object'))",[])?;
         }
@@ -34,13 +34,13 @@ impl Lookup<'_, '_> {
         {
             return Ok(());
         }
-        let all_objects:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates)
-            AND NOT EXISTS(SELECT 1 FROM resolution_candidates c JOIN symbols s ON s.id=c.id
+        let all_objects:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates)
+            AND NOT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id
               WHERE NOT EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='value_object'))",[],|r|r.get(0))?;
         if all_objects {
             self.members("apply")?;
             self.rule = "scala_object_apply";
-            let found: bool = self.connection.query_row(
+            let found: bool = self.connection.cached_row(
                 "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
                 [],
                 |r| r.get(0),

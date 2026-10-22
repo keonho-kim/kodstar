@@ -69,7 +69,7 @@ impl Lookup<'_, '_> {
                     receiver_type(context.language, type_name),
                     depth + 1,
                 )?;
-                self.connection.execute("DELETE FROM resolution_candidates WHERE id NOT IN (SELECT id FROM symbols WHERE kind IN ('class','struct','enum','type','interface','trait'))",[])?;
+                self.connection.cached_execute("DELETE FROM resolution_candidates WHERE NOT EXISTS (SELECT 1 FROM symbols WHERE id=resolution_candidates.id AND (kind IN ('class','struct','enum','type','interface','trait')))",[])?;
                 return self.members(member);
             }
             if binding.target.is_none() && binding.kind != "alias" {
@@ -83,11 +83,11 @@ impl Lookup<'_, '_> {
             }
         }
         self.receiver_expression(context, scope, position, receiver, depth + 1, type_path)?;
-        let count: i64 =
-            self.connection
-                .query_row("SELECT COUNT(*) FROM resolution_candidates", [], |row| {
-                    row.get(0)
-                })?;
+        let count: i64 = self.connection.cached_row(
+            "SELECT COUNT(*) FROM resolution_candidates",
+            [],
+            |row| row.get(0),
+        )?;
         if count > 0 || self.has_externals() {
             return self.members(member);
         }

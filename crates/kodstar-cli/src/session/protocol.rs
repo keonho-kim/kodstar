@@ -6,7 +6,7 @@
 use super::query::{self, OptionsInput, QueryInput};
 use crate::invocation::Action;
 use kodstar_core::{
-    BuildOptions, CacheRequest, Error, ErrorKind, ProjectOptions, Result, SettingsOverrides,
+    CacheRequest, Error, ErrorKind, InitOptions, ProjectOptions, Result, SettingsOverrides,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -72,7 +72,7 @@ impl ProjectInput {
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct BuildInput {
+struct InitInput {
     project: ProjectInput,
     path: Option<PathBuf>,
     full: bool,
@@ -86,6 +86,14 @@ struct QueryParameters {
     query: QueryInput,
     #[serde(default)]
     options: OptionsInput,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryParameters {
+    #[serde(default)]
+    project: ProjectInput,
+    request: kodstar_core::HistoryRequest,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -138,11 +146,11 @@ pub(super) fn decode(frame: &[u8], cwd: &Path) -> std::result::Result<Request, R
         id: id.clone(),
         error: argument("invalid request fields", error),
     })?;
-    if wire.protocol_version != 1 || id.is_none() {
+    if wire.protocol_version != 2 || id.is_none() {
         return Err(Rejected {
             id,
             error: Error::argument(
-                "expected protocol_version 1 and an integer or 1..256-byte string id",
+                "expected protocol_version 2 and an integer or 1..256-byte string id",
             ),
         });
     }
@@ -176,11 +184,11 @@ fn operation(method: &str, params: Option<Box<RawValue>>, cwd: &Path) -> Result<
                 Action::Languages { refresh },
             )
         }
-        "build" => {
-            let params: BuildInput = parameters(params)?;
+        "init" => {
+            let params: InitInput = parameters(params)?;
             (
                 Some(params.project.options(cwd)),
-                Action::Build(BuildOptions {
+                Action::Init(InitOptions {
                     path: params.path,
                     full: params.full,
                     verify: params.verify,
@@ -192,6 +200,13 @@ fn operation(method: &str, params: Option<Box<RawValue>>, cwd: &Path) -> Result<
             (
                 Some(params.project.options(cwd)),
                 Action::Query(Box::new(query::parse(params.query, params.options)?)),
+            )
+        }
+        "history" => {
+            let params: HistoryParameters = parameters(params)?;
+            (
+                Some(params.project.options(cwd)),
+                Action::History(params.request),
             )
         }
         "status" | "doctor" => {

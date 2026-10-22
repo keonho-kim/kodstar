@@ -6,14 +6,15 @@
 use crate::application::analysis::resolve::{FileContext, Lookup};
 use crate::domain::diagnostics::Result;
 use crate::domain::languages::Language;
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::{OptionalExtension, params};
 
 pub(super) fn nearest_module(
     c: &Connection,
     file: i64,
     scope: u32,
 ) -> Result<Option<(u32, String)>> {
-    Ok(c.query_row("WITH RECURSIVE parents(id,depth) AS (
+    Ok(c.cached_row("WITH RECURSIVE parents(id,depth) AS (
         SELECT ?2,0 UNION ALL SELECT s.parent,p.depth+1 FROM scopes s JOIN parents p ON s.local_id=p.id
         WHERE s.file_id=?1 AND s.parent IS NOT NULL AND p.depth<1024
       ) SELECT n.local_id,n.qualified_name FROM symbols n JOIN parents p ON n.local_id=p.id
@@ -29,7 +30,7 @@ impl Lookup<'_, '_> {
         {
             return Ok(false);
         }
-        let count = self.connection.execute(
+        let count = self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_candidates
              SELECT s.id FROM symbols s JOIN files f ON f.id=s.file_id
              JOIN symbols o ON o.id=s.owner_id
@@ -45,7 +46,7 @@ impl Lookup<'_, '_> {
         )?;
         self.scala_targets()?;
         if self.language == Language::Scala {
-            return Ok(self.connection.query_row(
+            return Ok(self.connection.cached_row(
                 "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
                 [],
                 |r| r.get(0),
@@ -60,7 +61,7 @@ impl Lookup<'_, '_> {
         module: &str,
         depth: usize,
     ) -> Result<()> {
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_module_owners WHERE depth=?1",
             [depth],
         )?;
@@ -76,7 +77,7 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         let normalized = module.replace(['.', '\\'], "::");
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_module_owners
             SELECT ?4,s.file_id,s.id FROM symbols s JOIN files f ON f.id=s.file_id
             WHERE s.kind='module' AND s.language=?1 AND f.package=?2 AND f.status='analyzed'
@@ -89,7 +90,7 @@ impl Lookup<'_, '_> {
                 depth
             ],
         )?;
-        self.connection.execute("INSERT OR IGNORE INTO resolution_modules SELECT depth,file_id FROM resolution_module_owners WHERE depth=?1",[depth])?;
+        self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT depth,file_id FROM resolution_module_owners WHERE depth=?1",[depth])?;
         Ok(())
     }
 
@@ -102,7 +103,7 @@ impl Lookup<'_, '_> {
         if !matches!(context.language, Language::CSharp | Language::Php) {
             return Ok(false);
         }
-        let count=self.connection.execute("WITH RECURSIVE parents(id,depth) AS (
+        let count=self.connection.cached_execute("WITH RECURSIVE parents(id,depth) AS (
             SELECT ?2,0 UNION ALL SELECT s.parent,p.depth+1 FROM scopes s JOIN parents p ON s.local_id=p.id
             WHERE s.file_id=?1 AND s.parent IS NOT NULL AND p.depth<1024
           ), nearest(name) AS (
@@ -119,10 +120,10 @@ impl Lookup<'_, '_> {
 
     pub(super) fn declared_namespace(&self, context: &FileContext, name: &str) -> Result<bool> {
         if context.language == Language::Swift {
-            return Ok(self.connection.query_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND kind='import' AND module_name=?2 AND name='*')",params![context.id,name],|r|r.get(0))?);
+            return Ok(self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND kind='import' AND module_name=?2 AND name='*')",params![context.id,name],|r|r.get(0))?);
         }
         if matches!(context.language, Language::Kotlin | Language::Java) {
-            return Ok(self.connection.query_row("SELECT EXISTS(SELECT 1 FROM files WHERE language=?3 AND package=?1 AND module=?2 AND status='analyzed')",params![context.package,name.replace("::","."),context.language.as_str()],|r|r.get(0))?);
+            return Ok(self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM files WHERE language=?3 AND package=?1 AND module=?2 AND status='analyzed')",params![context.package,name.replace("::","."),context.language.as_str()],|r|r.get(0))?);
         }
         if !matches!(
             context.language,
@@ -131,7 +132,7 @@ impl Lookup<'_, '_> {
             return Ok(false);
         }
         let name = name.replace(['.', '\\'], "::");
-        Ok(self.connection.query_row(
+        Ok(self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM symbols s JOIN files f ON f.id=s.file_id
             WHERE s.language=?1 AND f.package=?2 AND s.kind='module'
               AND replace(replace(s.qualified_name,'.','::'),char(92),'::')=?3)",

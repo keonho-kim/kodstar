@@ -5,12 +5,19 @@
 
 //! SQLite resource ownership. Writers publish facts and relationships in one transaction.
 
+pub(crate) mod cached;
 mod definitions;
+pub(crate) mod dependencies;
+pub(crate) mod dictionary;
 mod fact_statements;
 mod facts;
+pub(crate) mod inert_inputs;
+pub(crate) mod invalidation;
 mod lisp_metadata;
+mod packed;
 mod previous;
 mod reader;
+pub(crate) mod relations;
 mod runtime;
 mod statistics;
 mod write;
@@ -32,8 +39,26 @@ pub(crate) use reader::{SymbolReader, symbol};
 pub(crate) use runtime::{limit_reads, observe_cancellation, stop_observing};
 pub(crate) use write::{FileRecord, clear_file};
 
-pub(crate) const STORAGE_VERSION: u32 = 7;
-pub(crate) const EXTRACTION_VERSION: u32 = 42;
+pub(crate) const STORAGE_VERSION: u32 = 12;
+pub(crate) const EXTRACTION_VERSION: u32 = 44;
+pub(crate) fn require_history(
+    connection: &Connection,
+    repository: &str,
+    checkpoint: Option<&str>,
+) -> Result<()> {
+    let (stored, source): (Option<String>, Option<String>) =
+        connection.query_row("SELECT repository,checkpoint FROM metadata", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
+    if stored.as_deref() != Some(repository)
+        || checkpoint.is_some_and(|id| source.as_deref() != Some(id))
+    {
+        return Err(Error::not_found(
+            "no matching analysis for this repository/checkpoint; retry without --no-refresh",
+        ));
+    }
+    Ok(())
+}
 const APPLICATION_ID: u32 = 0x4b535441;
 
 pub(crate) const SYMBOL_COLUMNS: &str = "
@@ -55,14 +80,6 @@ pub(crate) fn open(
     open_mode(path, root, writable, writable, cache_bytes)
 }
 
-pub(crate) fn open_existing_writer(
-    path: &Path,
-    root: &Path,
-    cache_bytes: usize,
-) -> Result<Connection> {
-    open_mode(path, root, true, false, cache_bytes)
-}
-
 fn open_mode(
     path: &Path,
     root: &Path,
@@ -71,7 +88,7 @@ fn open_mode(
     cache_bytes: usize,
 ) -> Result<Connection> {
     if !create && !path.is_file() {
-        return Err(Error::not_found("no index found; run kodstar build first"));
+        return Err(Error::not_found("no index found; run kodstar init first"));
     }
     if path
         .symlink_metadata()
@@ -92,7 +109,15 @@ fn open_mode(
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "trusted_schema", false)?;
     connection.pragma_update(None, "temp_store", "FILE")?;
-    let cache_kib = i64::try_from(cache_bytes.div_ceil(1024))
+    dependencies::register(&connection)?;
+    packed::register(&connection)?;
+    // Compact rows and disk staging share the budget with prepared lookups and block codecs.
+    let page_cache_bytes = if writable {
+        cache_bytes.div_ceil(4)
+    } else {
+        cache_bytes
+    };
+    let cache_kib = i64::try_from(page_cache_bytes.div_ceil(1024))
         .map_err(|_| Error::argument("DB cache budget is too large"))?;
     let temporary_kib = cache_kib / 4;
     connection.pragma_update(Some("main"), "cache_size", -(cache_kib - temporary_kib))?;
@@ -112,7 +137,9 @@ fn open_mode(
             ));
         }
         let transaction = connection.transaction()?;
+        transaction.execute_batch(dictionary::SCHEMA)?;
         transaction.execute_batch(include_str!("schema.sql"))?;
+        transaction.execute_batch(relations::SCHEMA)?;
         transaction.execute("INSERT INTO metadata(singleton,root,engine_version,extraction_version,relation_registry_version) VALUES(1,?1,?2,?3,?4)",
             rusqlite::params![path_bytes(root), crate::VERSION, EXTRACTION_VERSION, RELATION_REGISTRY_VERSION])?;
         transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
@@ -120,7 +147,7 @@ fn open_mode(
         transaction.commit()?;
     } else if version != STORAGE_VERSION || application != APPLICATION_ID {
         return Err(Error::operation(format!(
-            "incompatible index storage version {version}; explicitly clean this cache and run kodstar build"
+            "incompatible index storage version {version}; explicitly clean this cache and run kodstar init"
         )));
     }
     let stored: Vec<u8> =
@@ -135,6 +162,11 @@ fn open_mode(
     if writable {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
+        connection.execute_batch(
+            "CREATE TEMP TABLE dictionary_retirements(id INTEGER PRIMARY KEY);
+            CREATE TEMP TRIGGER dictionary_retire_lookup BEFORE DELETE ON main.lookup_blocks BEGIN
+            INSERT OR IGNORE INTO dictionary_retirements VALUES(OLD.key_id); END;",
+        )?;
     }
     Ok(connection)
 }
@@ -147,7 +179,7 @@ pub(crate) fn require_committed(connection: &Connection) -> Result<(i64, u64)> {
     )?;
     if metadata.0 == 0 {
         return Err(Error::not_found(
-            "no completed index found; run kodstar build first",
+            "no completed index found; run kodstar init first",
         ));
     }
     Ok(metadata)
@@ -200,4 +232,11 @@ pub(crate) fn complete_symbol(
 ) -> Result<()> {
     definitions::attach(connection, symbol, definitions)?;
     lisp_metadata::attach(connection, symbol)
+}
+
+/// Hex is kept at domain boundaries; persisted input and extraction digests use 32 bytes.
+pub(crate) fn hash_bytes(hash: &str) -> Result<[u8; 32]> {
+    blake3::Hash::from_hex(hash)
+        .map(|hash| *hash.as_bytes())
+        .map_err(|e| Error::caused_by("invalid stored analysis digest", e))
 }

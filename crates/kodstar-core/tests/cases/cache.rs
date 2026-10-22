@@ -138,9 +138,9 @@ fn capacity_gc_removes_the_oldest_unused_cache_first() -> TestResult {
     fs::write(other.join("second.rs"), "fn second() {}")?;
     let mut options = project.options();
     options.root = Some(other);
-    let second = project.engine.build(
+    let second = project.engine.init(
         &options,
-        BuildOptions::default(),
+        InitOptions::default(),
         &Cancellation::default(),
         &mut |_| Ok(()),
     )?;
@@ -225,9 +225,9 @@ fn automatic_gc_protects_the_current_project_and_respects_its_interval() -> Test
     fs::write(other.join("other.rs"), "fn other() {}")?;
     let mut options = project.options();
     options.root = Some(other);
-    let stale = project.engine.build(
+    let stale = project.engine.init(
         &options,
-        BuildOptions::default(),
+        InitOptions::default(),
         &Cancellation::default(),
         &mut |_| Ok(()),
     )?;

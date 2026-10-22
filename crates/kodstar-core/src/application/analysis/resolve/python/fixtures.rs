@@ -33,7 +33,7 @@ impl Lookup<'_, '_> {
         if !test_module {
             return Ok(false);
         }
-        let eligible:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM symbols s WHERE s.file_id=?1 AND s.local_id=?2 AND (s.name LIKE 'test%' OR EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='python_fixture')))",params![context.id,scope],|r|r.get(0))?;
+        let eligible:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM symbols s WHERE s.file_id=?1 AND s.local_id=?2 AND (s.name LIKE 'test%' OR EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='python_fixture')))",params![context.id,scope],|r|r.get(0))?;
         if !eligible {
             return Ok(false);
         }
@@ -50,7 +50,7 @@ impl Lookup<'_, '_> {
             if path != context.path {
                 let file: Option<i64> = self
                     .connection
-                    .query_row(
+                    .cached_row(
                         "SELECT id FROM files WHERE path=?1",
                         [path_bytes(&path)],
                         |r| r.get(0),
@@ -70,7 +70,7 @@ impl Lookup<'_, '_> {
     }
 
     fn fixture_in_file(&mut self, file: i64, name: &str, depth: usize) -> Result<bool> {
-        let mut statement = self.connection.prepare(
+        let mut statement = self.connection.cached_prepare(
             "SELECT s.id,s.scope_id,b.imported_name,b.start_byte
             FROM bindings b
             JOIN symbols s ON s.file_id=b.file_id
@@ -118,7 +118,7 @@ impl Lookup<'_, '_> {
         if !valid {
             return Ok(false);
         }
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_candidates VALUES(?1)",
             [id],
         )?;

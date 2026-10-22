@@ -4,7 +4,9 @@
 // Related: crates/kodstar-core/src/application/execution/context.rs, crates/kodstar-core/src/application/execution/commands.rs, crates/kodstar-core/src/application/execution/reads.rs.
 
 mod commands;
-mod context;
+pub(crate) mod context;
+pub(super) mod history;
+mod prepare;
 pub(super) mod reads;
 mod watch;
 
@@ -12,7 +14,7 @@ use super::workspace::ProjectOptions;
 use crate::domain::{cancellation::Cancellation, diagnostics::Result, results::Progress};
 use crate::infrastructure::cache::CacheStore;
 pub use commands::Command;
-pub(super) use commands::{Build, Cache, Watch};
+pub(super) use commands::{Cache, Init, Watch};
 use context::{Context, Plan};
 
 pub(super) trait CommandHandler {
@@ -45,7 +47,7 @@ pub(super) fn run<C: CommandHandler>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::analysis::BuildOptions;
+    use crate::application::analysis::InitOptions;
     use crate::application::engine::Engine;
     use crate::domain::diagnostics::Error;
     use std::{
@@ -74,7 +76,7 @@ mod tests {
     }
 
     #[test]
-    fn a_child_handler_inherits_initial_build_gating_and_incremental_synchronization() -> Result<()>
+    fn a_child_handler_inherits_initialization_gating_and_incremental_synchronization() -> Result<()>
     {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -93,7 +95,7 @@ mod tests {
         let options = ProjectOptions::new(root);
         let cancel = Cancellation::default();
         assert!(run(&engine.cache, &options, Child, &cancel).is_err());
-        let first = engine.build(&options, BuildOptions::default(), &cancel, &mut |_| Ok(()))?;
+        let first = engine.init(&options, InitOptions::default(), &cancel, &mut |_| Ok(()))?;
         fs::write(&source, "fn second() {} fn third() {}")
             .map_err(|error| Error::io("change fixture", &source, error))?;
         assert_eq!(

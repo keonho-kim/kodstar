@@ -14,7 +14,7 @@ impl Lookup<'_, '_> {
         if self.language != Language::CSharp || context.input_format != Some(Language::Razor) {
             return Ok(());
         }
-        let present: bool = self.connection.query_row(
+        let present: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
             [],
             |r| r.get(0),
@@ -22,11 +22,11 @@ impl Lookup<'_, '_> {
         if present {
             return Ok(());
         }
-        let namespace: Option<String> = self.connection.query_row("SELECT CASE WHEN COUNT(*)=1 THEN MIN(module_name) END FROM bindings WHERE file_id=?1 AND kind='razor_namespace'", [context.id], |r|r.get(0))?;
+        let namespace: Option<String> = self.connection.cached_row("SELECT CASE WHEN COUNT(*)=1 THEN MIN(module_name) END FROM bindings WHERE file_id=?1 AND kind='razor_namespace'", [context.id], |r|r.get(0))?;
         let (qualifier, name) = tag
             .rsplit_once('.')
             .map_or((None, tag), |(ns, name)| (Some(ns), name));
-        let mut statement = self.connection.prepare(
+        let mut statement = self.connection.cached_prepare(
             "SELECT s.id,f.path,(SELECT CASE WHEN COUNT(*)=1 THEN MIN(n.module_name) END
             FROM bindings n
             WHERE n.file_id=f.id
@@ -56,7 +56,7 @@ impl Lookup<'_, '_> {
                 proven = qualifier == Some(target)
                     || qualifier.is_none() && namespace.as_deref() == Some(target);
                 if qualifier.is_none() && !proven {
-                    proven = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND scope_id=0 AND name='*' AND kind='import' AND module_name=?2 AND imported_name='*')", params![context.id,target], |r|r.get(0))?;
+                    proven = self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND scope_id=0 AND name='*' AND kind='import' AND module_name=?2 AND imported_name='*')", params![context.id,target], |r|r.get(0))?;
                 }
             }
             let uncertain_same_directory = qualifier.is_none()
@@ -65,7 +65,7 @@ impl Lookup<'_, '_> {
             if !proven && !uncertain_same_directory {
                 continue;
             }
-            self.connection.execute(
+            self.connection.cached_execute(
                 "INSERT OR IGNORE INTO resolution_candidates VALUES(?1)",
                 [symbol],
             )?;

@@ -28,7 +28,7 @@ impl Lookup<'_, '_> {
         };
         let declared = self.select_packages(context, name, depth)?;
         self.dependency("package", name, declared)?;
-        let mut packages = self.connection.prepare(
+        let mut packages = self.connection.cached_prepare(
             "SELECT manifest FROM resolution_package_candidates WHERE depth=?1 ORDER BY manifest",
         )?;
         let records = packages.query_map([depth], |r| r.get::<_, i64>(0))?;
@@ -59,7 +59,7 @@ impl Lookup<'_, '_> {
         let captured = match_pattern(raw, &pattern)
             .map(|m| m.captured)
             .unwrap_or("");
-        let mut entries=self.connection.prepare("SELECT target,native FROM resolution_package_entries WHERE depth=?1 ORDER BY priority,position")?;
+        let mut entries=self.connection.cached_prepare("SELECT target,native FROM resolution_package_entries WHERE depth=?1 ORDER BY priority,position")?;
         let records = entries.query_map([depth], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
         })?;
@@ -75,12 +75,12 @@ impl Lookup<'_, '_> {
                 }
             } else {
                 self.connection
-                    .execute("DELETE FROM resolution_modules WHERE depth=?1", [depth + 1])?;
+                    .cached_execute("DELETE FROM resolution_modules WHERE depth=?1", [depth + 1])?;
                 let location = self.module_files(context, scope, &target, depth + 1)?;
                 if native {
                     self.platform_candidate();
                 }
-                self.connection.execute("INSERT OR IGNORE INTO resolution_modules SELECT ?1,id FROM resolution_modules WHERE depth=?2",params![depth,depth+1])?;
+                self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT ?1,id FROM resolution_modules WHERE depth=?2",params![depth,depth+1])?;
                 return Ok(if matches!(location, Location::Unmapped) {
                     Location::External(target)
                 } else {

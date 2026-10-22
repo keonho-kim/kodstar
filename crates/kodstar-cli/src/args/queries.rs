@@ -58,8 +58,13 @@ pub(super) fn commands() -> Vec<Command> {
             options::location(base(
                 Command::new("impact")
                     .about("Find incoming static impact candidates")
-                    .arg(options::path("file", true))
-                    .arg(Arg::new("name")),
+                    .arg(options::path("file", false).required_unless_present("since"))
+                    .arg(Arg::new("name"))
+                    .arg(
+                        Arg::new("since")
+                            .long("since")
+                            .conflicts_with_all(["file", "name", "at", "rev"]),
+                    ),
             )),
             "impact",
         ))
@@ -82,7 +87,12 @@ pub(super) fn commands() -> Vec<Command> {
 
 fn base(command: Command) -> Command {
     options::format(options::limits(options::refresh(options::project(
-        command, true,
+        command.arg(
+            Arg::new("rev")
+                .long("rev")
+                .help("Read analysis at a saved checkpoint"),
+        ),
+        true,
     ))))
 }
 

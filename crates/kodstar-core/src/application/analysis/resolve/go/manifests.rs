@@ -25,7 +25,7 @@ impl Lookup<'_, '_> {
         &self,
         path: &Path,
     ) -> Result<Option<Manifest>> {
-        let row=self.connection.query_row("SELECT id,path,package,declared_module FROM files WHERE path=?1 AND status='auxiliary'",[path_bytes(path)],read).optional()?;
+        let row=self.connection.cached_row("SELECT id,path,package,declared_module FROM files WHERE path=?1 AND status='auxiliary'",[path_bytes(path)],read).optional()?;
         row.map(|(id, path, package, module)| {
             Ok(Manifest {
                 id,
@@ -41,7 +41,7 @@ impl Lookup<'_, '_> {
         &self,
         c: &FileContext,
     ) -> Result<Option<Manifest>> {
-        let row=self.connection.query_row("SELECT id,path,package,declared_module FROM files WHERE package=?1 AND status='auxiliary' AND declared_module<>'' AND (display_path='go.mod' OR display_path LIKE '%/go.mod') LIMIT 1",[&c.package],read).optional()?;
+        let row=self.connection.cached_row("SELECT id,path,package,declared_module FROM files WHERE package=?1 AND status='auxiliary' AND declared_module<>'' AND (display_path='go.mod' OR display_path LIKE '%/go.mod') LIMIT 1",[&c.package],read).optional()?;
         row.map(|(id, path, package, module)| {
             Ok(Manifest {
                 id,
@@ -60,7 +60,7 @@ impl Lookup<'_, '_> {
     ) -> Result<Option<i64>> {
         let cached: Option<Option<i64>> = self
             .connection
-            .query_row(
+            .cached_row(
                 "SELECT workspace FROM go_workspace_selection WHERE file=?1",
                 [c.id],
                 |r| r.get(0),
@@ -75,13 +75,13 @@ impl Lookup<'_, '_> {
                 continue;
             };
             self.go_workspace_members(&workspace)?;
-            let member:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM go_workspace_members WHERE workspace=?1 AND manifest=?2)",params![workspace.id,own.id],|r|r.get(0))?;
+            let member:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM go_workspace_members WHERE workspace=?1 AND manifest=?2)",params![workspace.id,own.id],|r|r.get(0))?;
             if member {
                 selected = Some(workspace.id);
             }
             break;
         }
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT INTO go_workspace_selection VALUES(?1,?2)",
             params![c.id, selected],
         )?;
@@ -89,7 +89,7 @@ impl Lookup<'_, '_> {
     }
 
     fn go_workspace_members(&self, workspace: &Manifest) -> Result<()> {
-        let ready: bool = self.connection.query_row(
+        let ready: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM go_workspace_ready WHERE workspace=?1)",
             [workspace.id],
             |r| r.get(0),
@@ -98,7 +98,7 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         let parent = workspace.path.parent().unwrap_or_else(|| Path::new(""));
-        let mut statement=self.connection.prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND kind='go_workspace_use' ORDER BY id")?;
+        let mut statement=self.connection.cached_prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND kind='go_workspace_use' ORDER BY id")?;
         let paths = statement.query_map([workspace.id], |r| r.get::<_, String>(0))?;
         for path in paths {
             if let Some(directory) =
@@ -106,14 +106,14 @@ impl Lookup<'_, '_> {
                 && let Some(manifest) = self.go_manifest(&directory.join("go.mod"))?
                 && !manifest.module.is_empty()
             {
-                self.connection.execute(
+                self.connection.cached_execute(
                     "INSERT OR IGNORE INTO go_workspace_members VALUES(?1,?2)",
                     params![workspace.id, manifest.id],
                 )?;
             }
         }
         self.connection
-            .execute("INSERT INTO go_workspace_ready VALUES(?1)", [workspace.id])?;
+            .cached_execute("INSERT INTO go_workspace_ready VALUES(?1)", [workspace.id])?;
         Ok(())
     }
 }

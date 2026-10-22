@@ -41,7 +41,7 @@ impl Lookup<'_, '_> {
         }
         if let Some(constructor) = expression.strip_prefix("@constructor:") {
             self.type_expression(context, scope, position, constructor, depth + 1)?;
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id NOT IN (SELECT id FROM symbols WHERE kind IN ('class','struct','enum','type'))",[])?;
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE NOT EXISTS (SELECT 1 FROM symbols WHERE id=resolution_candidates.id AND (kind IN ('class','struct','enum','type')))",[])?;
             self.ruby_constructor()?;
             return Ok(());
         }
@@ -162,7 +162,7 @@ impl Lookup<'_, '_> {
         if context.language == Language::Go {
             self.package_peers(context, &key)?;
         }
-        let found: bool = self.connection.query_row(
+        let found: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
             [],
             |row| row.get(0),

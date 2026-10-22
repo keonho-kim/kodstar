@@ -5,7 +5,8 @@
 
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 
 const REASON: &str = "matching Go method names and arities; signature types, pointer method sets and runtime dispatch are not proven";
 
@@ -14,7 +15,7 @@ pub(in crate::application::analysis::resolve) fn run(
     cancel: &Cancellation,
 ) -> Result<()> {
     connection.execute_batch(include_str!("method_sets.sql"))?;
-    let mut statement = connection.prepare(
+    let mut statement = connection.cached_prepare(
         "SELECT concrete.id,contract.id FROM symbols concrete JOIN symbols contract
          WHERE concrete.language='go' AND concrete.kind IN ('struct','type')
            AND contract.language='go' AND contract.kind='interface'
@@ -36,10 +37,10 @@ pub(in crate::application::analysis::resolve) fn run(
     for record in records {
         cancel.check()?;
         let (source, target) = record?;
-        let fact:i64=connection.query_row(
+        let fact:i64=connection.cached_row(
             "INSERT INTO facts(file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
              SELECT file_id,id,scope_id,'@go-interface:'||(SELECT logical_key FROM symbols WHERE id=?2),'implements',language,condition,0,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM symbols WHERE id=?1 RETURNING id",params![source,target],|r|r.get(0))?;
-        connection.execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set',?4)",params![fact,source,target,REASON])?;
+        connection.cached_execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set',?4)",params![fact,source,target,REASON])?;
     }
     Ok(())
 }
@@ -47,16 +48,22 @@ pub(in crate::application::analysis::resolve) fn run(
 pub(in crate::application::analysis::resolve) fn dispatch(
     connection: &Connection,
     cancel: &Cancellation,
+    changed_only: bool,
 ) -> Result<()> {
-    let mut statement=connection.prepare(
-        "SELECT DISTINCT call.fact_id,call.source_id,implementation.id FROM relationships call
-         JOIN facts f ON f.id=call.fact_id JOIN symbols declaration ON declaration.id=call.target_id
-         JOIN go_methods required ON required.id=declaration.id
-         JOIN relationships implements ON implements.target_id=required.root AND implements.rule='go_method_set'
+    let mut statement=connection.cached_prepare(
+        "SELECT DISTINCT call.fact_id,call.source_id,implementation.id
+         FROM relation_texts rule
+         CROSS JOIN relationship_rows implements ON implements.rule_id=rule.id
+         JOIN go_methods required ON required.root=implements.target_id
+         JOIN symbols declaration ON declaration.id=required.id
+         JOIN relationships call ON call.target_id=declaration.id
+         JOIN facts f ON f.id=call.fact_id
          JOIN go_methods implementation ON implementation.root=implements.source_id AND implementation.name=required.name
-         WHERE f.relation='calls' AND call.resolution='resolved' AND declaration.language='go'
+         WHERE rule.value='go_method_set' AND f.relation='calls'
+           AND call.resolution='resolved' AND declaration.language='go'
+           AND (?1=0 OR f.file_id IN (SELECT id FROM changed_files))
          ORDER BY call.fact_id,implementation.id")?;
-    let records = statement.query_map([], |r| {
+    let records = statement.query_map([changed_only], |r| {
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, i64>(1)?,
@@ -66,10 +73,40 @@ pub(in crate::application::analysis::resolve) fn dispatch(
     for record in records {
         cancel.check()?;
         let (origin, source, target) = record?;
-        let fact:i64=connection.query_row(
+        let fact:i64=connection.cached_row(
             "INSERT INTO facts(file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
              SELECT file_id,?2,scope_id,expression,'dispatch_candidate',language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM facts WHERE id=?1 RETURNING id",params![origin,source],|r|r.get(0))?;
-        connection.execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set_dispatch',?4)",params![fact,source,target,REASON])?;
+        connection.cached_execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set_dispatch',?4)",params![fact,source,target,REASON])?;
     }
     Ok(())
+}
+
+pub(in crate::application::analysis::resolve) fn refresh_calls(
+    connection: &Connection,
+    cancel: &Cancellation,
+) -> Result<()> {
+    connection.cached_execute(
+        "UPDATE facts SET
+        start_byte=(SELECT start_byte FROM symbols WHERE id=facts.source_id),
+        end_byte=(SELECT end_byte FROM symbols WHERE id=facts.source_id),
+        line=(SELECT line FROM symbols WHERE id=facts.source_id),
+        column_byte=(SELECT column_byte FROM symbols WHERE id=facts.source_id),
+        end_line=(SELECT end_line FROM symbols WHERE id=facts.source_id),
+        end_column_byte=(SELECT end_column_byte FROM symbols WHERE id=facts.source_id)
+        WHERE language='go' AND relation='implements' AND expression LIKE '@go-interface:%'
+          AND file_id IN (SELECT id FROM changed_files)",
+        [],
+    )?;
+    // Package functions cannot dispatch through an interface method set. Check changed
+    // call facts before constructing the project-wide temporary method tables.
+    let methods:bool=connection.cached_row(
+        "SELECT EXISTS(SELECT 1 FROM changed_files changed CROSS JOIN facts f ON f.file_id=changed.id
+         CROSS JOIN relationships r ON r.fact_id=f.id JOIN symbols s ON s.id=r.target_id JOIN symbols owner ON owner.id=s.owner_id
+         WHERE f.relation='calls' AND r.resolution='resolved' AND s.language='go'
+           AND owner.kind IN ('struct','interface','type') AND s.kind IN ('method','function'))",[],|r|r.get(0))?;
+    if !methods {
+        return Ok(());
+    }
+    connection.execute_batch(include_str!("method_sets.sql"))?;
+    dispatch(connection, cancel, true)
 }

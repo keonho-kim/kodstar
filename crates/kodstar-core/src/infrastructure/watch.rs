@@ -32,14 +32,18 @@ impl Changes {
         let cache_home = cache_home
             .canonicalize()
             .map_err(|error| Error::caused_by("resolve watched cache exclusion", error))?;
+        let history_home = root.join(".kodstar");
         let signal = Arc::clone(&dirty);
         let failure = Arc::clone(&error);
         let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
             match result {
                 Ok(event) => {
-                    if matches!(event.kind, EventKind::Access(_))
-                        || !event.paths.is_empty()
-                            && event.paths.iter().all(|path| path.starts_with(&cache_home))
+                    if !event.need_rescan()
+                        && (matches!(event.kind, EventKind::Access(_))
+                            || !event.paths.is_empty()
+                                && event.paths.iter().all(|path| {
+                                    path.starts_with(&cache_home) || path.starts_with(&history_home)
+                                }))
                     {
                         return;
                     }

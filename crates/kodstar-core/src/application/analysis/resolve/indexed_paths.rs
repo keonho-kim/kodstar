@@ -6,7 +6,8 @@
 use crate::application::analysis::resolve::Lookup;
 use crate::domain::diagnostics::Result;
 use crate::infrastructure::cache::paths::path_bytes;
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::{OptionalExtension, params};
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) enum PathKind {
@@ -55,7 +56,7 @@ pub(crate) fn configuration_file(
     };
     for candidate in candidates {
         if let Some(id) = connection
-            .query_row(
+            .cached_row(
                 "SELECT id FROM files WHERE path=?1",
                 [path_bytes(&candidate)],
                 |r| r.get(0),
@@ -105,13 +106,13 @@ impl Lookup<'_, '_> {
         let sql = format!(
             "SELECT id FROM files WHERE path=?1 AND status='analyzed' AND language IN ({allowed})"
         );
-        let mut statement = self.connection.prepare(&sql)?;
+        let mut statement = self.connection.cached_prepare(&sql)?;
         for candidate in candidates {
             if let Some(id) = statement
                 .query_row([path_bytes(&candidate)], |r| r.get::<_, i64>(0))
                 .optional()?
             {
-                self.connection.execute(
+                self.connection.cached_execute(
                     "INSERT OR IGNORE INTO resolution_modules VALUES(?1,?2)",
                     params![depth, id],
                 )?;

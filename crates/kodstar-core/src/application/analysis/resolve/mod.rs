@@ -44,7 +44,8 @@ use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
 use crate::domain::languages::Language;
 use crate::infrastructure::cache::paths::path_from_bytes;
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 use std::path::PathBuf;
 
 struct FileContext {
@@ -67,18 +68,22 @@ struct Binding {
 }
 
 pub(crate) fn run(
-    connection: &Connection,
+    connection: &rusqlite::Connection,
     cancel: &Cancellation,
     selection: super::incremental::Resolution,
 ) -> Result<()> {
+    let connection = &Connection::new(connection)?;
     let all = selection == super::incremental::Resolution::All;
     if all {
-        connection.execute(
+        connection.execute_batch("DELETE FROM relation_blocks;")?;
+        connection.cached_execute(
             "DELETE FROM facts WHERE relation IN ('overrides','dispatch_candidate')
              OR (language='go' AND relation='implements' AND expression LIKE '@go-interface:%')",
             [],
         )?;
-        connection.execute_batch("DELETE FROM relationships; DELETE FROM lookup_dependencies;")?;
+        connection.execute_batch("DELETE FROM lookup_blocks;")?;
+    } else {
+        crate::infrastructure::index::invalidation::prepare_partial(connection)?;
     }
     connection.execute_batch(include_str!("staging.sql"))?;
     crate::application::analysis::resolve::modules::scopes::reset(connection)?;
@@ -95,7 +100,7 @@ pub(crate) fn run(
         crate::application::analysis::resolve::cxx::types::run(connection, cancel)?;
         identities::rebuild(connection)?;
     }
-    let prepared = prepared::Prepared::new(connection)?;
+    let prepared = prepared::Prepared::new(connection.connection())?;
     if all {
         owners::run(connection, cancel, &prepared)?;
         crate::application::analysis::resolve::cxx::declarations::run(connection, cancel)?;
@@ -104,7 +109,7 @@ pub(crate) fn run(
         identities::rebuild(connection)?;
     }
     connection.execute_batch(include_str!("lisp/packages.sql"))?;
-    let merged: bool = connection.query_row(
+    let merged: bool = connection.cached_row(
         "SELECT EXISTS(SELECT 1 FROM symbol_identities WHERE symbol_id<>canonical_id)",
         [],
         |r| r.get(0),
@@ -114,11 +119,14 @@ pub(crate) fn run(
     if all {
         crate::application::analysis::resolve::go::interfaces::run(connection, cancel)?;
         dispatch::run(connection, cancel)?;
-        crate::application::analysis::resolve::go::interfaces::dispatch(connection, cancel)?;
+        crate::application::analysis::resolve::go::interfaces::dispatch(connection, cancel, false)?;
+    } else {
+        crate::application::analysis::resolve::go::interfaces::refresh_calls(connection, cancel)?;
     }
     if merged {
         identities::relationships(connection)?;
     }
+    connection.execute_batch("DELETE FROM relation_texts WHERE NOT EXISTS(SELECT 1 FROM relation_routes r WHERE r.kind=6 AND r.entity=relation_texts.id);")?;
     Ok(())
 }
 
@@ -127,7 +135,7 @@ fn context(
     file: i64,
     language: Option<Language>,
 ) -> Result<Option<FileContext>> {
-    let record: (String, String, String, Vec<u8>, String) = connection.query_row(
+    let record: (String, String, String, Vec<u8>, String) = connection.cached_row(
         "SELECT language,module,package,path,declared_module FROM files WHERE id=?1",
         [file],
         |row| {
@@ -156,7 +164,7 @@ fn context(
 }
 
 struct Lookup<'conn, 'operation> {
-    connection: &'conn Connection,
+    connection: &'operation Connection<'conn>,
     fact: Option<i64>,
     relation: &'operation str,
     external_scope_id: usize,

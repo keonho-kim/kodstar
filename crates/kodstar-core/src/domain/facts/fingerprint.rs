@@ -73,7 +73,7 @@ fn replace_span(fact: &mut Fact) -> Option<SourceSpan> {
     let span = match fact {
         Fact::Scope(s) => &mut s.span,
         Fact::Definition(d) => &mut d.span,
-        Fact::Binding(b) if b.kind == "function" => {
+        Fact::Binding(b) if matches!(b.kind, "function" | "go_signature") => {
             let original = b.span;
             b.span.end_byte = b.span.start_byte;
             b.span.end_line = b.span.line;

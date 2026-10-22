@@ -1,55 +1,269 @@
-# KodStar
+<p align="center">
+  <img src="docs/assets/kodstar-boot-logo.png" width="680" alt="KodStar — a gold star and orbital wordmark inspired by vintage PC boot screens" />
+</p>
 
-Rust로 작성한 로컬 소스코드 관계 분석 엔진과 CLI입니다. 공식 Tree-sitter로 구문 사실을 추출하고,
-SQLite에 저장한 관계를 조회합니다.
+<h1 align="center">KodStar</h1>
 
-실행 지원 대상은 **macOS와 Linux**입니다. **Windows는 지원하지 않습니다.**
+<p align="center">
+  <strong>Follow the code. Keep the history.</strong><br />
+  A local CLI for exploring code relationships and keeping source history.
+</p>
 
-## 시작
+<p align="center">
+  <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/Rust-1.99.1-D6AA33?style=flat-square&amp;logo=rust&amp;logoColor=white&amp;labelColor=161B18" alt="Rust toolchain 1.99.1" /></a>
+  <a href="#supported-languages"><img src="https://img.shields.io/badge/platform-macOS%20%2B%20Linux-D6AA33?style=flat-square&amp;labelColor=161B18" alt="macOS and Linux" /></a>
+  <a href="#features"><img src="https://img.shields.io/badge/analysis-local-D6AA33?style=flat-square&amp;labelColor=161B18" alt="Local analysis" /></a>
+  <a href="#supported-languages"><img src="https://img.shields.io/badge/status-early%20development-D6AA33?style=flat-square&amp;labelColor=161B18" alt="Early development" /></a>
+</p>
 
-[rust-toolchain.toml](rust-toolchain.toml)의 toolchain과 네이티브 C 빌드 도구를 준비한 뒤
-저장소 루트에서 실행합니다. toolchain 선택 방법은 [개발 환경](docs/development.md#개발-환경)을 참고합니다.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#examples">Examples</a> ·
+  <a href="#supported-languages">Languages</a> ·
+  <a href="#documentation-and-development">Documentation</a>
+</p>
+
+---
+
+**KodStar** is a source-code relationship analysis engine and CLI written in Rust.
+It extracts syntax facts with official **Tree-sitter** parsers and stores relationships and analysis state in **SQLite**.
+Follow calls, references, and dependencies, while automatic checkpoints preserve changes observed as you use the CLI.
+
+## Features
+
+- **Explore code relationships** — Find symbol definitions, call targets, incoming references, and dependency paths.
+- **Inspect change impact** — Trace the impact of a symbol or changes since a saved checkpoint.
+- **Incremental synchronization** — After initialization, regular commands check for changes and update the analysis.
+- **Automatic local history** — Name checkpoints, compare changes, restore files, and work with local branches.
+- **Configurable resource budgets** — Set worker counts and memory budgets, backed by a disk-based index.
+- **Tool integration** — Use text, JSON, JSONL, or TSV output, file watching, and stdio sessions.
+
+## Quick start
+
+### 1. Install
+
+You need `rustup`, the [pinned Rust toolchain](rust-toolchain.toml), and native C build tools.
+See [development setup](docs/development.md#개발-환경) for platform-specific requirements.
+
+```bash
+git clone https://github.com/keonho-kim/kodstar.git
+cd kodstar
+./install.sh
+```
+
+The installer places a dist build at `$HOME/.local/bin/kodstar` and configures your shell's PATH.
+Open a new terminal, or run the PATH command printed by the installer, to use `kodstar` from any directory.
+To update an existing installation, get the latest source and run `./install.sh` again.
+
+<details>
+<summary>Installation path and shell setup</summary>
+
+PATH setup covers sh, Bash, and Zsh. Fish is configured when it is your shell or its configuration file exists.
+Installation is separate from project initialization. To install an existing executable, use
+`./install.sh --binary /absolute/path/to/kodstar`.
+
+</details>
+
+### 2. Initialize a project
+
+Enter the project you want to analyze and create its history repository and initial index together.
+
+```bash
+cd /work/your-project
+kodstar init .
+```
+
+The first initialization shows the actual target path and asks for confirmation. Initialization at `/` is refused.
+For automation, review the path before using `kodstar init /work/your-project --yes`.
+
+### 3. Explore your code
+
+Replace the example file paths and function names with ones from your project.
+Inside a project, KodStar selects the registered ancestor root, so you can use relative paths.
+
+```bash
+# List symbols defined in a file
+kodstar symbols src/api.rs
+
+# Inspect caller's dependencies and how they were resolved
+kodstar deps src/api.rs caller
+kodstar explain src/api.rs caller
+
+# Search definitions by name
+kodstar search target
+```
+
+## Examples
+
+### Follow references and change impact
+
+```bash
+# Find references to target, including individual use sites
+kodstar refs src/api.rs target --sites
+
+# Inspect the impact of changing target
+kodstar impact src/api.rs target
+
+# Produce structured results for other tools
+kodstar deps src/api.rs caller --format json
+```
+
+Results distinguish resolved targets, candidates, ambiguity, unresolved references, and index freshness.
+Outside the project, select it with `--root /work/your-project`.
+
+### Keep local history as you work
+
+Regular commands check for source changes and preserve them in checkpoints.
+When nothing has changed, no checkpoint is added.
+
+```bash
+# Name the current checkpoint
+kodstar history save baseline
+
+# After editing code, run another query to synchronize changes
+kodstar search target
+
+# Compare against the saved checkpoint and inspect change impact
+kodstar history diff --from baseline
+kodstar impact --since baseline
+
+# Query a saved checkpoint and restore a file
+kodstar symbols src/api.rs --rev baseline
+kodstar history restore baseline src/api.rs
+```
+
+Use local branches to keep separate lines of work.
+
+```bash
+kodstar branch create experiment
+kodstar branch switch experiment
+kodstar branch
+```
+
+Restore and branch switching preserve current changes first. When resuming an interrupted operation,
+KodStar stops if it detects conflicting external edits. See the [local history contract](kodstar-spec.md#7-cli-명령어-전체) for details.
+
+### Watch files and connect external tools
+
+```bash
+# Watch changes to saved files
+kodstar watch
+
+# Start a stdio session for external tools
+kodstar serve --stdio
+```
+
+JSON, JSONL, TSV, and stdio contracts are defined in the [specification](kodstar-spec.md).
+
+<details>
+<summary>Command overview</summary>
+
+| Purpose | Commands |
+|---|---|
+| Initialization and analysis updates | `init`, `init --full`, `init --verify` |
+| Definitions and name search | `symbols`, `list`, `search` |
+| Relationships, explanations, and impact | `related`, `deps`, `refs`, `explain`, `impact`, `path` |
+| Local history | `history`, `history save/diff/restore/upgrade` |
+| Local branches | `branch`, `branch create/switch/delete` |
+| Status and diagnostics | `status`, `doctor`, `languages` |
+| Cache management | `cache list/clean/gc` |
+| Tool integration | `watch`, `serve --stdio` |
+
+Run `kodstar <command> --help` to see the options for each command.
+
+</details>
+
+## Supported languages
+
+KodStar provides selected static analysis rules for **19 languages** and **6 component and template formats**.
+
+| Category | Languages and formats |
+|---|---|
+| Systems and native | Rust, Go, C, C++, Zig |
+| Application languages | Java, Kotlin, Scala, C#, Swift, Pascal |
+| Dynamic languages and web | Python, JavaScript, TypeScript, Ruby, PHP |
+| BEAM·Lisp | Elixir, Erlang, Common Lisp |
+| Components and templates | Vue, Svelte, Astro, EJS, Blade, Razor |
+
+**Full implementation of the specification and porting of Graphify's language and framework rules are still in progress.**
+Run `kodstar languages --format json` for capabilities and limitations by language.
+See [porting verification](docs/development.md#포팅-검증) for evidence and remaining gaps.
+
+Supported platforms are **macOS and Linux**. **Windows is not supported.**
+
+## Storage and maintenance
+
+| Data | Location | Purpose |
+|---|---|---|
+| Project history | `<project>/.kodstar/repository.sqlite` | Preserved source content, checkpoints, names, and branches |
+| Analysis cache | `$HOME/.kodstar` | Rebuildable relationship indexes and cache management metadata |
+
+`cache clean` and `cache gc` preserve source history.
+To configure the memory budget and worker count:
+
+```bash
+kodstar init . --jobs 2 --memory-budget 128MiB
+kodstar doctor
+```
+
+<details>
+<summary>Upgrade existing history and rebuild the cache</summary>
+
+`kodstar history upgrade` explicitly converts history formats 1, 2, and 3 to format 4.
+For format 4, it repacks stored content and reclaims free pages while preserving checkpoints, source content, names, and branches.
+If the analysis cache format is incompatible, explicitly clean it and initialize again.
+
+```bash
+kodstar history upgrade
+kodstar cache clean --root .
+kodstar init .
+```
+
+See [storage consistency](kodstar-spec.md#16-저장-일관성과-장애-시-동작) for storage formats and recovery behavior,
+and the [development guide](docs/development.md) for measurements and performance tradeoffs.
+
+</details>
+
+<details>
+<summary>Uninstall and remove data</summary>
+
+**After confirmation, uninstall removes the executable, managed PATH entries, caches, default global configuration,
+and checkpoint history for every registered project.**
+It preserves source files, other shell configuration, development checkouts, build outputs, and the Rust toolchain.
+
+```bash
+kodstar uninstall
+```
+
+For automation, use `kodstar uninstall --yes`. Active sessions, modified installation records, or unknown data
+cause uninstall to stop with a diagnostic. If a project has moved, use KodStar once at its new location to update its registration before uninstalling.
+
+</details>
+
+## Documentation and development
+
+Detailed documentation is currently in Korean.
+
+| Document | Contents |
+|---|---|
+| [Specification](kodstar-spec.md) | Product scope, commands, output, freshness, and stdio contracts |
+| [Architecture](docs/architecture.md) | Layers, source layout, execution flow, and state and resource ownership |
+| [Development guide](docs/development.md) | Setup, builds, configuration, verification, dependencies, and porting evidence |
+| [Development principles](AGENTS.md) | Design review, code, comments, and change procedures |
+
+The engine lives in [`kodstar-core`](crates/kodstar-core), and the CLI in [`kodstar-cli`](crates/kodstar-cli).
+Read the development principles before making changes, and follow the [verification procedure](docs/development.md#변경-검증).
 
 ```bash
 cargo build --workspace --locked
-./target/debug/kodstar build /work/project
-./target/debug/kodstar symbols /work/project/src/api.rs --root /work/project
-./target/debug/kodstar deps /work/project/src/api.rs caller --root /work/project --format json
-./target/debug/kodstar explain /work/project/src/api.rs caller --root /work/project
+cargo test --workspace --locked
 ```
 
-프로젝트 안에서는 등록된 상위 루트를 선택하므로 상대 파일 경로를 사용할 수 있습니다.
-조회와 `watch`를 사용하기 전에 `build`로 초기 인덱스를 만듭니다.
+Pinned dependencies and grammar sources are recorded in the [dependency inventory](LICENSES/dependencies.json).
+Third-party license texts and notices are preserved in [LICENSES](LICENSES).
 
-## 구현 범위
+---
 
-| 기능 | 명령 |
-|---|---|
-| 분석·갱신 | `build` |
-| 객체·관계 조회 | `symbols`, `list`, `related`, `deps`, `refs`, `explain`, `impact`, `path`, `search` |
-| 상태·진단·캐시 | `status`, `doctor`, `languages`, `cache list/clean/gc` |
-| 연동 | `watch`, `serve --stdio`, VS Code adapter |
-
-19개 언어와 Vue·Svelte·Astro·EJS·Blade·Razor의 선정된 정적 규칙을 구현합니다.
-**명세와 Graphify의 전체 언어·framework 규칙 포팅은 진행 중입니다.**
-언어별 기능과 제한은 `languages --format json`, 포팅 근거와 미완료 범위는
-[포팅 검증](docs/development.md#포팅-검증)에서 확인합니다.
-
-첫 build 이후 일반 명령은 변경을 확인하고 증분 동기화합니다.
-후보·모호함·미해결과 최신성은 결과에 표시합니다.
-명령 옵션·출력·캐시 정책은 [기능 명세](kodstar-spec.md)에 정의합니다.
-
-## 문서와 저장소
-
-| 문서 | 내용 |
-|---|---|
-| [기능 명세](kodstar-spec.md) | 제품 범위·명령·출력·최신성·stdio 계약 |
-| [아키텍처](docs/architecture.md) | 레이어·주요 소스 구성·실행 흐름·상태와 자원 소유권 |
-| [개발 문서](docs/development.md) | 환경·빌드·설정 예제·검증·의존성·포팅 근거 |
-| [개발 원칙](AGENTS.md) | 설계 검토·코드·주석·변경 절차 |
-
-엔진은 `crates/kodstar-core`, CLI는 `crates/kodstar-cli`, 에디터는 `editors/vscode`에 있습니다.
-언어별 규칙은 레이어 안의 언어 모듈에, 혼합 입력 처리는 포맷별 모듈에 둡니다.
-
-고정 의존성과 grammar 출처는 [의존성 목록](LICENSES/dependencies.json),
-라이선스 원문과 고지는 [LICENSES](LICENSES)에 있습니다.
+<p align="center">
+  <sub>Built with Rust · Parsed with Tree-sitter · Stored in SQLite</sub>
+</p>

@@ -28,7 +28,7 @@ impl Lookup<'_, '_> {
     }
 
     fn package_at(&self, directory: &Path) -> Result<Option<i64>> {
-        Ok(self.connection.query_row("SELECT f.id FROM files f WHERE f.path=?1 AND f.status='auxiliary' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='package_manifest')",[path_bytes(&directory.join("package.json"))],|r|r.get(0)).optional()?)
+        Ok(self.connection.cached_row("SELECT f.id FROM files f WHERE f.path=?1 AND f.status='auxiliary' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='package_manifest')",[path_bytes(&directory.join("package.json"))],|r|r.get(0)).optional()?)
     }
 
     pub(in crate::application::analysis::resolve) fn select_packages(
@@ -37,21 +37,21 @@ impl Lookup<'_, '_> {
         name: &str,
         depth: usize,
     ) -> Result<bool> {
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_package_candidates WHERE depth=?1",
             [depth],
         )?;
         let mut declared = false;
         if let Some((consumer, directory)) = self.nearest_package(context)? {
-            self.connection.execute("INSERT OR IGNORE INTO resolution_package_candidates SELECT ?1,f.id FROM files f WHERE f.id=?2 AND f.declared_module=?3 AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='package_exports_marker')",params![depth,consumer,name])?;
-            let mut links=self.connection.prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND kind='package_link' AND name=?2 ORDER BY id")?;
+            self.connection.cached_execute("INSERT OR IGNORE INTO resolution_package_candidates SELECT ?1,f.id FROM files f WHERE f.id=?2 AND f.declared_module=?3 AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='package_exports_marker')",params![depth,consumer,name])?;
+            let mut links=self.connection.cached_prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND kind='package_link' AND name=?2 ORDER BY id")?;
             let links = links.query_map(params![consumer, name], |r| r.get::<_, String>(0))?;
             for raw in links {
                 declared = true;
                 if let Some(directory) = indexed_paths::normalize(&directory, &raw?)
                     && let Some(manifest) = self.package_at(&directory)?
                 {
-                    self.connection.execute(
+                    self.connection.cached_execute(
                         "INSERT OR IGNORE INTO resolution_package_candidates VALUES(?1,?2)",
                         params![depth, manifest],
                     )?;
@@ -66,18 +66,18 @@ impl Lookup<'_, '_> {
         {
             let mut root = None;
             for manifest in ["pnpm-workspace.yaml", "pnpm-workspace.yml", "package.json"] {
-                root=self.connection.query_row("SELECT f.id FROM files f WHERE f.path=?1 AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='workspace_root')",[path_bytes(&directory.join(manifest))],|r|r.get::<_,i64>(0)).optional()?;
+                root=self.connection.cached_row("SELECT f.id FROM files f WHERE f.path=?1 AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='workspace_root')",[path_bytes(&directory.join(manifest))],|r|r.get::<_,i64>(0)).optional()?;
                 if root.is_some() {
                     break;
                 }
             }
             if let Some(root) = root {
                 self.load_workspace(root, directory)?;
-                self.connection.execute("INSERT OR IGNORE INTO resolution_package_candidates SELECT ?1,manifest FROM resolution_workspace_packages WHERE root=?2 AND name=?3",params![depth,root,name])?;
+                self.connection.cached_execute("INSERT OR IGNORE INTO resolution_package_candidates SELECT ?1,manifest FROM resolution_workspace_packages WHERE root=?2 AND name=?3",params![depth,root,name])?;
                 break;
             }
         }
-        let found: bool = self.connection.query_row(
+        let found: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_package_candidates WHERE depth=?1)",
             [depth],
             |r| r.get(0),
@@ -86,14 +86,14 @@ impl Lookup<'_, '_> {
     }
 
     fn load_workspace(&self, root: i64, directory: &Path) -> Result<()> {
-        if self.connection.execute(
+        if self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_workspace_seen VALUES(?1)",
             [root],
         )? == 0
         {
             return Ok(());
         }
-        let mut patterns=self.connection.prepare("SELECT name FROM bindings WHERE file_id=?1 AND kind='workspace_glob' ORDER BY start_byte,id")?;
+        let mut patterns=self.connection.cached_prepare("SELECT name FROM bindings WHERE file_id=?1 AND kind='workspace_glob' ORDER BY start_byte,id")?;
         let patterns = patterns.query_map([root], |r| r.get::<_, String>(0))?;
         for pattern in patterns {
             let pattern = pattern?;
@@ -111,7 +111,7 @@ impl Lookup<'_, '_> {
                 .build()
                 .map_err(|e| Error::caused_by("invalid workspace pattern", e))?
                 .compile_matcher();
-            let mut packages=self.connection.prepare("SELECT f.id,f.path,f.declared_module FROM files f WHERE f.status='auxiliary' AND f.declared_module<>'' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='package_manifest') ORDER BY f.id")?;
+            let mut packages=self.connection.cached_prepare("SELECT f.id,f.path,f.declared_module FROM files f WHERE f.status='auxiliary' AND f.declared_module<>'' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='package_manifest') ORDER BY f.id")?;
             let packages = packages.query_map([], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
@@ -132,19 +132,19 @@ impl Lookup<'_, '_> {
                     continue;
                 }
                 if exclude {
-                    self.connection.execute(
+                    self.connection.cached_execute(
                         "INSERT OR IGNORE INTO resolution_workspace_excluded VALUES(?1,?2)",
                         params![root, manifest],
                     )?;
                 } else {
-                    self.connection.execute(
+                    self.connection.cached_execute(
                         "INSERT OR IGNORE INTO resolution_workspace_packages VALUES(?1,?2,?3)",
                         params![root, name, manifest],
                     )?;
                 }
             }
         }
-        self.connection.execute("DELETE FROM resolution_workspace_packages WHERE root=?1 AND manifest IN (SELECT manifest FROM resolution_workspace_excluded WHERE root=?1)",[root])?;
+        self.connection.cached_execute("DELETE FROM resolution_workspace_packages WHERE root=?1 AND manifest IN (SELECT manifest FROM resolution_workspace_excluded WHERE root=?1)",[root])?;
         Ok(())
     }
 }

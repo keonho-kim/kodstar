@@ -4,6 +4,7 @@
 // Related: crates/kodstar-core/src/application/engine.rs, crates/kodstar-core/src/application/query/selection.rs.
 
 //! Query orchestration on one committed generation.
+pub(crate) mod metadata;
 mod relationship_rows;
 mod relationships;
 mod search;
@@ -13,11 +14,10 @@ mod traversal;
 use rusqlite::Connection;
 
 use crate::domain::cancellation::Cancellation;
-use crate::domain::diagnostics::{Error, Result};
+use crate::domain::diagnostics::Result;
 use crate::domain::query::{Query, QueryOptions, Selector};
 use crate::domain::relations::Direction;
-use crate::domain::results::{QueryMetadata, QueryRow, QuerySink, QuerySummary};
-use crate::infrastructure::cache::paths::encoding;
+use crate::domain::results::{QueryRow, QuerySink, QuerySummary};
 use crate::infrastructure::index::{self};
 
 use crate::application::workspace::SelectedProject;
@@ -36,30 +36,7 @@ pub(crate) fn run(
     maintenance: Option<crate::domain::results::MaintenanceReport>,
 ) -> Result<QuerySummary> {
     options.validate(query)?;
-    let (generation, indexed_at,relation_registry_version): (i64, u64,u32) = connection.query_row(
-        "SELECT generation,indexed_at,relation_registry_version FROM metadata WHERE singleton=1",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?,row.get(2)?)),
-    )?;
-    if generation == 0 {
-        return Err(Error::not_found(
-            "no completed index found; run kodstar build first",
-        ));
-    }
-    let coverage = index::coverage(connection)?;
-    let metadata = QueryMetadata {
-        maintenance,
-        schema_version: 1,
-        relation_registry_version,
-        engine_version: crate::VERSION,
-        root: Some(selected.root.to_string_lossy().into_owned()),
-        root_encoding: encoding(&selected.root),
-        generation: Some(generation),
-        indexed_at: Some(indexed_at),
-        freshness: options.refresh.as_str(),
-        unresolved_count: coverage.unresolved,
-        coverage,
-    };
+    let metadata = metadata::read(connection, selected, options.refresh, maintenance)?;
     sink.begin(&metadata)?;
     let mut summary = QuerySummary {
         complete: true,
@@ -92,6 +69,18 @@ pub(crate) fn run(
                 setup(connection, options, matches!(query, Query::Explain { .. }))?;
                 let max_nodes = options.max_nodes.resolve(selected.settings.max_nodes);
                 match query {
+                    Query::Changes { .. } => {
+                        connection.execute("INSERT INTO q_seeds SELECT s.id FROM symbols s JOIN files f ON f.id=s.file_id JOIN q_changed_inputs c ON c.path=f.path",[])?;
+                        traverse(
+                            connection,
+                            Direction::In,
+                            options.depth_for(query),
+                            max_nodes,
+                            cancel,
+                            &mut summary,
+                            None,
+                        )?;
+                    }
                     Query::Related { selector }
                     | Query::Deps { selector }
                     | Query::Refs { selector }

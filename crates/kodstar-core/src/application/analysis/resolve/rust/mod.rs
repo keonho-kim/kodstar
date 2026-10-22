@@ -44,7 +44,7 @@ impl Lookup<'_, '_> {
             return Ok(false);
         };
         let key = context.language.lookup_key(name.trim_end_matches('!'));
-        let count = self.connection.execute(
+        let count = self.connection.cached_execute(
             "INSERT
             OR IGNORE INTO resolution_candidates
             SELECT s.id
@@ -67,7 +67,7 @@ impl Lookup<'_, '_> {
         if count == 0 {
             return Ok(false);
         }
-        let conditional: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind='rust_macro_export' AND b.type_name IS NOT NULL)", [], |r| r.get(0))?;
+        let conditional: bool = self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind='rust_macro_export' AND b.type_name IS NOT NULL)", [], |r| r.get(0))?;
         self.candidate_only |= conditional;
         if conditional {
             self.reason = Some("macro_export is conditional and configuration was not evaluated");
@@ -107,7 +107,7 @@ impl Lookup<'_, '_> {
             return Ok(false);
         }
         let saved = self.save_candidates()?;
-        let mut statement = self.connection.prepare("SELECT s.file_id,s.local_id,s.kind,s.qualified_name,f.module FROM resolution_saved r JOIN symbols s ON s.id=r.id JOIN files f ON f.id=s.file_id WHERE r.lookup_scope=?1 AND s.kind IN ('file','module') ORDER BY s.id")?;
+        let mut statement = self.connection.cached_prepare("SELECT s.file_id,s.local_id,s.kind,s.qualified_name,f.module FROM resolution_saved r JOIN symbols s ON s.id=r.id JOIN files f ON f.id=s.file_id WHERE r.lookup_scope=?1 AND s.kind IN ('file','module') ORDER BY s.id")?;
         let records = statement.query_map([saved], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
@@ -140,7 +140,7 @@ impl Lookup<'_, '_> {
                 self.member_depth + 1,
             )?;
         }
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_saved WHERE lookup_scope=?1",
             [saved],
         )?;

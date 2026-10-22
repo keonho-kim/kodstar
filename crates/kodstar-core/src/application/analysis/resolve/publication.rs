@@ -6,7 +6,8 @@
 use crate::application::analysis::resolve::prepared::Publication;
 use crate::application::analysis::resolve::{FileContext, Lookup, identities};
 use crate::domain::diagnostics::{Error, Result};
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 
 pub(super) fn reset(c: &Connection) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS resolution_dependencies(fact_id INTEGER,kind TEXT,lookup_key TEXT,found INTEGER,PRIMARY KEY(fact_id,kind,lookup_key)) WITHOUT ROWID;
@@ -16,10 +17,10 @@ pub(super) fn reset(c: &Connection) -> Result<()> {
 }
 
 pub(super) fn flush(c: &Connection) -> Result<()> {
-    c.execute_batch("INSERT INTO lookup_dependencies SELECT * FROM resolution_dependencies;
-      INSERT INTO relationships(fact_id,source_id,target_id,external_key,resolution,rule,reason)
-        SELECT fact_id,source_id,target_id,external_key,resolution,rule,reason FROM resolution_relationships ORDER BY id;
-      DELETE FROM resolution_dependencies; DELETE FROM resolution_relationships;")?;
+    crate::infrastructure::index::dependencies::publish(c)?;
+    crate::infrastructure::index::relations::publish(c)?;
+    crate::infrastructure::index::dictionary::retire(c)?;
+    c.execute_batch("DELETE FROM resolution_dependencies; DELETE FROM resolution_relationships;")?;
     Ok(())
 }
 
@@ -43,7 +44,7 @@ impl Lookup<'_, '_> {
         let mut source = self.source_override.unwrap_or(source);
         if merged {
             identities::candidates(self.connection)?;
-            source = self.connection.query_row(
+            source = self.connection.cached_row(
                 "SELECT canonical_id FROM symbol_identities WHERE symbol_id=?1",
                 [source],
                 |r| r.get(0),
@@ -51,7 +52,7 @@ impl Lookup<'_, '_> {
         }
         let count: i64 =
             self.connection
-                .query_row("SELECT COUNT(*) FROM resolution_candidates", [], |r| {
+                .cached_row("SELECT COUNT(*) FROM resolution_candidates", [], |r| {
                     r.get(0)
                 })?;
         self.prepared.dependency(params![
@@ -64,7 +65,7 @@ impl Lookup<'_, '_> {
             ),
             count > 0
         ])?;
-        let external_count: i64 = self.connection.query_row(
+        let external_count: i64 = self.connection.cached_row(
             "SELECT COUNT(*) FROM resolution_externals WHERE scope=0",
             [],
             |r| r.get(0),

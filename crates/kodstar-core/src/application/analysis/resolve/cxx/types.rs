@@ -5,14 +5,15 @@
 
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 
 pub(in crate::application::analysis::resolve) fn run(
     c: &Connection,
     cancel: &Cancellation,
 ) -> Result<()> {
     crate::application::analysis::resolve::cxx::stage(c)?;
-    let mut statement=c.prepare("SELECT s.id,s.file_id,s.language,f.package,s.qualified_name,b.module_name,condition.effective,b.imported_name='definition',CASE WHEN b.type_name='internal' THEN f.path ELSE X'' END
+    let mut statement=c.cached_prepare("SELECT s.id,s.file_id,s.language,f.package,s.qualified_name,b.module_name,condition.effective,b.imported_name='definition',CASE WHEN b.type_name='internal' THEN f.path ELSE X'' END
         FROM symbols s JOIN cxx_conditions condition ON condition.id=s.id JOIN files f ON f.id=s.file_id JOIN symbols owner ON owner.id=s.owner_id
         JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id
         WHERE s.language IN ('c','cpp') AND b.kind='cxx_type' AND owner.kind IN ('file','module') ORDER BY s.id")?;
@@ -32,7 +33,7 @@ pub(in crate::application::analysis::resolve) fn run(
         let local: Vec<u8> = row.get(8)?;
         hash.update(&(local.len() as u64).to_le_bytes());
         hash.update(&local);
-        c.execute(
+        c.cached_execute(
             "INSERT INTO cxx_rows VALUES(?1,?2,?3,?4)",
             params![id, file, hash.finalize().to_hex().to_string(), definition],
         )?;

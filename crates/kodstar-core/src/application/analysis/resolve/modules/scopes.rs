@@ -5,7 +5,8 @@
 
 use crate::application::analysis::resolve::Lookup;
 use crate::domain::diagnostics::Result;
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 
 pub(in crate::application::analysis::resolve) fn reset(connection: &Connection) -> Result<()> {
     connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS resolution_module_snapshots(lookup_scope INTEGER,id INTEGER,PRIMARY KEY(lookup_scope,id));
@@ -17,12 +18,12 @@ pub(in crate::application::analysis::resolve) fn reset(connection: &Connection) 
 impl Lookup<'_, '_> {
     pub(in crate::application::analysis::resolve) fn save_candidates(&mut self) -> Result<usize> {
         let scope = self.allocate_scope()?;
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT INTO resolution_saved SELECT ?1,id FROM resolution_candidates",
             [scope],
         )?;
         self.connection
-            .execute("DELETE FROM resolution_candidates", [])?;
+            .cached_execute("DELETE FROM resolution_candidates", [])?;
         Ok(scope)
     }
 
@@ -30,8 +31,8 @@ impl Lookup<'_, '_> {
         &self,
         scope: usize,
     ) -> Result<()> {
-        self.connection.execute("INSERT OR IGNORE INTO resolution_candidates SELECT id FROM resolution_saved WHERE lookup_scope=?1",[scope])?;
-        self.connection.execute(
+        self.connection.cached_execute("INSERT OR IGNORE INTO resolution_candidates SELECT id FROM resolution_saved WHERE lookup_scope=?1",[scope])?;
+        self.connection.cached_execute(
             "DELETE FROM resolution_saved WHERE lookup_scope=?1",
             [scope],
         )?;
@@ -43,8 +44,8 @@ impl Lookup<'_, '_> {
         depth: usize,
     ) -> Result<usize> {
         let scope = self.allocate_scope()?;
-        self.connection.execute("INSERT INTO resolution_module_snapshots SELECT ?1,id FROM resolution_modules WHERE depth=?2",params![scope,depth])?;
-        self.connection.execute("INSERT INTO resolution_owner_snapshots SELECT ?1,file_id,owner_id FROM resolution_module_owners WHERE depth=?2",params![scope,depth])?;
+        self.connection.cached_execute("INSERT INTO resolution_module_snapshots SELECT ?1,id FROM resolution_modules WHERE depth=?2",params![scope,depth])?;
+        self.connection.cached_execute("INSERT INTO resolution_owner_snapshots SELECT ?1,file_id,owner_id FROM resolution_module_owners WHERE depth=?2",params![scope,depth])?;
         Ok(scope)
     }
 
@@ -52,11 +53,11 @@ impl Lookup<'_, '_> {
         &self,
         scope: usize,
     ) -> Result<()> {
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_module_snapshots WHERE lookup_scope=?1",
             [scope],
         )?;
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_owner_snapshots WHERE lookup_scope=?1",
             [scope],
         )?;

@@ -12,7 +12,8 @@ use std::path::PathBuf;
 use super::diagnostics::{Error, Result};
 use super::relations::{Direction, RelationKind};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Refresh {
     #[default]
     Metadata,
@@ -65,6 +66,9 @@ impl Selector {
 
 #[derive(Clone, Debug)]
 pub enum Query {
+    Changes {
+        since: String,
+    },
     Symbols {
         file: PathBuf,
     },
@@ -126,6 +130,7 @@ impl Limit {
 
 #[derive(Clone, Debug)]
 pub struct QueryOptions {
+    pub revision: Option<String>,
     pub refresh: Refresh,
     pub direction: Option<Direction>,
     pub relations: Vec<RelationKind>,
@@ -141,6 +146,7 @@ pub struct QueryOptions {
 impl Default for QueryOptions {
     fn default() -> Self {
         Self {
+            revision: None,
             refresh: Refresh::Metadata,
             direction: None,
             relations: Vec::new(),
@@ -163,7 +169,10 @@ impl QueryOptions {
     pub(crate) fn depth_for(&self, query: &Query) -> Option<usize> {
         match self.depth {
             Depth::Default => {
-                if matches!(query, Query::Impact { .. } | Query::Path { .. }) {
+                if matches!(
+                    query,
+                    Query::Impact { .. } | Query::Changes { .. } | Query::Path { .. }
+                ) {
                     None
                 } else {
                     Some(1)
@@ -177,7 +186,7 @@ impl QueryOptions {
     pub(crate) fn direction_for(&self, query: &Query) -> Direction {
         self.direction.unwrap_or(match query {
             Query::Deps { .. } => Direction::Out,
-            Query::Refs { .. } | Query::Impact { .. } => Direction::In,
+            Query::Refs { .. } | Query::Impact { .. } | Query::Changes { .. } => Direction::In,
             _ => Direction::Both,
         })
     }

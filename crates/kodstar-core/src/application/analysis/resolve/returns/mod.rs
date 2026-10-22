@@ -39,7 +39,7 @@ impl Lookup<'_, '_> {
         let fixture = source == ValueSource::Fixture;
         if depth >= 32 {
             self.connection
-                .execute("DELETE FROM resolution_candidates", [])?;
+                .cached_execute("DELETE FROM resolution_candidates", [])?;
             self.reason = Some("return type lookup depth limit");
             return Ok(());
         }
@@ -52,21 +52,21 @@ impl Lookup<'_, '_> {
              );",
         )?;
         self.connection
-            .execute("DELETE FROM resolution_returns WHERE depth=?1", [depth])?;
-        self.connection.execute(
+            .cached_execute("DELETE FROM resolution_returns WHERE depth=?1", [depth])?;
+        self.connection.cached_execute(
             "DELETE FROM resolution_return_results WHERE depth=?1",
             [depth],
         )?;
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT INTO resolution_returns
-             SELECT ?1,c.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id
+             SELECT ?1,c.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id
              WHERE s.kind IN ('function','method') AND (
                 ?2=0 OR EXISTS(SELECT 1 FROM bindings b
                     WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='python_property')
              )",
             params![depth,property_only],
         )?;
-        let mut unknown: bool = self.connection.query_row(
+        let mut unknown: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_returns r JOIN symbols s ON s.id=r.id
              WHERE r.depth=?1 AND NOT EXISTS(SELECT 1 FROM bindings b
                 WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND (
@@ -76,21 +76,21 @@ impl Lookup<'_, '_> {
              ))", params![depth,fixture], |r|r.get(0),
         )?;
         unknown |= self.has_externals();
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT INTO resolution_return_results
-             SELECT ?1,c.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id
+             SELECT ?1,c.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id
              WHERE s.kind IN ('class','struct','enum','type','interface','trait')
                 OR (?2 AND NOT EXISTS(SELECT 1 FROM resolution_returns r WHERE r.depth=?1 AND r.id=c.id))",
             params![depth,property_only],
         )?;
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_return_results
-             SELECT ?1,o.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id
+             SELECT ?1,o.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id
              JOIN symbols o ON o.id=s.owner_id
              WHERE s.kind='constructor' AND o.kind IN ('class','struct')",
             [depth],
         )?;
-        let mut statement = self.connection.prepare(records::ANNOTATIONS)?;
+        let mut statement = self.connection.cached_prepare(records::ANNOTATIONS)?;
         let records = statement.query_map(params![depth, fixture], ReturnBinding::read)?;
         for record in records {
             let ReturnBinding {
@@ -111,7 +111,7 @@ impl Lookup<'_, '_> {
                 continue;
             };
             self.connection
-                .execute("DELETE FROM resolution_candidates", [])?;
+                .cached_execute("DELETE FROM resolution_candidates", [])?;
             if let Some(ty) = type_name {
                 self.type_expression(
                     &context,
@@ -129,26 +129,26 @@ impl Lookup<'_, '_> {
                 self.candidate_only = true;
                 self.reason = Some("fixture has a return or yield without an established type");
             }
-            let established: bool = self.connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM resolution_candidates c JOIN symbols s ON s.id=c.id
+            let established: bool = self.connection.cached_row(
+                "SELECT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id
                  WHERE s.kind IN ('class','struct','enum','type','interface','trait'))",
                 [],
                 |r| r.get(0),
             )?;
             unknown |= !established;
-            self.connection.execute(
+            self.connection.cached_execute(
                 "INSERT OR IGNORE INTO resolution_return_results
-                 SELECT ?1,c.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id
+                 SELECT ?1,c.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id
                  WHERE s.kind IN ('class','struct','enum','type','interface','trait')",
                 [depth],
             )?;
         }
         self.connection
-            .execute("DELETE FROM resolution_candidates", [])?;
-        self.connection.execute("INSERT INTO resolution_candidates SELECT id FROM resolution_return_results WHERE depth=?1",[depth])?;
+            .cached_execute("DELETE FROM resolution_candidates", [])?;
+        self.connection.cached_execute("INSERT INTO resolution_candidates SELECT id FROM resolution_return_results WHERE depth=?1",[depth])?;
         self.connection
-            .execute("DELETE FROM resolution_returns WHERE depth=?1", [depth])?;
-        self.connection.execute(
+            .cached_execute("DELETE FROM resolution_returns WHERE depth=?1", [depth])?;
+        self.connection.cached_execute(
             "DELETE FROM resolution_return_results WHERE depth=?1",
             [depth],
         )?;

@@ -1,14 +1,15 @@
 // Purpose: 소형 인덱스의 일곱 저장 계약을 ID와 무관하게 비교.
 // Pattern: Test Snapshot.
 // Usage: 증분 최적화 회귀 사례가 동일 입력의 full build와 대조.
-// Related: crates/kodstar-core/tests/cases/optimization.rs, scripts/benchmark.py.
+// Related: crates/kodstar-core/tests/cases/optimization.rs, scripts/benchmarks/analysis.py.
 
-use kodstar_core::BuildReport;
+use kodstar_core::InitReport;
 use std::error::Error;
 
-pub fn normalized_index(report: &BuildReport) -> Result<Vec<String>, Box<dyn Error>> {
+pub fn normalized_index(report: &InitReport) -> Result<Vec<String>, Box<dyn Error>> {
     let connection =
         rusqlite::Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
+    super::postings::register(&connection)?;
     let mut result = Vec::new();
     for (name, sql) in [
         ("symbols", "
@@ -29,7 +30,7 @@ pub fn normalized_index(report: &BuildReport) -> Result<Vec<String>, Box<dyn Err
             ORDER BY 1,2,3,4,5,6,7,8,9,10,11,12,13
         "),
         ("inputs", "
-            SELECT hex(path),content_hash,language,module,declared_module,package,status
+            SELECT hex(path),CASE WHEN typeof(content_hash)='blob' THEN lower(hex(content_hash)) ELSE content_hash END,language,module,declared_module,package,status
             FROM files ORDER BY path
         "),
         ("scopes", "
@@ -46,13 +47,7 @@ pub fn normalized_index(report: &BuildReport) -> Result<Vec<String>, Box<dyn Err
             JOIN symbols s ON s.id=i.symbol_id JOIN symbols c ON c.id=i.canonical_id
             ORDER BY 1,2
         "),
-        ("lookups", "
-            SELECT hex(f.path),s.logical_key,u.scope_id,u.expression,u.relation,u.start_byte,
-                   u.end_byte,d.kind,d.lookup_key,d.found
-            FROM lookup_dependencies d JOIN facts u ON u.id=d.fact_id
-            JOIN files f ON f.id=u.file_id JOIN symbols s ON s.id=u.source_id
-            ORDER BY 1,2,3,4,5,6,7,8,9,10
-        "),
+        ("lookups", include_str!("../../../../scripts/benchmarks/lookups.sql")),
     ] {
         result.push(name.into());
         let mut statement = connection.prepare(sql)?;

@@ -31,7 +31,9 @@ pub(super) fn run(receiver: Arc<Mutex<mpsc::Receiver<Work>>>, events: Events, fa
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
             let parser = parser.get_or_insert_with(|| ParseSession::new(fact_limit));
+            parser.begin_file(work.previous.is_some());
             let result = extract(parser, work, &events, fact_limit);
+            parser.end_file();
             if let Err(error) = result {
                 events.fail(error);
                 break;
@@ -72,6 +74,7 @@ fn extract(
             });
         }
         preserve = next.environment == previous.environment;
+        parser.replay();
     }
     events.send(Event::Begin {
         record: work.record,

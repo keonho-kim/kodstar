@@ -53,7 +53,7 @@ impl Lookup<'_, '_> {
         } else {
             (head, None)
         };
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_candidates
              SELECT s.id FROM symbols s JOIN resolution_modules m ON m.id=s.file_id
              JOIN symbols o ON o.id=s.owner_id
@@ -73,7 +73,7 @@ impl Lookup<'_, '_> {
         let filtered = self.rust_targets();
         self.namespace = previous;
         filtered?;
-        let found: bool = self.connection.query_row(
+        let found: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
             [],
             |r| r.get(0),
@@ -94,13 +94,13 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         let snapshot = self.snapshot_modules(depth)?;
-        let named: bool = self.connection.query_row(
+        let named: bool = self.connection.cached_row(
             &format!("SELECT EXISTS(SELECT 1 FROM bindings b JOIN resolution_module_snapshots m ON m.id=b.file_id
              WHERE m.lookup_scope=?2 AND b.kind IN ('export','export_type','commonjs_export_module','commonjs_export_exports') AND (b.name=?1 OR b.name_key=?3) AND {EXPORT_SCOPE})"),
             params![head, snapshot,rust_key],
             |r| r.get(0),
         )?;
-        let mut exports = self.connection.prepare(&format!(
+        let mut exports = self.connection.cached_prepare(&format!(
             "SELECT b.file_id,b.scope_id,b.module_name,b.imported_name,b.start_byte,b.kind,b.name,b.type_name
              FROM bindings b JOIN resolution_module_snapshots m ON m.id=b.file_id
              WHERE m.lookup_scope=?2 AND b.kind IN ('export','export_type','commonjs_export_module','commonjs_export_exports')
@@ -117,7 +117,7 @@ impl Lookup<'_, '_> {
 
     fn component_default(&self, head: &str, depth: usize) -> Result<()> {
         if head == "default" && self.relation == "references" {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "INSERT
                 OR IGNORE INTO resolution_candidates
                 SELECT s.id
@@ -249,11 +249,11 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         let saved = self.save_candidates()?;
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_candidates SELECT s.id FROM symbols s JOIN symbols o ON o.id=s.owner_id
              WHERE s.file_id=?1 AND s.name=?2 AND o.kind IN ('file','module')", params![context.id,local])?;
         self.rust_targets()?;
-        let found: bool = self.connection.query_row(
+        let found: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
             [],
             |row| row.get(0),

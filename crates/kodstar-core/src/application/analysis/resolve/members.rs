@@ -11,7 +11,7 @@ impl Lookup<'_, '_> {
         if self.member_depth >= 32 {
             self.reason = Some("member type lookup depth limit");
             self.connection
-                .execute("DELETE FROM resolution_candidates", [])?;
+                .cached_execute("DELETE FROM resolution_candidates", [])?;
             return Ok(());
         }
         self.member_depth += 1;
@@ -60,24 +60,25 @@ impl Lookup<'_, '_> {
         }
         self.rule = "explicit_owner_or_receiver_type";
         self.connection
-            .execute("DELETE FROM resolution_members", [])?;
+            .cached_execute("DELETE FROM resolution_members", [])?;
         // UNION deduplicates cycles on disk. A declaration on a nearer type stops that branch.
-        self.connection.execute(
+        self.connection.cached_execute(
             include_str!("members.sql"),
             rusqlite::params![member, keyed],
         )?;
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_members
-            SELECT m.id FROM symbols m JOIN symbols t ON m.qualified_name=t.qualified_name||'::'||?1
-            JOIN resolution_candidates c ON c.id=t.id JOIN files mf ON mf.id=m.file_id
-            JOIN files tf ON tf.id=t.file_id WHERE mf.language=tf.language AND mf.module=tf.module
+            SELECT m.id FROM resolution_candidates c CROSS JOIN symbols t ON t.id=c.id
+            CROSS JOIN symbols m ON m.qualified_name=t.qualified_name||'::'||?1
+            JOIN files mf ON mf.id=m.file_id JOIN files tf ON tf.id=t.file_id
+            WHERE mf.language=tf.language AND mf.module=tf.module
             AND mf.package=tf.package AND t.kind<>'file' AND t.language<>'scala'",
             [member],
         )?;
         self.connection.execute_batch("DELETE FROM resolution_candidates; INSERT INTO resolution_candidates SELECT id FROM resolution_members;")?;
         if let Some(arity) = arity {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id IN (SELECT id FROM symbols WHERE language='elixir' AND exported=0)",[])?;
-            self.connection.execute(
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE id IN (SELECT id FROM symbols WHERE language='elixir' AND exported=0)",[])?;
+            self.connection.cached_execute(
                 "DELETE
                 FROM resolution_candidates
                 WHERE NOT EXISTS(SELECT 1
@@ -93,22 +94,22 @@ impl Lookup<'_, '_> {
         }
         self.rust_targets()?;
         if self.language == crate::domain::languages::Language::Swift {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id IN (
-                SELECT s.id FROM symbols s JOIN files target ON target.id=s.file_id
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE EXISTS (
+                SELECT 1 FROM symbols s JOIN files target ON target.id=s.file_id
                 JOIN facts fact ON fact.id=?1 JOIN files caller ON caller.id=fact.file_id
-                WHERE s.exported=0 AND (target.package<>caller.package OR target.module<>caller.module))",[self.fact])?;
+                WHERE s.id=resolution_candidates.id AND s.exported=0 AND (target.package<>caller.package OR target.module<>caller.module))",[self.fact])?;
         }
         if self.language == crate::domain::languages::Language::Go {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id IN (
-                SELECT s.id FROM symbols s JOIN files target ON target.id=s.file_id
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE EXISTS (
+                SELECT 1 FROM symbols s JOIN files target ON target.id=s.file_id
                 JOIN facts fact ON fact.id=?1 JOIN files caller ON caller.id=fact.file_id
-                WHERE s.exported=0 AND (target.package<>caller.package OR target.module<>caller.module OR target.declared_module<>caller.declared_module))",[self.fact])?;
+                WHERE s.id=resolution_candidates.id AND s.exported=0 AND (target.package<>caller.package OR target.module<>caller.module OR target.declared_module<>caller.declared_module))",[self.fact])?;
         }
         if matches!(
             self.language,
             crate::domain::languages::Language::Zig | crate::domain::languages::Language::Pascal
         ) {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id IN (SELECT s.id FROM symbols s WHERE s.exported=0 AND s.file_id<>(SELECT file_id FROM facts WHERE id=?1))",[self.fact])?;
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE EXISTS (SELECT 1 FROM symbols s WHERE s.id=resolution_candidates.id AND s.exported=0 AND s.file_id<>(SELECT file_id FROM facts WHERE id=?1))",[self.fact])?;
         }
         Ok(())
     }

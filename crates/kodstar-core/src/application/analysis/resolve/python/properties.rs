@@ -14,13 +14,13 @@ impl Lookup<'_, '_> {
         context: &FileContext,
         expression: &str,
     ) -> Result<()> {
-        let (scope, position): (u32, usize) = self.connection.query_row(
+        let (scope, position): (u32, usize) = self.connection.cached_row(
             "SELECT scope_id,start_byte FROM facts WHERE id=?1",
             [self.fact],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         self.expression(context, scope, position, expression, 0)?;
-        self.connection.execute("DELETE FROM resolution_candidates WHERE NOT EXISTS(SELECT 1 FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE s.id=resolution_candidates.id AND b.kind='python_property')",[])?;
+        self.connection.cached_execute("DELETE FROM resolution_candidates WHERE NOT EXISTS(SELECT 1 FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE s.id=resolution_candidates.id AND b.kind='python_property')",[])?;
         self.verified_properties()?;
         self.clear_externals()?;
         self.rule = "python_property_read";
@@ -32,7 +32,7 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         self.verified_properties()?;
-        let present:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind='python_property')",[],|r|r.get(0))?;
+        let present:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind='python_property')",[],|r|r.get(0))?;
         if present {
             self.return_types(
                 self.member_depth,
@@ -46,9 +46,9 @@ impl Lookup<'_, '_> {
         self.connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS resolution_properties(depth INTEGER,id INTEGER,PRIMARY KEY(depth,id));")?;
         let depth = self.member_depth;
         self.connection
-            .execute("DELETE FROM resolution_properties WHERE depth=?1", [depth])?;
-        self.connection.execute("INSERT INTO resolution_properties SELECT DISTINCT ?1,c.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind='python_property'",[depth])?;
-        let mut statement = self.connection.prepare(
+            .cached_execute("DELETE FROM resolution_properties WHERE depth=?1", [depth])?;
+        self.connection.cached_execute("INSERT INTO resolution_properties SELECT DISTINCT ?1,c.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind='python_property'",[depth])?;
+        let mut statement = self.connection.cached_prepare(
             "SELECT s.id,s.file_id,s.scope_id,b.start_byte,b.imported_name
             FROM resolution_properties p
             JOIN symbols s ON s.id=p.id
@@ -94,10 +94,10 @@ impl Lookup<'_, '_> {
             };
             if !valid {
                 self.connection
-                    .execute("DELETE FROM resolution_candidates WHERE id=?1", [id])?;
+                    .cached_execute("DELETE FROM resolution_candidates WHERE id=?1", [id])?;
             }
         }
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_properties WHERE depth=?1",
             params![depth],
         )?;

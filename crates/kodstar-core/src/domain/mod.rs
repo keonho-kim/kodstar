@@ -8,6 +8,7 @@
 pub(crate) mod cancellation;
 pub(crate) mod diagnostics;
 pub(crate) mod facts;
+pub(crate) mod history;
 pub(crate) mod languages;
 pub(crate) mod query;
 pub(crate) mod relations;

@@ -11,8 +11,6 @@ use rusqlite::{Connection, OptionalExtension, Statement};
 use std::path::Path;
 
 pub(crate) struct PreviousFile {
-    pub(crate) modified: String,
-    pub(crate) changed: String,
     pub(crate) size: u64,
     pub(crate) hash: String,
     pub(crate) language: String,
@@ -25,10 +23,7 @@ pub(crate) struct PreviousFile {
 
 impl PreviousFile {
     pub(crate) fn same_metadata(&self, record: &FileRecord) -> bool {
-        self.modified == record.modified_ns
-            && self.changed == record.changed_ns
-            && self.size == record.size
-            && self.same_context(record)
+        self.hash == record.content_hash && self.size == record.size && self.same_context(record)
     }
     pub(crate) fn same_context(&self, record: &FileRecord) -> bool {
         self.language == record.language
@@ -43,7 +38,7 @@ pub(crate) struct PreviousFiles<'conn> {
 }
 impl<'conn> PreviousFiles<'conn> {
     pub(crate) fn new(connection: &'conn Connection) -> Result<Self> {
-        Ok(Self { statement: connection.prepare("SELECT facts_hash,environment_hash,modified_ns,changed_ns,size,content_hash,
+        Ok(Self { statement: connection.prepare("SELECT lower(hex(facts_hash)),lower(hex(environment_hash)),size,lower(hex(content_hash)),
             language,status,path_module,path_package,EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=files.id AND b.kind='configuration') FROM files WHERE path=?1")? })
     }
     pub(crate) fn get(&mut self, path: &Path) -> Result<Option<PreviousFile>> {
@@ -55,15 +50,13 @@ impl<'conn> PreviousFiles<'conn> {
                         all: row.get(0)?,
                         environment: row.get(1)?,
                     },
-                    modified: row.get(2)?,
-                    changed: row.get(3)?,
-                    size: row.get(4)?,
-                    hash: row.get(5)?,
-                    language: row.get(6)?,
-                    status: row.get(7)?,
-                    base_module: row.get(8)?,
-                    package: row.get(9)?,
-                    configuration: row.get(10)?,
+                    size: row.get(2)?,
+                    hash: row.get(3)?,
+                    language: row.get(4)?,
+                    status: row.get(5)?,
+                    base_module: row.get(6)?,
+                    package: row.get(7)?,
+                    configuration: row.get(8)?,
                 })
             })
             .optional()?)

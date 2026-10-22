@@ -203,9 +203,9 @@ fn a_native_language_override_does_not_enable_template_helpers_by_filename() -> 
     )?;
     let mut options = p.options();
     options.config = Some(config);
-    p.engine.build(
+    p.engine.init(
         &options,
-        BuildOptions::default(),
+        InitOptions::default(),
         &Cancellation::default(),
         &mut |_| Ok(()),
     )?;

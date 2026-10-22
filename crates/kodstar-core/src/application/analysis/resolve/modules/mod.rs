@@ -74,7 +74,7 @@ impl Lookup<'_, '_> {
         python_star: bool,
     ) -> Result<()> {
         self.connection
-            .execute("DELETE FROM resolution_modules WHERE depth=?1", [depth])?;
+            .cached_execute("DELETE FROM resolution_modules WHERE depth=?1", [depth])?;
         if matches!(context.language, Language::C | Language::Cpp)
             && module.starts_with("@include:")
         {
@@ -84,7 +84,7 @@ impl Lookup<'_, '_> {
         if self.rust_exported_macro(context, scope, module, imported)? {
             return Ok(());
         }
-        let found: bool = self.connection.query_row(
+        let found: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_modules WHERE depth=?1)",
             [depth],
             |row| row.get(0),
@@ -108,7 +108,7 @@ impl Lookup<'_, '_> {
                     let result = self.module(context, scope, parent, Some(&path), depth + 1);
                     self.namespace = previous;
                     result?;
-                    let identified: bool = self.connection.query_row(
+                    let identified: bool = self.connection.cached_row(
                         "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
                         [],
                         |r| r.get(0),
@@ -171,7 +171,7 @@ impl Lookup<'_, '_> {
             self.python_star_files(imported.unwrap_or(""), depth)?;
         }
         if imported.is_none() || imported == Some("*") {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "INSERT
                 OR IGNORE INTO resolution_candidates
                 SELECT s.id

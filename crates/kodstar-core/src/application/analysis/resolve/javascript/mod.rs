@@ -28,7 +28,7 @@ impl Lookup<'_, '_> {
         };
         self.load_javascript_configuration(root, root, 0)?;
         let mut best: Option<(String, i64, u8, usize)> = None;
-        let mut patterns=self.connection.prepare("SELECT pattern,configuration FROM resolution_path_patterns WHERE root=?1 ORDER BY rowid")?;
+        let mut patterns=self.connection.cached_prepare("SELECT pattern,configuration FROM resolution_path_patterns WHERE root=?1 ORDER BY rowid")?;
         let records = patterns.query_map([root], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })?;
@@ -51,7 +51,7 @@ impl Lookup<'_, '_> {
                     "selected configuration pattern no longer matches",
                 ));
             };
-            let mut targets=self.connection.prepare("SELECT b.module_name,b.imported_name,f.path FROM bindings b JOIN files f ON f.id=b.file_id
+            let mut targets=self.connection.cached_prepare("SELECT b.module_name,b.imported_name,f.path FROM bindings b JOIN files f ON f.id=b.file_id
                 WHERE b.file_id=?1 AND b.kind='path_alias' AND b.name=?2
                   AND b.start_byte>(SELECT COALESCE(MAX(d.start_byte),-1) FROM bindings d WHERE d.file_id=b.file_id AND d.kind='path_alias_start' AND d.name=b.name)
                 ORDER BY b.start_byte,b.id")?;
@@ -86,7 +86,7 @@ impl Lookup<'_, '_> {
             }
             return Ok(true);
         }
-        let base:Option<(String,Vec<u8>)>=self.connection.query_row("SELECT b.module_name,f.path FROM bindings b JOIN files f ON f.id=b.file_id WHERE b.file_id=?1 AND b.kind='base_url' ORDER BY b.id DESC LIMIT 1",[root],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let base:Option<(String,Vec<u8>)>=self.connection.cached_row("SELECT b.module_name,f.path FROM bindings b JOIN files f ON f.id=b.file_id WHERE b.file_id=?1 AND b.kind='base_url' ORDER BY b.id DESC LIMIT 1",[root],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((base, file)) = base {
             let file = path_from_bytes(&file)?;
             if let Some(base) =

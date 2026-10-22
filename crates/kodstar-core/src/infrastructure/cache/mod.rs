@@ -78,29 +78,6 @@ impl CacheStore {
         Ok(())
     }
 
-    pub(crate) fn registered(&self, root: &Path, cancel: &Cancellation) -> Result<bool> {
-        if !self.home.is_dir() {
-            return Ok(false);
-        }
-        let _registry = FileLock::acquire(&self.home.join("registry.lock"), true, cancel)?;
-        let directory = self.home.join(cache_key(root));
-        if !directory
-            .join("project.json")
-            .try_exists()
-            .map_err(|error| Error::io("inspect project registration", &directory, error))?
-        {
-            return Ok(false);
-        }
-        let _lease = FileLock::acquire(&directory.join("lease.lock"), true, cancel)?;
-        let (stored, _) = self.read_record(&directory)?;
-        if stored != root {
-            return Err(Error::operation(
-                "cache root does not match its path fingerprint",
-            ));
-        }
-        Ok(directory.join("index.sqlite").is_file())
-    }
-
     pub(crate) fn acquire(
         &self,
         root: &Path,
@@ -111,7 +88,7 @@ impl CacheStore {
             self.ensure_home()?;
         }
         if !self.home.is_dir() {
-            return Err(Error::not_found("no index found; run kodstar build first"));
+            return Err(Error::not_found("no index found; run kodstar init first"));
         }
         let _registry = FileLock::acquire(&self.home.join("registry.lock"), true, cancel)?;
         let directory = self.home.join(cache_key(root));
@@ -131,7 +108,7 @@ impl CacheStore {
         }
         let metadata = fs::symlink_metadata(&directory).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
-                Error::not_found("no index found; run kodstar build first")
+                Error::not_found("no index found; run kodstar init first")
             } else {
                 Error::io("inspect project cache", &directory, error)
             }
@@ -146,7 +123,7 @@ impl CacheStore {
                 return Err(Error::operation("cache root fingerprint mismatch"));
             }
         } else if !create {
-            return Err(Error::not_found("no index found; run kodstar build first"));
+            return Err(Error::not_found("no index found; run kodstar init first"));
         }
         Ok(ProjectCache {
             directory,
@@ -243,7 +220,6 @@ impl ProjectCache {
 
     pub(crate) fn touch(&self) -> Result<()> {
         let path = self.directory.join("project.json");
-        // Windows requires a writable handle to update file timestamps.
         OpenOptions::new()
             .write(true)
             .open(&path)

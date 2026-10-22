@@ -5,14 +5,15 @@
 
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 
 pub(in crate::application::analysis::resolve) fn run(
     c: &Connection,
     cancel: &Cancellation,
 ) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS cxx_identities(id INTEGER PRIMARY KEY,identity TEXT,definition INTEGER); DELETE FROM cxx_identities;")?;
-    let mut statement=c.prepare("SELECT s.id,owner.logical_key,s.name,b.module_name,condition.effective,b.imported_name='definition'
+    let mut statement=c.cached_prepare("SELECT s.id,owner.logical_key,s.name,b.module_name,condition.effective,b.imported_name='definition'
         FROM symbols s
         JOIN cxx_conditions condition ON condition.id=s.id
         JOIN symbols owner ON owner.id=s.owner_id
@@ -34,11 +35,11 @@ pub(in crate::application::analysis::resolve) fn run(
             hash.update(&(part.len() as u64).to_le_bytes());
             hash.update(part.as_bytes());
         }
-        c.execute(
+        c.cached_execute(
             "INSERT INTO cxx_identities VALUES(?1,?2,?3)",
             params![id, hash.finalize().to_hex().to_string(), definition],
         )?;
     }
-    c.execute("UPDATE symbols SET logical_key=(SELECT identity FROM cxx_identities WHERE id=symbols.id) WHERE id IN (SELECT id FROM cxx_identities WHERE identity IN (SELECT identity FROM cxx_identities GROUP BY identity HAVING SUM(definition)<2))",[])?;
+    c.cached_execute("UPDATE symbols SET logical_key=(SELECT identity FROM cxx_identities WHERE id=symbols.id) WHERE id IN (SELECT id FROM cxx_identities WHERE identity IN (SELECT identity FROM cxx_identities GROUP BY identity HAVING SUM(definition)<2))",[])?;
     Ok(())
 }

@@ -1,10 +1,10 @@
-// Purpose: 공개 명령 요청과 build·cache·watch의 공통 실행 연결.
+// Purpose: 공개 명령 요청과 init·cache·watch의 공통 실행 연결.
 // Pattern: Command Handler.
 // Usage: CLI·stdio·Rust API가 Engine::execute 또는 편의 메서드를 호출.
 // Related: crates/kodstar-core/src/application/execution/mod.rs, crates/kodstar-core/src/application/execution/reads.rs, crates/kodstar-core/src/application/engine.rs.
 
 use super::super::{
-    analysis::BuildOptions,
+    analysis::InitOptions,
     cache::{self, CacheRequest},
     engine::Engine,
     workspace::ProjectOptions,
@@ -18,12 +18,13 @@ use crate::domain::{
     cancellation::Cancellation,
     diagnostics::{Error, Result},
     query::{Query, QueryOptions, Refresh},
-    results::{BuildReport, Progress, QueryRow, QuerySink, QuerySummary},
+    results::{InitReport, Progress, QueryRow, QuerySink, QuerySummary},
 };
 
 /// One engine command. Output formatting and process/session control remain with the caller.
 pub enum Command<'a> {
-    Build(&'a BuildOptions),
+    History(&'a crate::domain::history::HistoryRequest),
+    Init(&'a InitOptions),
     Query {
         query: &'a Query,
         options: &'a QueryOptions,
@@ -51,8 +52,9 @@ impl Engine {
         sink: &mut dyn QuerySink,
     ) -> Result<QuerySummary> {
         match command {
-            Command::Build(options) => {
-                let report = self.build(project, options.clone(), cancel, &mut |event| {
+            Command::History(request) => self.history(project, request, cancel, sink),
+            Command::Init(options) => {
+                let report = self.init(project, options.clone(), cancel, &mut |event| {
                     sink.progress(event)
                 })?;
                 let refresh = if options.verify {
@@ -67,7 +69,7 @@ impl Engine {
                     unresolved_count: report.coverage.unresolved,
                     ..QuerySummary::default()
                 };
-                sink.row(&QueryRow::Build(report))?;
+                sink.row(&QueryRow::Init(report))?;
                 sink.finish(&summary)?;
                 Ok(summary)
             }
@@ -103,24 +105,24 @@ impl Engine {
     }
 }
 
-pub(crate) struct Build<'a> {
-    pub options: &'a BuildOptions,
+pub(crate) struct Init<'a> {
+    pub options: &'a InitOptions,
     pub progress: &'a mut dyn FnMut(&Progress) -> Result<()>,
 }
-impl CommandHandler for Build<'_> {
-    type Output = BuildReport;
+impl CommandHandler for Init<'_> {
+    type Output = InitReport;
     fn plan(&self) -> Plan<'_> {
-        Plan::Build(self.options)
+        Plan::Init(self.options)
     }
     fn progress(&mut self, event: &Progress) -> Result<()> {
         (self.progress)(event)
     }
-    fn execute(self, context: &mut Context<'_>, _: &Cancellation) -> Result<BuildReport> {
+    fn execute(self, context: &mut Context<'_>, _: &Cancellation) -> Result<InitReport> {
         context
             .required()?
             .report
             .take()
-            .ok_or_else(|| Error::operation("build did not publish a report"))
+            .ok_or_else(|| Error::operation("initialization did not publish a report"))
     }
 }
 

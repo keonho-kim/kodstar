@@ -8,14 +8,15 @@ use crate::application::analysis::resolve::{FileContext, Lookup};
 use crate::domain::diagnostics::Result;
 use crate::domain::languages::Language;
 use crate::infrastructure::cache::paths::path_bytes;
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::{OptionalExtension, params};
 
 pub(super) fn diagnostics(connection: &Connection) -> Result<()> {
-    connection.execute(
+    connection.cached_execute(
         "DELETE FROM diagnostics WHERE code='ejs_rendered_client'",
         [],
     )?;
-    connection.execute("INSERT INTO diagnostics(file_id,code,message)
+    connection.cached_execute("INSERT INTO diagnostics(file_id,code,message)
         SELECT f.id,'ejs_rendered_client','client source contains EJS runtime rendering; source syntax was analyzed and dependent relations remain candidates'
         FROM files f
         WHERE f.language='ejs'
@@ -29,7 +30,7 @@ pub(super) fn diagnostics(connection: &Connection) -> Result<()> {
 
 impl Lookup<'_, '_> {
     fn ejs_client(&self, context: &FileContext, scope: u32) -> Result<Option<bool>> {
-        Ok(self.connection.query_row(
+        Ok(self.connection.cached_row(
             "WITH RECURSIVE parents(id,depth) AS (SELECT ?2,0
             UNION ALL
             SELECT s.parent,p.depth+1
@@ -71,7 +72,7 @@ impl Lookup<'_, '_> {
         if !include && !(self.relation == "calls" && expression == "include") {
             return Ok(None);
         }
-        let (scope, position): (u32, usize) = self.connection.query_row(
+        let (scope, position): (u32, usize) = self.connection.cached_row(
             "SELECT scope_id,start_byte FROM facts WHERE id=?1",
             [self.fact],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -119,10 +120,10 @@ impl Lookup<'_, '_> {
         } else {
             path
         };
-        let target:Option<i64>=self.connection.query_row("SELECT s.id FROM files f JOIN symbols s ON s.file_id=f.id AND s.local_id=0 WHERE f.path=?1 AND f.language='ejs' AND f.status='analyzed'",[path_bytes(&path)],|r|r.get(0)).optional()?;
+        let target:Option<i64>=self.connection.cached_row("SELECT s.id FROM files f JOIN symbols s ON s.file_id=f.id AND s.local_id=0 WHERE f.path=?1 AND f.language='ejs' AND f.status='analyzed'",[path_bytes(&path)],|r|r.get(0)).optional()?;
         self.dependency("ejs_include", raw, target.is_some())?;
         if let Some(target) = target {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "INSERT OR IGNORE INTO resolution_candidates VALUES(?1)",
                 [target],
             )?;

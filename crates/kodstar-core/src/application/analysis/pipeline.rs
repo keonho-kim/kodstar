@@ -11,7 +11,6 @@ use crate::application::workspace::SelectedProject;
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::{Error, Result};
 use crate::domain::results::Progress;
-use crate::infrastructure::cache::CacheStore;
 use crate::infrastructure::cache::paths::path_bytes;
 use crate::infrastructure::index::{self};
 use rusqlite::{Connection, params};
@@ -23,7 +22,6 @@ use std::time::Duration;
 
 pub(super) struct Input<'a> {
     pub(super) database: &'a Path,
-    pub(super) store: &'a CacheStore,
     pub(super) selected: &'a SelectedProject,
     pub(super) full: bool,
     pub(super) verify: bool,
@@ -38,12 +36,12 @@ pub(super) fn run(
 ) -> Result<(bool, u64, u64, Resolution)> {
     let Input {
         database,
-        store,
         selected,
         full,
         verify,
         generation,
     } = input;
+    let connection = &index::cached::Sql::new(connection)?;
     let internal = Cancellation::default();
     let (events_tx, events_rx) = mpsc::sync_channel(selected.settings.jobs * 4);
     let (work_tx, work_rx) = mpsc::sync_channel::<Work>(selected.settings.jobs);
@@ -70,7 +68,6 @@ pub(super) fn run(
         let producer = Pipeline {
             selected,
             database,
-            store,
             full,
             verify,
             inputs,
@@ -97,7 +94,6 @@ pub(super) fn run(
         }
         drop(events);
         let mut writer = None;
-        let mut reusable_bodies = None;
         let mut files = HashMap::new();
         let mut changed = false;
         let mut resolution = Resolution::None;
@@ -123,22 +119,17 @@ pub(super) fn run(
                 }
                 match message.event {
                     Event::Begin { record, preserve } => {
-                        let preserve = if preserve && resolution != Resolution::All {
-                            match reusable_bodies {
-                                Some(eligible) => eligible,
-                                None => {
-                                    let eligible = super::incremental::reusable_bodies(connection)?;
-                                    reusable_bodies = Some(eligible);
-                                    eligible
-                                }
-                            }
-                        } else {
-                            false
-                        };
+                        let preserve = preserve
+                            && resolution != Resolution::All
+                            && super::incremental::reusable_bodies(connection, &record)?;
                         connection.execute(
                             "INSERT OR IGNORE INTO seen_files VALUES(?1)",
                             [path_bytes(&record.path)],
                         )?;
+                        let scoped = !full
+                            && !preserve
+                            && resolution != Resolution::All
+                            && super::incremental::scoped_declarations(connection, &record)?;
                         let id = if preserve {
                             record.refresh_metadata(connection, generation)?;
                             let id: i64 = connection.query_row(
@@ -146,14 +137,15 @@ pub(super) fn run(
                                 [path_bytes(&record.path)],
                                 |r| r.get(0),
                             )?;
-                            connection.execute("DELETE FROM facts WHERE file_id=?1", [id])?;
+                            connection.execute("DELETE FROM facts WHERE file_id=?1
+                                AND NOT (language='go' AND relation='implements' AND expression LIKE '@go-interface:%')", [id])?;
                             id
                         } else {
                             let id = record.persist(connection, generation)?;
                             index::clear_file(connection, id)?;
                             id
                         };
-                        resolution = resolution.max(if preserve {
+                        resolution = resolution.max(if preserve || scoped {
                             Resolution::ChangedFiles
                         } else {
                             Resolution::All
@@ -181,9 +173,19 @@ pub(super) fn run(
                         let context = files.remove(path.as_ref()).ok_or_else(|| {
                             Error::operation("file completion has no matching extraction")
                         })?;
+                        if resolution == Resolution::ChangedFiles
+                            && !context.preserves_definitions()
+                            && !index::invalidation::package_functions(connection, context.id)?
+                        {
+                            resolution = Resolution::All;
+                        }
                         connection.execute(
                             "UPDATE files SET facts_hash=?1,environment_hash=?2 WHERE id=?3",
-                            params![fingerprints.all, fingerprints.environment, context.id],
+                            params![
+                                &index::hash_bytes(&fingerprints.all)?[..],
+                                &index::hash_bytes(&fingerprints.environment)?[..],
+                                context.id
+                            ],
                         )?;
                         parsed += 1;
                         progress(&Progress {
@@ -221,6 +223,11 @@ pub(super) fn run(
                             "INSERT OR IGNORE INTO seen_files VALUES(?1)",
                             [path_bytes(&record.path)],
                         )?;
+                        if index::inert_inputs::unchanged_kind(connection, &record)? {
+                            record.refresh_metadata(connection, generation)?;
+                            changed = true;
+                            return Ok(());
+                        }
                         let id = record.persist(connection, generation)?;
                         index::clear_file(connection, id)?;
                         connection.execute(

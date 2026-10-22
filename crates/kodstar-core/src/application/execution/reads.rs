@@ -27,13 +27,29 @@ impl CommandHandler for Query<'_> {
         self.options.validate(self.query)
     }
     fn plan(&self) -> Plan<'_> {
-        Plan::Project(self.options.refresh)
+        self.options
+            .revision
+            .as_deref()
+            .map_or(Plan::Project(self.options.refresh), |revision| {
+                Plan::Revision(revision, self.options.refresh)
+            })
     }
     fn progress(&mut self, event: &Progress) -> Result<()> {
         self.sink.progress(event)
     }
     fn execute(self, context: &mut Context<'_>, cancel: &Cancellation) -> Result<QuerySummary> {
+        let store = context.store;
         let project = context.required()?;
+        if let Request::Changes { since } = self.query {
+            return crate::application::history::impact::run(
+                store,
+                project,
+                since,
+                self.options,
+                cancel,
+                self.sink,
+            );
+        }
         index::limit_reads(&project.connection, project.selected.settings.memory_budget)?;
         index::observe_cancellation(&project.connection, cancel)?;
         let snapshot = project.connection.transaction()?;
@@ -60,7 +76,7 @@ pub(crate) struct Status<'a> {
 impl CommandHandler for Status<'_> {
     type Output = QuerySummary;
     fn plan(&self) -> Plan<'_> {
-        Plan::Project(self.refresh)
+        Plan::Diagnostics(self.refresh)
     }
     fn progress(&mut self, event: &Progress) -> Result<()> {
         self.sink.progress(event)
@@ -75,6 +91,7 @@ impl CommandHandler for Status<'_> {
             |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)))?;
         let coverage = index::coverage(&snapshot)?;
         let integrity = if self.doctor {
+            project.repository.verify(cancel)?;
             let check: String = snapshot.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
             if check != "ok" {
                 return Err(Error::operation(format!(
@@ -85,13 +102,17 @@ impl CommandHandler for Status<'_> {
             if keys.query([])?.next()?.is_some() {
                 return Err(Error::operation("index foreign-key check failed"));
             }
+            index::dictionary::verify(&snapshot)?;
+            index::dependencies::verify(&snapshot)?;
+            index::relations::verify(&snapshot)?;
             Some(check)
         } else {
             None
         };
         self.sink.begin(&QueryMetadata {
+            history: project.selected.history.clone(),
             maintenance: project.maintenance.clone(),
-            schema_version: 1,
+            schema_version: 2,
             relation_registry_version,
             engine_version: crate::VERSION,
             root: Some(project.selected.root.to_string_lossy().into_owned()),
@@ -103,6 +124,7 @@ impl CommandHandler for Status<'_> {
             coverage: coverage.clone(),
         })?;
         self.sink.row(&QueryRow::Status(StatusRow {
+            history: project.selected.history.clone(),
             maintenance: project.maintenance.clone(),
             root: project.selected.root.to_string_lossy().into_owned(),
             cache: project.cache.directory.to_string_lossy().into_owned(),

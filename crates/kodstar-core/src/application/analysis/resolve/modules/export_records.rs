@@ -39,11 +39,11 @@ impl Lookup<'_, '_> {
         rust_key: Option<&str>,
         depth: usize,
     ) -> Result<Option<Export>> {
-        let file:Option<i64>=self.connection.query_row("SELECT CASE WHEN COUNT(*)=1 AND NOT EXISTS(SELECT 1 FROM resolution_module_owners WHERE depth=?1) THEN MIN(id) END FROM resolution_modules WHERE depth=?1",[depth],|r|r.get(0))?;
+        let file:Option<i64>=self.connection.cached_row("SELECT CASE WHEN COUNT(*)=1 AND NOT EXISTS(SELECT 1 FROM resolution_module_owners WHERE depth=?1) THEN MIN(id) END FROM resolution_modules WHERE depth=?1",[depth],|r|r.get(0))?;
         let Some(file) = file else {
             return Ok(None);
         };
-        let mut statement=self.connection.prepare("SELECT file_id,scope_id,module_name,imported_name,start_byte,kind,name,type_name FROM bindings
+        let mut statement=self.connection.cached_prepare("SELECT file_id,scope_id,module_name,imported_name,start_byte,kind,name,type_name FROM bindings
             WHERE file_id=?1 AND kind IN ('export','export_type','commonjs_export_module','commonjs_export_exports') AND (name=?2 OR name_key=?3) ORDER BY id LIMIT 2")?;
         let mut records = statement.query_map(params![file, head, rust_key], Export::read)?;
         let first = records.next().transpose()?;

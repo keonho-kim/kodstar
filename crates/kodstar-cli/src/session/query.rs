@@ -14,6 +14,9 @@ use std::path::PathBuf;
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum QueryInput {
+    Changes {
+        since: String,
+    },
     Symbols {
         file: PathBuf,
     },
@@ -59,6 +62,7 @@ pub(super) enum QueryInput {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct OptionsInput {
+    revision: Option<String>,
     refresh: Option<String>,
     direction: Option<String>,
     relations: Vec<String>,
@@ -75,6 +79,7 @@ pub(super) struct OptionsInput {
 
 pub(super) fn parse(query: QueryInput, raw: OptionsInput) -> Result<QueryRequest> {
     let query = match query {
+        QueryInput::Changes { since } => Query::Changes { since },
         QueryInput::Symbols { file } => Query::Symbols { file },
         QueryInput::List { file } => Query::Files { file },
         QueryInput::Related { file, name, at } => Query::Related {
@@ -102,6 +107,7 @@ pub(super) fn parse(query: QueryInput, raw: OptionsInput) -> Result<QueryRequest
         ));
     }
     let options = QueryOptions {
+        revision: raw.revision,
         refresh: parse_refresh(raw.refresh.as_deref())?,
         direction: raw
             .direction

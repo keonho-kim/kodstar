@@ -8,17 +8,17 @@ use serde_json::Value;
 use support::*;
 
 #[test]
-fn build_and_queries_stream_structured_results_and_refresh() -> TestResult {
+fn initialization_and_queries_stream_structured_results_and_refresh() -> TestResult {
     let project = Project::new()?;
     project.write("fn target() {}\nfn caller() { target(); }\n")?;
-    let build = project.run(&["build", "--format", "json"])?;
+    let build = project.run(&["init", "--format", "json"])?;
     assert!(
         build.status.success(),
         "{}",
         String::from_utf8_lossy(&build.stderr)
     );
     let built: Value = serde_json::from_slice(&build.stdout)?;
-    assert_eq!(built["schema_version"], 1);
+    assert_eq!(built["schema_version"], 2);
     assert_eq!(built["complete"], true);
     assert_eq!(built["generation"], 1);
     let deps = project.run(&["deps", "main.rs", "caller", "--format", "jsonl"])?;
@@ -53,7 +53,7 @@ fn build_and_queries_stream_structured_results_and_refresh() -> TestResult {
 fn output_limit_returns_complete_json_with_a_truncation_exit_code() -> TestResult {
     let project = Project::new()?;
     project.write("fn one() {} fn two() {}")?;
-    assert!(project.run(&["build"])?.status.success());
+    assert!(project.run(&["init"])?.status.success());
     let output = project.run(&["symbols", "main.rs", "--limit", "1", "--format", "json"])?;
     assert_eq!(output.status.code(), Some(3));
     let value: Value = serde_json::from_slice(&output.stdout)?;
@@ -75,9 +75,9 @@ fn meaningful_options_and_values_are_rejected_before_analysis() -> TestResult {
         vec!["refs", "main.rs", "f", "--direction", "out"],
         vec!["related", "main.rs", "f", "--depth", "2", "--transitive"],
         vec!["related", "main.rs", "f", "--relation", "unknown"],
-        vec!["build", "--memory-budget", "12garbage"],
-        vec!["build", "--jobs", "0"],
-        vec!["build", "--sites"],
+        vec!["init", "--memory-budget", "12garbage"],
+        vec!["init", "--jobs", "0"],
+        vec!["init", "--sites"],
     ] {
         let output = project.run(&args)?;
         assert_eq!(
@@ -93,12 +93,12 @@ fn meaningful_options_and_values_are_rejected_before_analysis() -> TestResult {
 }
 
 #[test]
-fn missing_index_reports_build_guidance_without_creating_cache() -> TestResult {
+fn missing_index_reports_initialization_guidance_without_creating_cache() -> TestResult {
     let project = Project::new()?;
     let output = project.run(&["symbols", "main.rs"])?;
     assert_eq!(output.status.code(), Some(4));
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8(output.stderr)?.contains("build"));
+    assert!(String::from_utf8(output.stderr)?.contains("init"));
     assert!(!project.home.join(".kodstar").exists());
     Ok(())
 }
@@ -107,7 +107,7 @@ fn missing_index_reports_build_guidance_without_creating_cache() -> TestResult {
 fn text_tsv_status_and_languages_have_real_results() -> TestResult {
     let project = Project::new()?;
     project.write("fn target() {} fn caller() { target(); }")?;
-    assert!(project.run(&["build"])?.status.success());
+    assert!(project.run(&["init"])?.status.success());
     let text = project.run(&["deps", "main.rs", "caller"])?;
     assert!(text.status.success());
     assert!(String::from_utf8(text.stdout)?.contains("target"));
@@ -143,7 +143,7 @@ fn text_tsv_status_and_languages_have_real_results() -> TestResult {
 fn cache_commands_stream_candidates_and_do_not_delete_sources() -> TestResult {
     let project = Project::new()?;
     project.write("fn target() {}")?;
-    assert!(project.run(&["build"])?.status.success());
+    assert!(project.run(&["init"])?.status.success());
     let list = project.run(&["cache", "list", "--format", "json"])?;
     assert!(list.status.success());
     let list: Value = serde_json::from_slice(&list.stdout)?;
@@ -153,17 +153,18 @@ fn cache_commands_stream_candidates_and_do_not_delete_sources() -> TestResult {
     let clean: Value = serde_json::from_slice(&clean.stdout)?;
     assert_eq!(clean["results"][0]["action"], "removed");
     assert!(project.root.join("main.rs").exists());
-    assert_eq!(project.run(&["symbols", "main.rs"])?.status.code(), Some(4));
+    assert!(project.root.join(".kodstar/repository.sqlite").exists());
+    assert!(project.run(&["symbols", "main.rs"])?.status.success());
     Ok(())
 }
 
 #[test]
-fn positional_build_root_must_agree_with_explicit_root() -> TestResult {
+fn positional_initialization_root_must_agree_with_explicit_root() -> TestResult {
     let project = Project::new()?;
     project.write("fn target() {}")?;
-    let good = project.run(&["build", ".", "--root", ".", "--format", "json"])?;
+    let good = project.run(&["init", ".", "--root", ".", "--format", "json"])?;
     assert!(good.status.success());
-    let bad = project.run(&["build", ".", "--root", ".."])?;
+    let bad = project.run(&["init", ".", "--root", ".."])?;
     assert_eq!(bad.status.code(), Some(2));
     assert!(bad.stdout.is_empty());
     Ok(())

@@ -18,7 +18,7 @@ impl Lookup<'_, '_> {
         kind: &str,
         raw: &str,
     ) -> Result<Option<String>> {
-        let mut statement=self.connection.prepare("SELECT name FROM bindings WHERE file_id=?1 AND kind=?2 GROUP BY name ORDER BY MIN(start_byte)")?;
+        let mut statement=self.connection.cached_prepare("SELECT name FROM bindings WHERE file_id=?1 AND kind=?2 GROUP BY name ORDER BY MIN(start_byte)")?;
         let records = statement.query_map(params![manifest, kind], |r| r.get::<_, String>(0))?;
         let mut best: Option<(String, u8, usize)> = None;
         for record in records {
@@ -42,7 +42,7 @@ impl Lookup<'_, '_> {
     ) -> Result<PathBuf> {
         let raw: Vec<u8> =
             self.connection
-                .query_row("SELECT path FROM files WHERE id=?1", [manifest], |r| {
+                .cached_row("SELECT path FROM files WHERE id=?1", [manifest], |r| {
                     r.get(0)
                 })?;
         Ok(path_from_bytes(&raw)?
@@ -64,11 +64,11 @@ impl Lookup<'_, '_> {
                 matches!(s, "native" | "mobile" | "ios" | "android" | "react-native")
             })
         });
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_package_entries WHERE depth=?1",
             [depth],
         )?;
-        self.connection.execute("INSERT INTO resolution_package_entries
+        self.connection.cached_execute("INSERT INTO resolution_package_entries
             SELECT ?1,replace(COALESCE(imported_name,''),'N','0'),start_byte,module_name,instr(COALESCE(imported_name,''),'N')>0 FROM bindings
             WHERE file_id=?2 AND kind=?3 AND name=?4 AND (?5 OR instr(COALESCE(imported_name,''),'N')=0)",params![depth,manifest,kind,pattern,native])?;
         Ok(())
@@ -114,7 +114,7 @@ impl Lookup<'_, '_> {
             return Ok(false);
         }
         let directory = self.package_directory(manifest)?;
-        let exported:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND kind='package_exports_marker')",[manifest],|r|r.get(0))?;
+        let exported:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND kind='package_exports_marker')",[manifest],|r|r.get(0))?;
         if exported {
             let Some(pattern) = self.package_pattern(manifest, "package_export", subpath)? else {
                 return Ok(false);
@@ -123,7 +123,7 @@ impl Lookup<'_, '_> {
             let captured = match_pattern(subpath, &pattern)
                 .map(|m| m.captured)
                 .unwrap_or("");
-            let mut entries=self.connection.prepare("SELECT target,native FROM resolution_package_entries WHERE depth=?1 ORDER BY priority,position")?;
+            let mut entries=self.connection.cached_prepare("SELECT target,native FROM resolution_package_entries WHERE depth=?1 ORDER BY priority,position")?;
             let records = entries.query_map([depth], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
             })?;
@@ -146,7 +146,7 @@ impl Lookup<'_, '_> {
         if subpath != "." {
             return self.package_source(&directory, subpath, true, depth);
         }
-        let mut entries=self.connection.prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND kind='package_entry' ORDER BY CASE name WHEN 'source' THEN 0 WHEN 'module' THEN 1 WHEN 'main' THEN 2 ELSE 3 END,start_byte")?;
+        let mut entries=self.connection.cached_prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND kind='package_entry' ORDER BY CASE name WHEN 'source' THEN 0 WHEN 'module' THEN 1 WHEN 'main' THEN 2 ELSE 3 END,start_byte")?;
         let records = entries.query_map([manifest], |r| r.get::<_, String>(0))?;
         for target in records {
             if self.package_source(&directory, &target?, false, depth)? {

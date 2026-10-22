@@ -13,13 +13,13 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         if self.namespace == crate::domain::resolve::namespaces::Namespace::Types {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id NOT IN (SELECT id FROM symbols WHERE kind IN ('class','interface','trait','enum','struct','type'))",[])?;
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE NOT EXISTS (SELECT 1 FROM symbols WHERE id=resolution_candidates.id AND (kind IN ('class','interface','trait','enum','struct','type')))",[])?;
             return Ok(());
         }
         if self.receiver || self.relation != "calls" {
             return Ok(());
         }
-        let removed=self.connection.execute("DELETE FROM resolution_candidates WHERE EXISTS(SELECT 1 FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE s.id=resolution_candidates.id AND b.kind='kotlin_object_value')",[])?;
+        let removed=self.connection.cached_execute("DELETE FROM resolution_candidates WHERE EXISTS(SELECT 1 FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE s.id=resolution_candidates.id AND b.kind='kotlin_object_value')",[])?;
         if removed > 0 {
             self.reason = Some(
                 "Kotlin object invocation requires an operator invoke target; it is not a class constructor",

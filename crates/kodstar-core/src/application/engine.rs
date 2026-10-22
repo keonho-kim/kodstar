@@ -5,14 +5,14 @@
 
 use std::path::PathBuf;
 
-use super::analysis::BuildOptions;
+use super::analysis::InitOptions;
 use super::execution::{self, reads};
 use super::workspace::ProjectOptions;
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::{Error, Result};
 use crate::domain::query::{Query, QueryOptions, Refresh};
 use crate::domain::results::{
-    BuildReport, LanguageCapability, Progress, QueryMetadata, QuerySink, QuerySummary,
+    InitReport, LanguageCapability, Progress, QueryMetadata, QuerySink, QuerySummary,
 };
 use crate::infrastructure::cache::CacheStore;
 use crate::infrastructure::languages;
@@ -24,6 +24,20 @@ pub struct Engine {
 }
 
 impl Engine {
+    pub fn history(
+        &self,
+        project: &ProjectOptions,
+        request: &crate::domain::history::HistoryRequest,
+        cancel: &Cancellation,
+        sink: &mut dyn QuerySink,
+    ) -> Result<QuerySummary> {
+        execution::run(
+            &self.cache,
+            project,
+            execution::history::History { request, sink },
+            cancel,
+        )
+    }
     pub fn new(cache_home: PathBuf) -> Result<Self> {
         if !cache_home.is_absolute() {
             return Err(Error::argument("cache home must be an absolute path"));
@@ -34,25 +48,22 @@ impl Engine {
     }
 
     pub fn from_environment() -> Result<Self> {
-        #[cfg(windows)]
-        let home = std::env::var_os("USERPROFILE");
-        #[cfg(not(windows))]
         let home = std::env::var_os("HOME");
         let home = home.ok_or_else(|| Error::operation("user home directory is unavailable"))?;
         Self::new(PathBuf::from(home).join(".kodstar"))
     }
 
-    pub fn build(
+    pub fn init(
         &self,
         project: &ProjectOptions,
-        options: BuildOptions,
+        options: InitOptions,
         cancel: &Cancellation,
         progress: &mut dyn FnMut(&Progress) -> Result<()>,
-    ) -> Result<BuildReport> {
+    ) -> Result<InitReport> {
         execution::run(
             &self.cache,
             project,
-            execution::Build {
+            execution::Init {
                 options: &options,
                 progress,
             },
@@ -157,8 +168,9 @@ impl Engine {
 
     pub(crate) fn detached_metadata() -> QueryMetadata {
         QueryMetadata {
+            history: None,
             maintenance: None,
-            schema_version: 1,
+            schema_version: 2,
             relation_registry_version: crate::domain::relations::RELATION_REGISTRY_VERSION,
             engine_version: crate::VERSION,
             root: None,

@@ -15,19 +15,19 @@ impl Lookup<'_, '_> {
         depth: usize,
     ) -> Result<()> {
         self.connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS resolution_python_exports(depth INTEGER,id INTEGER,PRIMARY KEY(depth,id));")?;
-        self.connection.execute(
+        self.connection.cached_execute(
             "DELETE FROM resolution_python_exports WHERE depth=?1",
             [depth],
         )?;
         let mut statement = self
             .connection
-            .prepare("SELECT id FROM resolution_modules WHERE depth=?1 ORDER BY id")?;
+            .cached_prepare("SELECT id FROM resolution_modules WHERE depth=?1 ORDER BY id")?;
         let mut rows = statement.query([depth])?;
         while let Some(row) = rows.next()? {
             let file: i64 = row.get(0)?;
-            let base:Option<(String,usize,usize)>=self.connection.query_row("SELECT kind,start_byte,end_byte FROM bindings WHERE file_id=?1 AND kind IN ('python_all_reset','python_all_unknown','python_all_absent') ORDER BY start_byte DESC,id DESC LIMIT 1",[file],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+            let base:Option<(String,usize,usize)>=self.connection.cached_row("SELECT kind,start_byte,end_byte FROM bindings WHERE file_id=?1 AND kind IN ('python_all_reset','python_all_unknown','python_all_absent') ORDER BY start_byte DESC,id DESC LIMIT 1",[file],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
             let (kind, start, end) = base.unwrap_or_else(|| ("python_all_absent".into(), 0, 0));
-            let after:bool=self.connection.query_row("SELECT EXISTS(SELECT 1
+            let after:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1
                 FROM bindings b
                 WHERE b.file_id=?1
                 AND b.scope_id=0
@@ -39,7 +39,7 @@ impl Lookup<'_, '_> {
                 AND s.kind IN ('python_all_reset','python_all_append','python_all_unknown','python_all_absent')
                 AND b.start_byte>=s.start_byte
                 AND b.start_byte<s.end_byte))",params![file,end],|r|r.get(0))?;
-            let append:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND kind='python_all_append' AND start_byte>=?2)",params![file,start],|r|r.get(0))?;
+            let append:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND kind='python_all_append' AND start_byte>=?2)",params![file,start],|r|r.get(0))?;
             let unknown =
                 kind == "python_all_unknown" || after || kind == "python_all_absent" && append;
             let allowed = if unknown {
@@ -49,12 +49,12 @@ impl Lookup<'_, '_> {
             } else if kind == "python_all_absent" {
                 !name.starts_with('_')
             } else {
-                self.connection.query_row("SELECT EXISTS(SELECT 1 FROM bindings e JOIN bindings s ON s.file_id=e.file_id AND s.start_byte=CAST(e.module_name AS INTEGER)
+                self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM bindings e JOIN bindings s ON s.file_id=e.file_id AND s.start_byte=CAST(e.module_name AS INTEGER)
                     WHERE e.file_id=?1 AND e.kind='python_all_entry' AND e.imported_name=?2 AND s.kind IN ('python_all_reset','python_all_append') AND s.start_byte>=?3)",params![file,name,start],|r|r.get(0))?
             };
             self.dependency("python_star_export", &format!("{file}:{name}"), allowed)?;
             if allowed {
-                self.connection.execute(
+                self.connection.cached_execute(
                     "INSERT INTO resolution_python_exports VALUES(?1,?2)",
                     params![depth, file],
                 )?;
@@ -62,7 +62,7 @@ impl Lookup<'_, '_> {
         }
         drop(rows);
         drop(statement);
-        self.connection.execute("DELETE FROM resolution_modules WHERE depth=?1 AND id NOT IN (SELECT id FROM resolution_python_exports WHERE depth=?1)",[depth])?;
+        self.connection.cached_execute("DELETE FROM resolution_modules WHERE depth=?1 AND id NOT IN (SELECT id FROM resolution_python_exports WHERE depth=?1)",[depth])?;
         Ok(())
     }
 
@@ -71,7 +71,7 @@ impl Lookup<'_, '_> {
         name: &str,
         depth: usize,
     ) -> Result<()> {
-        let (count, file): (usize, Option<i64>) = self.connection.query_row(
+        let (count, file): (usize, Option<i64>) = self.connection.cached_row(
             "SELECT COUNT(*),MIN(id) FROM resolution_modules WHERE depth=?1",
             [depth],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -83,23 +83,23 @@ impl Lookup<'_, '_> {
         } else if count > 1 {
             let snapshot = self.snapshot_modules(depth)?;
             self.connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS resolution_python_values(lookup_scope INTEGER,id INTEGER,PRIMARY KEY(lookup_scope,id));")?;
-            let mut statement = self.connection.prepare(
+            let mut statement = self.connection.cached_prepare(
                 "SELECT id FROM resolution_module_snapshots WHERE lookup_scope=?1 ORDER BY id",
             )?;
             let mut rows = statement.query([snapshot])?;
             while let Some(row) = rows.next()? {
                 let file: i64 = row.get(0)?;
                 self.connection
-                    .execute("DELETE FROM resolution_candidates", [])?;
+                    .cached_execute("DELETE FROM resolution_candidates", [])?;
                 self.python_file_name(file, name, depth)?;
-                self.connection.execute("INSERT OR IGNORE INTO resolution_python_values SELECT ?1,id FROM resolution_candidates",[snapshot])?;
+                self.connection.cached_execute("INSERT OR IGNORE INTO resolution_python_values SELECT ?1,id FROM resolution_candidates",[snapshot])?;
             }
             drop(rows);
             drop(statement);
             self.connection
-                .execute("DELETE FROM resolution_candidates", [])?;
-            self.connection.execute("INSERT INTO resolution_candidates SELECT id FROM resolution_python_values WHERE lookup_scope=?1",[snapshot])?;
-            self.connection.execute(
+                .cached_execute("DELETE FROM resolution_candidates", [])?;
+            self.connection.cached_execute("INSERT INTO resolution_candidates SELECT id FROM resolution_python_values WHERE lookup_scope=?1",[snapshot])?;
+            self.connection.cached_execute(
                 "DELETE FROM resolution_python_values WHERE lookup_scope=?1",
                 [snapshot],
             )?;
@@ -133,7 +133,7 @@ impl Lookup<'_, '_> {
             for member in parts {
                 self.members(member)?;
             }
-            let found: bool = self.connection.query_row(
+            let found: bool = self.connection.cached_row(
                 "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
                 [],
                 |r| r.get(0),

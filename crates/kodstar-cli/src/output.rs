@@ -3,6 +3,7 @@
 // Usage: CLI 실행 경계가 엔진의 결과와 진행을 전달.
 // Related: crates/kodstar-cli/src/run.rs, crates/kodstar-cli/src/output/json.rs, crates/kodstar-cli/src/output/text.rs, crates/kodstar-cli/src/output/tsv.rs.
 
+mod history;
 mod json;
 pub(crate) mod progress;
 mod text;
@@ -116,7 +117,8 @@ fn write_error(error: io::Error) -> Error {
 
 fn row_kind(row: &QueryRow) -> &'static str {
     match row {
-        QueryRow::Build(_) => "build",
+        QueryRow::History(_) => "history",
+        QueryRow::Init(_) => "init",
         QueryRow::Symbol(_) => "symbol",
         QueryRow::Relationship(_) => "relationship",
         QueryRow::File(_) => "file",

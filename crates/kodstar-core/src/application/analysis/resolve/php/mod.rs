@@ -56,7 +56,7 @@ impl Lookup<'_, '_> {
                 "self" | "static" | "parent"
             )
         {
-            self.connection.execute("INSERT
+            self.connection.cached_execute("INSERT
                 OR IGNORE INTO resolution_candidates WITH RECURSIVE parents(id,depth) AS (VALUES(?2,0)
                 UNION ALL
                 SELECT s.parent,p.depth+1
@@ -126,7 +126,7 @@ impl Lookup<'_, '_> {
                 return Ok(true);
             }
             if binding.target.is_some() {
-                self.connection.execute(
+                self.connection.cached_execute(
                     "INSERT
                     OR IGNORE INTO resolution_candidates
                     SELECT s.id
@@ -177,7 +177,7 @@ impl Lookup<'_, '_> {
             .replace('\\', "::")
             .trim_start_matches("::")
             .to_owned();
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT
             OR IGNORE INTO resolution_candidates
             SELECT s.id
@@ -213,7 +213,7 @@ impl Lookup<'_, '_> {
     }
 
     fn php_found(&self) -> Result<bool> {
-        Ok(self.connection.query_row(
+        Ok(self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
             [],
             |r| r.get(0),

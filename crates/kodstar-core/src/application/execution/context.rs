@@ -4,19 +4,21 @@
 // Related: crates/kodstar-core/src/application/execution/mod.rs, crates/kodstar-core/src/application/analysis/mod.rs, crates/kodstar-core/src/application/workspace/mod.rs.
 
 use super::super::{
-    analysis::{self, BuildOptions},
+    analysis::{self, InitOptions},
     engine::Engine,
     maintenance,
     workspace::{self, ProjectOptions, SelectedProject, Selection},
 };
+use crate::application::history::capture;
 use crate::domain::{
     cancellation::Cancellation,
     diagnostics::{Error, ErrorKind, Result},
     query::Refresh,
-    results::{BuildReport, MaintenanceReport, Progress, QueryMetadata},
+    results::{InitReport, MaintenanceReport, Progress, QueryMetadata},
 };
 use crate::infrastructure::{
     cache::{CacheStore, ProjectCache, now_seconds},
+    history::{Repository, checkpoints},
     index,
     watch::Changes,
 };
@@ -25,8 +27,10 @@ use std::time::Instant;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Plan<'a> {
-    Build(&'a BuildOptions),
+    Init(&'a InitOptions),
     Project(Refresh),
+    Diagnostics(Refresh),
+    Revision(&'a str, Refresh),
     Optional(Refresh),
     Watch,
     Detached,
@@ -35,12 +39,16 @@ pub(crate) enum Plan<'a> {
 pub(crate) struct ProjectContext {
     // Connections and observers close before the project lease is released.
     pub connection: Connection,
+    pub database: std::path::PathBuf,
     pub changes: Option<Changes>,
+    pub repository: Repository,
     pub cache: ProjectCache,
     pub selected: SelectedProject,
-    pub report: Option<BuildReport>,
+    pub report: Option<InitReport>,
     pub maintenance: Option<MaintenanceReport>,
     pub refresh: Refresh,
+    pub revision: bool,
+    pub watching: bool,
 }
 
 pub(crate) struct Context<'a> {
@@ -48,8 +56,11 @@ pub(crate) struct Context<'a> {
     pub options: &'a ProjectOptions,
     pub project: Option<ProjectContext>,
     full: bool,
-    build: bool,
+    initialize: bool,
     started: Instant,
+    diagnostic: bool,
+    // The process lease outlives project observers, connections and repository locks.
+    _installation: Option<crate::infrastructure::cache::locks::FileLock>,
 }
 
 impl<'a> Context<'a> {
@@ -61,8 +72,8 @@ impl<'a> Context<'a> {
     ) -> Result<Self> {
         let started = Instant::now();
         let (selection, optional, refresh, full, watch) = match plan {
-            Plan::Build(options) => (
-                Selection::Build(options.path.as_deref()),
+            Plan::Init(options) => (
+                Selection::Init(options.path.as_deref()),
                 false,
                 if options.verify {
                     Refresh::Verify
@@ -73,18 +84,22 @@ impl<'a> Context<'a> {
                 false,
             ),
             Plan::Project(refresh) => (Selection::Existing, false, refresh, false, false),
+            Plan::Diagnostics(refresh) => (Selection::Existing, false, refresh, false, false),
+            Plan::Revision(_, refresh) => (Selection::Existing, false, refresh, false, false),
             Plan::Optional(refresh) => (Selection::Existing, true, refresh, false, false),
             Plan::Watch => (Selection::Existing, false, Refresh::Metadata, false, true),
             Plan::Detached => (Selection::Existing, false, Refresh::None, false, false),
         };
-        let build = matches!(selection, Selection::Build(_));
+        let initialize = matches!(selection, Selection::Init(_));
         let mut context = Self {
+            _installation: crate::infrastructure::installation::lease(store, false, cancel)?,
             store,
             options,
             project: None,
             full,
-            build,
+            initialize,
             started,
+            diagnostic: matches!(plan, Plan::Diagnostics(_)),
         };
         if matches!(plan, Plan::Detached) {
             return Ok(context);
@@ -98,58 +113,15 @@ impl<'a> Context<'a> {
             }
             Err(error) => return Err(error),
         };
-        let cache = store.acquire(&selected.root, build, cancel)?;
-        let writer = if build || refresh != Refresh::None {
-            Some(cache.writer(cancel)?)
-        } else {
-            None
-        };
-        if build {
-            cache.initialize_record()?;
+        if context._installation.is_none() && (initialize || Repository::exists(&selected.root)) {
+            context._installation =
+                crate::infrastructure::installation::lease(store, true, cancel)?;
         }
-        let database = cache.directory.join("index.sqlite");
-        let connection = if build {
-            index::open(
-                &database,
-                &selected.root,
-                true,
-                selected.settings.db_cache_bytes,
-            )?
-        } else if refresh != Refresh::None {
-            index::open_existing_writer(
-                &database,
-                &selected.root,
-                selected.settings.db_cache_bytes,
-            )?
+        context.project = Some(if let Plan::Revision(revision, refresh) = plan {
+            super::prepare::revision(store, selected, revision, refresh, cancel)?
         } else {
-            index::open(
-                &database,
-                &selected.root,
-                false,
-                selected.settings.db_cache_bytes,
-            )?
-        };
-        if !build && let Err(error) = index::require_committed(&connection) {
-            if optional && options.root.is_none() && error.kind == ErrorKind::NotFound {
-                return Ok(context);
-            }
-            return Err(error);
-        }
-        let changes = if watch {
-            Some(Changes::start(&selected.root, &store.home)?)
-        } else {
-            None
-        };
-        context.project = Some(ProjectContext {
-            connection,
-            changes,
-            cache,
-            selected,
-            report: None,
-            maintenance: None,
-            refresh,
+            super::prepare::project(store, selected, initialize, refresh, watch, cancel)?
         });
-        drop(writer);
         Ok(context)
     }
 
@@ -158,35 +130,99 @@ impl<'a> Context<'a> {
         cancel: &Cancellation,
         progress: &mut dyn FnMut(&Progress) -> Result<()>,
     ) -> Result<()> {
+        let result = self.synchronize_inner(cancel, progress);
+        if let Some(project) = &mut self.project
+            && project.watching
+        {
+            project.repository.release();
+        }
+        result
+    }
+
+    fn synchronize_inner(
+        &mut self,
+        cancel: &Cancellation,
+        progress: &mut dyn FnMut(&Progress) -> Result<()>,
+    ) -> Result<()> {
         let Some(project) = &mut self.project else {
             return Ok(());
         };
-        if self.build || project.refresh != Refresh::None {
+        project.repository.acquire(cancel)?;
+        if self.initialize || project.refresh != Refresh::None {
+            if !project.revision {
+                let mut state = capture::run(
+                    &mut project.repository,
+                    &self.store.home,
+                    &project.selected.settings,
+                    project.refresh == Refresh::Verify,
+                    cancel,
+                )?;
+                let id = checkpoints::head(&project.repository.connection)?.ok_or_else(|| {
+                    Error::operation("initialization did not create a checkpoint")
+                })?;
+                project.selected.snapshot = Some(project.repository.snapshot(id));
+                state.analysis_checkpoint = Some(state.checkpoint.clone());
+                project.selected.history = Some(state);
+            }
             let _writer = project.cache.writer(cancel)?;
-            let report = analysis::run(
+            let outcome = analysis::run(
                 analysis::Session {
                     store: self.store,
                     selected: &project.selected,
                     cache: &project.cache,
+                    database: &project.database,
                     started: self.started,
                 },
                 &mut project.connection,
-                BuildOptions {
+                InitOptions {
                     path: None,
                     full: self.full,
                     verify: project.refresh == Refresh::Verify,
                 },
                 cancel,
                 progress,
-            )?;
+            );
+            let report = match outcome {
+                Ok(report) => report,
+                Err(error) if self.diagnostic => {
+                    if let Some(state) = &mut project.selected.history {
+                        state.analysis_error = Some(error.to_string());
+                        state.analysis_checkpoint = project.connection.query_row(
+                            "SELECT checkpoint FROM metadata",
+                            [],
+                            |r| r.get(0),
+                        )?;
+                    }
+                    project.cache.touch()?;
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
             project.maintenance = report.maintenance.clone();
             project.report = Some(report);
         } else {
+            let mut state = if project.revision {
+                project
+                    .selected
+                    .history
+                    .clone()
+                    .ok_or_else(|| Error::operation("historical context has no checkpoint"))?
+            } else {
+                project.repository.state()?
+            };
+            let (checkpoint, error) = project.connection.query_row(
+                "SELECT checkpoint,last_error FROM metadata WHERE singleton=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            state.analysis_checkpoint = checkpoint;
+            state.analysis_error = error;
+            project.selected.history = Some(state);
             project.maintenance =
                 maintenance::run(self.store, &project.selected, now_seconds()?, cancel)?;
         }
         project.cache.touch()?;
-        self.build = false;
+        self.initialize = false;
         self.full = false;
         self.started = Instant::now();
         Ok(())
@@ -217,8 +253,9 @@ impl<'a> Context<'a> {
             |r| r.get(0),
         )?;
         let metadata = QueryMetadata {
+            history: project.selected.history.clone(),
             maintenance: project.maintenance.clone(),
-            schema_version: 1,
+            schema_version: 2,
             relation_registry_version,
             engine_version: crate::VERSION,
             root: Some(project.selected.root.to_string_lossy().into_owned()),

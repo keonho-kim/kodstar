@@ -11,16 +11,31 @@ pub(super) fn begin(writer: &mut impl Write, metadata: &QueryMetadata) -> io::Re
         writeln!(
             writer,
             "project {root} | generation {} | {}",
-            metadata.generation.unwrap_or(0),
+            metadata
+                .generation
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".into()),
             metadata.freshness
         )?;
+        if let Some(state) = &metadata.history {
+            writeln!(
+                writer,
+                "branch {} | checkpoint {} | analysis {} | changed {} | tracked {}",
+                state.branch,
+                state.checkpoint,
+                state.analysis_checkpoint.as_deref().unwrap_or("-"),
+                state.changed_files,
+                state.tracked_files
+            )?;
+        }
     }
     Ok(())
 }
 
 pub(super) fn row(writer: &mut impl Write, row: &QueryRow) -> io::Result<()> {
     match row {
-        QueryRow::Build(report) => writeln!(
+        QueryRow::History(row) => super::history::row(writer, row),
+        QueryRow::Init(report) => writeln!(
             writer,
             "indexed generation {} | parsed {} | reused {} | skipped {} | {} ms",
             report.generation,

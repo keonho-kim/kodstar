@@ -51,12 +51,12 @@ fn sessions_return_versioned_ids_and_reject_invalid_parameters() -> TestResult {
     let output = session(
         &project,
         &[
-            json!({"protocol_version":1,"id":"languages","method":"languages","params":{}}),
+            json!({"protocol_version":2,"id":"languages","method":"languages","params":{}}),
             json!({"protocol_version":99,"id":"bad-version","method":"languages"}),
-            json!({"protocol_version":1,"id":"bad-query","method":"query","params":{"query":{"kind":"unknown"}}}),
+            json!({"protocol_version":2,"id":"bad-query","method":"query","params":{"query":{"kind":"unknown"}}}),
         ],
     )?;
-    assert!(output.iter().all(|event| event["protocol_version"] == 1));
+    assert!(output.iter().all(|event| event["protocol_version"] == 2));
     assert!(output.iter().any(|event| event["id"] == "languages"
         && event["type"] == "complete"
         && event["exit_code"] == 0));
@@ -71,14 +71,45 @@ fn sessions_return_versioned_ids_and_reject_invalid_parameters() -> TestResult {
 }
 
 #[test]
-fn sessions_use_the_same_index_and_can_read_without_refresh() -> TestResult {
+fn sessions_share_named_history_and_revision_queries_with_the_cli() -> TestResult {
     let project = Project::new()?;
-    project.write("fn target() {} fn caller() { target(); }")?;
-    assert!(project.run(&["build"])?.status.success());
+    project.write("fn saved() {}")?;
+    assert!(project.run(&["init"])?.status.success());
     let output = session(
         &project,
         &[
-            json!({"protocol_version":1,"id":1,"method":"query","params":{
+            json!({"protocol_version":1,"id":"old","method":"init"}),
+            json!({"protocol_version":2,"id":"save","method":"history","params":{"request":{"action":"save","name":"saved"}}}),
+            json!({"protocol_version":2,"id":"list","method":"history","params":{"request":{"action":"list","refresh":"none"}}}),
+            json!({"protocol_version":2,"id":"past","method":"query","params":{"query":{"kind":"symbols","file":"main.rs"},"options":{"revision":"saved"}}}),
+        ],
+    )?;
+    assert!(
+        output
+            .iter()
+            .any(|event| event["id"] == "old" && event["type"] == "error" && event["code"] == 2)
+    );
+    assert!(output.iter().any(|event| event["id"] == "list"
+        && event["type"] == "result"
+        && event["data"]["name"] == "saved"));
+    assert!(output.iter().any(|event| event["id"] == "past"
+        && event["type"] == "metadata"
+        && event["data"]["history"]["checkpoint"] == "c1"));
+    assert!(output.iter().any(|event| event["id"] == "past"
+        && event["type"] == "result"
+        && event["data"]["name"] == "saved"));
+    Ok(())
+}
+
+#[test]
+fn sessions_use_the_same_index_and_can_read_without_refresh() -> TestResult {
+    let project = Project::new()?;
+    project.write("fn target() {} fn caller() { target(); }")?;
+    assert!(project.run(&["init"])?.status.success());
+    let output = session(
+        &project,
+        &[
+            json!({"protocol_version":2,"id":1,"method":"query","params":{
                 "query":{"kind":"deps","file":"main.rs","name":"caller"},"options":{"refresh":"none"}
             }}),
         ],
@@ -107,14 +138,14 @@ fn cancellation_is_processed_while_an_analysis_request_is_active() -> TestResult
     let output = session(
         &project,
         &[
-            json!({"protocol_version":1,"id":"build","method":"build","params":{}}),
-            json!({"protocol_version":1,"id":"cancel","method":"cancel","params":{"request_id":"build"}}),
+            json!({"protocol_version":2,"id":"init","method":"init","params":{}}),
+            json!({"protocol_version":2,"id":"cancel","method":"cancel","params":{"request_id":"init"}}),
         ],
     )?;
     assert!(output.iter().any(|event| event["id"] == "cancel"
         && event["type"] == "complete"
         && event["exit_code"] == 0));
-    assert!(output.iter().any(|event| event["id"] == "build"
+    assert!(output.iter().any(|event| event["id"] == "init"
         && event["type"] == "complete"
         && event["exit_code"] == 130));
     Ok(())
@@ -124,13 +155,13 @@ fn cancellation_is_processed_while_an_analysis_request_is_active() -> TestResult
 fn sessions_synchronize_diagnostics_and_support_explicit_cached_reads() -> TestResult {
     let project = Project::new()?;
     project.write("fn first() {}")?;
-    assert!(project.run(&["build"])?.status.success());
+    assert!(project.run(&["init"])?.status.success());
     project.write("fn first() {} fn second() {}")?;
     let output = session(
         &project,
         &[
-            json!({"protocol_version":1,"id":"cached","method":"status","params":{"options":{"refresh":"none"}}}),
-            json!({"protocol_version":1,"id":"fresh","method":"status"}),
+            json!({"protocol_version":2,"id":"cached","method":"status","params":{"options":{"refresh":"none"}}}),
+            json!({"protocol_version":2,"id":"fresh","method":"status"}),
         ],
     )?;
     assert!(output.iter().any(|event| event["id"] == "cached"
@@ -148,7 +179,7 @@ fn sessions_synchronize_diagnostics_and_support_explicit_cached_reads() -> TestR
 fn ambiguous_duplicate_fields_are_rejected_and_large_frames_do_not_poison_the_session() -> TestResult
 {
     let project = Project::new()?;
-    let duplicate = br#"{"protocol_version":1,"id":"duplicate","method":"unknown","method":"languages","params":{}}
+    let duplicate = br#"{"protocol_version":2,"id":"duplicate","method":"unknown","method":"languages","params":{}}
 "#;
     let output = session_raw(&project, duplicate)?;
     assert!(
@@ -159,7 +190,7 @@ fn ambiguous_duplicate_fields_are_rejected_and_large_frames_do_not_poison_the_se
     let mut large = vec![b'x'; 65537];
     large.push(b'\n');
     large.extend_from_slice(
-        br#"{"protocol_version":1,"id":"next","method":"languages"}
+        br#"{"protocol_version":2,"id":"next","method":"languages"}
 "#,
     );
     let output = session_raw(&project, &large)?;

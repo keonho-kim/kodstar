@@ -38,7 +38,7 @@ impl Lookup<'_, '_> {
             self.external_target(&format!("route:{route}"))?;
             self.rule = "static_route_declaration";
         } else if let Some(tag) = expression.strip_prefix("@component:") {
-            let (scope, position): (u32, usize) = self.connection.query_row(
+            let (scope, position): (u32, usize) = self.connection.cached_row(
                 "SELECT scope_id,start_byte FROM facts WHERE id=?1",
                 [self.fact],
                 |r| Ok((r.get(0)?, r.get(1)?)),
@@ -63,7 +63,7 @@ impl Lookup<'_, '_> {
             .strip_prefix("@lisp-symbol:")
             .filter(|_| context.language == crate::domain::languages::Language::CommonLisp)
         {
-            let (scope, position): (u32, usize) = self.connection.query_row(
+            let (scope, position): (u32, usize) = self.connection.cached_row(
                 "SELECT scope_id,start_byte FROM facts WHERE id=?1",
                 [self.fact],
                 |r| Ok((r.get(0)?, r.get(1)?)),
@@ -71,7 +71,7 @@ impl Lookup<'_, '_> {
             self.expression(context, scope, position, name, 0)?;
         } else if let Some(mixin) = expression.strip_prefix("@ruby-mixin:") {
             if let Some((_, name)) = mixin.split_once('#') {
-                let (scope, position): (u32, usize) = self.connection.query_row(
+                let (scope, position): (u32, usize) = self.connection.cached_row(
                     "SELECT scope_id,start_byte FROM facts WHERE id=?1",
                     [self.fact],
                     |r| Ok((r.get(0)?, r.get(1)?)),
@@ -93,7 +93,7 @@ impl Lookup<'_, '_> {
                         kind,
                     )?
                 {
-                    self.connection.execute("INSERT OR IGNORE INTO resolution_candidates SELECT id FROM symbols WHERE file_id=?1 AND kind='file'",[file])?;
+                    self.connection.cached_execute("INSERT OR IGNORE INTO resolution_candidates SELECT id FROM symbols WHERE file_id=?1 AND kind='file'",[file])?;
                     self.rule = "explicit_configuration_reference";
                 } else {
                     self.reason = Some("configuration is external, excluded or missing");
@@ -101,15 +101,15 @@ impl Lookup<'_, '_> {
             }
         } else if let Some(implementation) = expression.strip_prefix("@impl:") {
             if let Some((owner, contract)) = implementation.split_once('#') {
-                let (scope, position): (u32, usize) = self.connection.query_row(
+                let (scope, position): (u32, usize) = self.connection.cached_row(
                     "SELECT scope_id,start_byte FROM facts WHERE id=?1",
                     [self.fact],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )?;
                 self.expression(context, scope, position, owner, 0)?;
-                self.source_override=self.connection.query_row("SELECT CASE WHEN COUNT(*)=1 THEN MIN(c.id) END FROM resolution_candidates c JOIN symbols s ON s.id=c.id WHERE s.kind IN ('class','struct','enum','type')",[],|r|r.get(0))?;
+                self.source_override=self.connection.cached_row("SELECT CASE WHEN COUNT(*)=1 THEN MIN(c.id) END FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id WHERE s.kind IN ('class','struct','enum','type')",[],|r|r.get(0))?;
                 self.connection
-                    .execute("DELETE FROM resolution_candidates", [])?;
+                    .cached_execute("DELETE FROM resolution_candidates", [])?;
                 if self.source_override.is_some() {
                     self.expression(context, scope, position, contract, 0)?;
                     self.rule = "explicit_trait_implementation";
@@ -118,7 +118,7 @@ impl Lookup<'_, '_> {
                 }
             }
         } else if let Some(import) = expression.strip_prefix("@require:") {
-            let (scope, position): (u32, usize) = self.connection.query_row(
+            let (scope, position): (u32, usize) = self.connection.cached_row(
                 "SELECT scope_id,start_byte FROM facts WHERE id=?1",
                 [self.fact],
                 |r| Ok((r.get(0)?, r.get(1)?)),
@@ -138,7 +138,7 @@ impl Lookup<'_, '_> {
             self.dependency("package", package, true)?;
         } else if let Some(local) = expression.strip_prefix("@local:") {
             if let Ok(local) = local.parse::<u32>() {
-                self.connection.execute("INSERT OR IGNORE INTO resolution_candidates SELECT id FROM symbols WHERE file_id=?1 AND local_id=?2", rusqlite::params![context.id,local])?;
+                self.connection.cached_execute("INSERT OR IGNORE INTO resolution_candidates SELECT id FROM symbols WHERE file_id=?1 AND local_id=?2", rusqlite::params![context.id,local])?;
                 self.rule = "syntax_containment";
             }
         } else if let Some(file) = expression.strip_prefix("@packagefile:") {
@@ -186,11 +186,11 @@ impl Lookup<'_, '_> {
         // Lookup only the enumerated index. Resolving a reference never opens an arbitrary path,
         // follows a symlink, runs a build, or fetches a missing dependency.
         let raw_path = path_bytes(&path);
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_candidates SELECT s.id FROM symbols s JOIN files f ON f.id=s.file_id WHERE f.path=?1 AND s.kind='file'",
             [&raw_path],
         )?;
-        let found: bool = self.connection.query_row(
+        let found: bool = self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
             [],
             |row| row.get(0),

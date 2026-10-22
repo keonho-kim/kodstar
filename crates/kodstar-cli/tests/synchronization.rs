@@ -11,7 +11,7 @@ use support::*;
 fn metadata_commands_share_synchronization_and_keep_explicit_recovery_paths() -> TestResult {
     let project = Project::new()?;
     project.write("fn first() {}")?;
-    assert!(project.run(&["build"])?.status.success());
+    assert!(project.run(&["init"])?.status.success());
     for (index, args) in [
         vec!["status"],
         vec!["doctor"],
@@ -41,7 +41,24 @@ fn metadata_commands_share_synchronization_and_keep_explicit_recovery_paths() ->
         vec!["languages"],
         vec!["cache", "list"],
     ] {
-        assert_eq!(project.run(&args)?.status.code(), Some(1));
+        let result = project.run(&args)?;
+        assert_eq!(
+            result.status.code(),
+            Some(if matches!(args[0], "status" | "doctor") {
+                0
+            } else {
+                1
+            })
+        );
+        if matches!(args[0], "status" | "doctor") {
+            let diagnostic = project.run(&[args[0], "--format", "json"])?;
+            let data: Value = serde_json::from_slice(&diagnostic.stdout)?;
+            assert!(data["history"]["analysis_error"].is_string());
+            assert_ne!(
+                data["history"]["checkpoint"],
+                data["history"]["analysis_checkpoint"]
+            );
+        }
         let mut args = args;
         args.extend(["--no-refresh", "--format", "json"]);
         let result = project.run(&args)?;

@@ -11,7 +11,8 @@ use crate::application::analysis::resolve::indexed_paths::normalize;
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
 use crate::infrastructure::cache::paths::{path_bytes, path_from_bytes};
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 use std::path::Path;
 
 pub(in crate::application::analysis::resolve) fn reset(
@@ -34,7 +35,7 @@ pub(in crate::application::analysis::resolve) fn reset(
         CREATE TEMP TABLE IF NOT EXISTS cxx_conflicts(id INTEGER PRIMARY KEY,component INTEGER);
         CREATE INDEX IF NOT EXISTS cxx_conflict_groups ON cxx_conflicts(component);
         DELETE FROM cxx_includes; DELETE FROM cxx_reach; DELETE FROM cxx_reach_ready; DELETE FROM cxx_conflicts;")?;
-    let mut statement = c.prepare(
+    let mut statement = c.cached_prepare(
         "SELECT b.file_id,f.path,b.module_name
         FROM bindings b
         JOIN files f ON f.id=b.file_id
@@ -61,7 +62,7 @@ pub(in crate::application::analysis::resolve) fn reset(
         let Some(target) = normalize(path.parent().unwrap_or_else(|| Path::new("")), raw) else {
             continue;
         };
-        c.execute("INSERT OR IGNORE INTO cxx_includes SELECT ?1,id FROM files WHERE path=?2 AND language IN ('c','cpp') AND status='analyzed'",params![file,path_bytes(&target)])?;
+        c.cached_execute("INSERT OR IGNORE INTO cxx_includes SELECT ?1,id FROM files WHERE path=?2 AND language IN ('c','cpp') AND status='analyzed'",params![file,path_bytes(&target)])?;
     }
     Ok(())
 }
@@ -75,21 +76,21 @@ pub(in crate::application::analysis::resolve) fn merge(
     c: &Connection,
     cancel: &Cancellation,
 ) -> Result<()> {
-    let mut sources=c.prepare("SELECT DISTINCT file FROM cxx_rows WHERE file NOT IN (SELECT id FROM cxx_reach_ready) ORDER BY file")?;
+    let mut sources=c.cached_prepare("SELECT DISTINCT file FROM cxx_rows WHERE file NOT IN (SELECT id FROM cxx_reach_ready) ORDER BY file")?;
     let mut sources = sources.query([])?;
     while let Some(row) = sources.next()? {
         cancel.check()?;
         let source: i64 = row.get(0)?;
-        c.execute("WITH RECURSIVE reach(id) AS (SELECT ?1 UNION SELECT i.target FROM reach r JOIN cxx_includes i ON i.source=r.id)
+        c.cached_execute("WITH RECURSIVE reach(id) AS (SELECT ?1 UNION SELECT i.target FROM reach r JOIN cxx_includes i ON i.source=r.id)
             INSERT OR IGNORE INTO cxx_reach SELECT ?1,id FROM reach",[source])?;
-        c.execute("INSERT INTO cxx_reach_ready VALUES(?1)", [source])?;
+        c.cached_execute("INSERT INTO cxx_reach_ready VALUES(?1)", [source])?;
     }
-    let mut roots = c.prepare("SELECT id FROM cxx_rows ORDER BY identity,id")?;
+    let mut roots = c.cached_prepare("SELECT id FROM cxx_rows ORDER BY identity,id")?;
     let mut roots = roots.query([])?;
     while let Some(row) = roots.next()? {
         cancel.check()?;
         let root: i64 = row.get(0)?;
-        let assigned: bool = c.query_row(
+        let assigned: bool = c.cached_row(
             "SELECT EXISTS(SELECT 1 FROM cxx_assigned WHERE id=?1)",
             [root],
             |r| r.get(0),
@@ -98,32 +99,32 @@ pub(in crate::application::analysis::resolve) fn merge(
             continue;
         }
         c.execute_batch("DELETE FROM cxx_component;")?;
-        c.execute("WITH RECURSIVE connected(id,file,identity) AS (
+        c.cached_execute("WITH RECURSIVE connected(id,file,identity) AS (
             SELECT id,file,identity FROM cxx_rows WHERE id=?1
             UNION SELECT b.id,b.file,b.identity FROM connected a JOIN cxx_rows b ON b.identity=a.identity
             WHERE b.file=a.file OR EXISTS(SELECT 1 FROM cxx_reach r WHERE (r.source=a.file AND r.target=b.file) OR (r.source=b.file AND r.target=a.file))
           ) INSERT INTO cxx_component SELECT id FROM connected",[root])?;
-        c.execute("INSERT INTO cxx_assigned SELECT id FROM cxx_component", [])?;
-        let definitions: u64 = c.query_row(
+        c.cached_execute("INSERT INTO cxx_assigned SELECT id FROM cxx_component", [])?;
+        let definitions: u64 = c.cached_row(
             "SELECT SUM(r.definition) FROM cxx_rows r JOIN cxx_component m ON m.id=r.id",
             [],
             |r| r.get(0),
         )?;
         if definitions > 1 {
-            c.execute(
+            c.cached_execute(
                 "INSERT INTO cxx_conflicts SELECT id,?1 FROM cxx_component",
                 [root],
             )?;
             continue;
         }
-        let (identity,anchor):(String,Vec<u8>)=c.query_row("SELECT r.identity,f.path FROM cxx_rows r JOIN cxx_component m ON m.id=r.id JOIN files f ON f.id=r.file ORDER BY r.definition,f.path,r.id LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        let (identity,anchor):(String,Vec<u8>)=c.cached_row("SELECT r.identity,f.path FROM cxx_rows r JOIN cxx_component m ON m.id=r.id JOIN files f ON f.id=r.file ORDER BY r.definition,f.path,r.id LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
         let mut hash = blake3::Hasher::new();
         hash.update(b"cxx-include-component");
         for part in [identity.as_bytes(), anchor.as_slice()] {
             hash.update(&(part.len() as u64).to_le_bytes());
             hash.update(part);
         }
-        c.execute(
+        c.cached_execute(
             "UPDATE symbols SET logical_key=?1 WHERE id IN (SELECT id FROM cxx_component)",
             [hash.finalize().to_hex().to_string()],
         )?;
@@ -138,7 +139,7 @@ impl crate::application::analysis::resolve::Lookup<'_, '_> {
         scope: u32,
         module: &str,
     ) -> Result<()> {
-        let conditional:bool=self.connection.query_row("SELECT
+        let conditional:bool=self.connection.cached_row("SELECT
             EXISTS(SELECT 1 FROM bindings b JOIN facts u ON u.file_id=b.file_id AND u.start_byte=b.start_byte AND u.relation='includes'
               WHERE b.file_id=?1 AND b.scope_id=?2 AND b.module_name=?3 AND b.kind='include' AND u.condition IS NOT NULL)
             AND NOT EXISTS(SELECT 1 FROM bindings b JOIN facts u ON u.file_id=b.file_id AND u.start_byte=b.start_byte AND u.relation='includes'
@@ -153,7 +154,7 @@ impl crate::application::analysis::resolve::Lookup<'_, '_> {
         &self,
         depth: usize,
     ) -> Result<()> {
-        self.connection.execute(
+        self.connection.cached_execute(
             "WITH RECURSIVE included(id) AS (
             SELECT id FROM resolution_modules WHERE depth=?1
             UNION SELECT i.target FROM included r JOIN cxx_includes i ON i.source=r.id
@@ -169,7 +170,7 @@ impl crate::application::analysis::resolve::Lookup<'_, '_> {
         ) {
             return Ok(());
         }
-        self.connection.execute("INSERT OR IGNORE INTO resolution_candidates
+        self.connection.cached_execute("INSERT OR IGNORE INTO resolution_candidates
             SELECT b.id FROM cxx_conflicts a JOIN resolution_candidates c ON c.id=a.id JOIN cxx_conflicts b ON b.component=a.component",[])?;
         Ok(())
     }

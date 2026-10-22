@@ -31,7 +31,7 @@ impl Lookup<'_, '_> {
             return Ok(Location::Project);
         }
         if let Some(include) = raw.strip_prefix("@erlang-include:") {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "DELETE FROM resolution_module_owners WHERE depth=?1",
                 [depth],
             )?;
@@ -41,7 +41,7 @@ impl Lookup<'_, '_> {
             return Ok(Location::Project);
         }
         if let Some(include) = raw.strip_prefix("@include:") {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "DELETE FROM resolution_module_owners WHERE depth=?1",
                 [depth],
             )?;
@@ -55,7 +55,7 @@ impl Lookup<'_, '_> {
             Language::JavaScript | Language::TypeScript
         );
         if javascript && !raw.starts_with('.') {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "DELETE FROM resolution_module_owners WHERE depth=?1",
                 [depth],
             )?;
@@ -94,7 +94,7 @@ impl Lookup<'_, '_> {
                 | Language::Swift
                 | Language::CommonLisp
         ) {
-            self.connection.execute("INSERT OR IGNORE INTO resolution_modules SELECT ?4,id FROM files WHERE language=?1 AND package=?2 AND (module=?3 OR ?1='pascal' AND lower(module)=lower(?3)) AND status='analyzed'",params![context.language.as_str(),context.package,module,depth])?;
+            self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT ?4,id FROM files WHERE language=?1 AND package=?2 AND (module=?3 OR ?1='pascal' AND lower(module)=lower(?3)) AND status='analyzed'",params![context.language.as_str(),context.package,module,depth])?;
         }
         if javascript
             || context.language == Language::Ruby && raw.starts_with('.')

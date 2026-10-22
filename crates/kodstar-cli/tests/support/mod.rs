@@ -46,12 +46,18 @@ impl Project {
         command
             .current_dir(&self.root)
             .env("HOME", &self.home)
-            .env("USERPROFILE", &self.home);
+            .env("ZDOTDIR", &self.home)
+            .env("SHELL", "/bin/zsh");
         command
     }
 
     pub fn run(&self, args: &[&str]) -> std::io::Result<Output> {
-        self.command().args(args).output()
+        let mut command = self.command();
+        command.args(args);
+        if args.first() == Some(&"init") {
+            command.arg("--yes");
+        }
+        command.output()
     }
 }
 

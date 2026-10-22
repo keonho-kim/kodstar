@@ -4,6 +4,8 @@
 // Related: crates/kodstar-core/src/application/analysis/mod.rs, crates/kodstar-core/src/domain/facts/fingerprint.rs.
 
 use crate::domain::diagnostics::Result;
+use crate::infrastructure::index::FileRecord;
+use crate::infrastructure::index::invalidation;
 use rusqlite::Connection;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
@@ -14,7 +16,12 @@ pub(super) enum Resolution {
     All,
 }
 
-pub(super) fn reusable_bodies(connection: &Connection) -> Result<bool> {
+pub(super) fn reusable_bodies(connection: &Connection, record: &FileRecord) -> Result<bool> {
+    // Identical extraction environments keep Go declarations, imports and method sets stable.
+    // The partial resolver separately rebuilds dispatch for the replaced call facts.
+    if record.language == "go" {
+        return Ok(true);
+    }
     Ok(connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM files WHERE language='rust' AND status='analyzed')
          AND NOT EXISTS(SELECT 1 FROM files WHERE status='analyzed' AND language<>'rust')
@@ -26,4 +33,17 @@ pub(super) fn reusable_bodies(connection: &Connection) -> Result<bool> {
              ('inherits','implements','mixes_in','overrides','dispatch_candidate'))",
         [], |r| r.get(0),
     )?)
+}
+
+pub(super) fn scoped_declarations(connection: &Connection, record: &FileRecord) -> Result<bool> {
+    if record.language != "go" || !invalidation::only_go(connection)? {
+        return Ok(false);
+    }
+    if let Some(id) = invalidation::prior_file(connection, record)?
+        && !invalidation::package_functions(connection, id)?
+    {
+        return Ok(false);
+    }
+    invalidation::capture(connection, record)?;
+    Ok(true)
 }

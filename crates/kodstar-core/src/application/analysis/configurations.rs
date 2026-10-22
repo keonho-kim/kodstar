@@ -7,11 +7,10 @@ use super::{module_identity::module_identity, resolve::indexed_paths};
 use crate::application::workspace::SelectedProject;
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::{Error, ErrorKind, Result};
-use crate::domain::languages::Language;
 use crate::domain::results::Progress;
 use crate::infrastructure::cache::paths::path_from_bytes;
+use crate::infrastructure::index;
 use crate::infrastructure::parse::ParseSession;
-use crate::infrastructure::{formats, index, scan};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 
@@ -22,8 +21,27 @@ pub(super) fn run(
     cancel: &Cancellation,
     progress: &mut dyn FnMut(&Progress) -> Result<()>,
 ) -> Result<(bool, u64)> {
+    let connection = &crate::infrastructure::index::cached::Sql::new(connection)?;
     connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS configuration_queue(id INTEGER PRIMARY KEY,depth INTEGER,done INTEGER); DELETE FROM configuration_queue;
         INSERT OR IGNORE INTO configuration_queue SELECT file_id,0,0 FROM bindings WHERE kind='configuration' AND name='root';")?;
+    let snapshot = selected
+        .snapshot
+        .as_ref()
+        .ok_or_else(|| Error::operation("configuration analysis requires a captured checkpoint"))?;
+    let pending: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM configuration_queue)",
+        [],
+        |r| r.get(0),
+    )?;
+    let input_connection = if pending {
+        Some(std::rc::Rc::new(snapshot.open(cancel)?))
+    } else {
+        None
+    };
+    let mut inputs = input_connection
+        .as_ref()
+        .map(crate::infrastructure::history::inputs::Reader::new)
+        .transpose()?;
     let mut parser = None;
     let mut parsed = 0;
     loop {
@@ -52,12 +70,14 @@ pub(super) fn run(
             connection.query_row("SELECT path FROM files WHERE id=?1", [id], |r| r.get(0))?;
         let path = path_from_bytes(&raw_path)?;
         if !known {
-            parse(
+            super::configuration_input::parse(
                 selected,
+                inputs
+                    .as_mut()
+                    .ok_or_else(|| Error::operation("missing configuration reader"))?,
                 connection,
                 generation,
-                id,
-                &path,
+                super::configuration_input::File { id, path: &path },
                 parser.get_or_insert_with(|| ParseSession::new(selected.settings.fact_batch_bytes)),
                 cancel,
             )?;
@@ -116,96 +136,13 @@ pub(super) fn run(
         let Some((id, path)) = orphan else { break };
         connection.execute("DELETE FROM configuration_orphans WHERE id=?1", [id])?;
         let path = path_from_bytes(&path)?;
-        let (package, module) = module_identity(&selected.root, &path, None);
+        let (package, module) = module_identity(&selected.root, &path, None, Path::new(""));
         index::clear_file(connection, id)?;
-        connection.execute("UPDATE files SET status='unsupported',language='unsupported',package=?2,module=?3,path_module=?3,content_hash='' WHERE id=?1",params![id,package,module])?;
+        connection.execute("UPDATE files SET status='unsupported',language='unsupported',package=?2,module=?3,path_module=?3 WHERE id=?1",params![id,package,module])?;
         connection.execute("INSERT INTO diagnostics(file_id,code,message) VALUES(?1,'unsupported_input','unsupported_input')",[id])?;
         changed = true;
     }
     Ok((changed, parsed))
-}
-
-fn parse(
-    selected: &SelectedProject,
-    connection: &Connection,
-    generation: i64,
-    id: i64,
-    path: &Path,
-    parser: &mut ParseSession,
-    cancel: &Cancellation,
-) -> Result<()> {
-    let status: String =
-        connection.query_row("SELECT status FROM files WHERE id=?1", [id], |r| r.get(0))?;
-    if status == "skipped" {
-        return Err(Error::new(
-            ErrorKind::Limit,
-            "referenced configuration exceeds the input limit",
-        ));
-    }
-    if status != "unsupported" {
-        return Err(Error::operation(
-            "referenced configuration is already classified as a different input kind",
-        ));
-    }
-    let absolute = selected.root.join(path);
-    let canonical = std::fs::canonicalize(&absolute)
-        .map_err(|e| Error::io("resolve configuration", &absolute, e))?;
-    let metadata = std::fs::symlink_metadata(&absolute)
-        .map_err(|e| Error::io("inspect configuration", &absolute, e))?;
-    if !canonical.starts_with(&selected.root) || !metadata.is_file() {
-        return Err(Error::operation(
-            "configuration is outside the indexed root or no longer a regular file",
-        ));
-    }
-    let entry = scan::Entry {
-        relative: path.to_path_buf(),
-        absolute,
-        metadata,
-        language: None,
-        auxiliary: true,
-        detect_prefix: false,
-    };
-    let (source, metadata) = scan::read_stable(&entry, selected.settings.max_file_bytes)?;
-    if source.len() > selected.settings.max_file_bytes {
-        return Err(Error::new(
-            ErrorKind::Limit,
-            "referenced configuration exceeds max_file_bytes",
-        ));
-    }
-    let after = std::fs::canonicalize(&entry.absolute)
-        .map_err(|e| Error::io("recheck configuration", &entry.absolute, e))?;
-    if !after.starts_with(&selected.root) {
-        return Err(Error::operation(
-            "configuration target changed outside the indexed root",
-        ));
-    }
-    let (package, module) = module_identity(&selected.root, path, Some(Language::TypeScript));
-    let (modified_ns, changed_ns) = scan::metadata_key(&metadata)?;
-    let record = index::FileRecord {
-        path: path.to_path_buf(),
-        language: "auxiliary".into(),
-        module,
-        package,
-        content_hash: blake3::hash(&source).to_hex().to_string(),
-        size: metadata.len(),
-        modified_ns,
-        changed_ns,
-        status: "auxiliary",
-    };
-    record.persist(connection, generation)?;
-    index::clear_file(connection, id)?;
-    let mut context = index::FileFacts::new(id, &record, false);
-    let mut writer = index::FactWriter::new(connection)?;
-    formats::extract_configuration(parser, path, &source, cancel, &mut |language, fact| {
-        cancel.check()?;
-        if fact.owned_bytes() > selected.settings.fact_batch_bytes {
-            return Err(Error::new(
-                ErrorKind::Limit,
-                "configuration fact exceeds fact_batch_bytes",
-            ));
-        }
-        writer.persist(&mut context, language, fact)
-    })
 }
 
 fn external(connection: &Connection, file: i64) -> Result<()> {

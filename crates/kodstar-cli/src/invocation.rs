@@ -4,9 +4,10 @@
 // Related: crates/kodstar-cli/src/args.rs, crates/kodstar-cli/src/run.rs.
 
 use clap::ArgMatches;
+mod history;
 use kodstar_core::{
-    BuildOptions, CacheRequest, Depth, Direction, Error, Limit, ProjectOptions, Query,
-    QueryOptions, Refresh, RelationKind, Result, Selector, SettingsOverrides,
+    CacheRequest, Depth, Direction, Error, InitOptions, Limit, ProjectOptions, Query, QueryOptions,
+    Refresh, RelationKind, Result, Selector, SettingsOverrides,
 };
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -25,7 +26,8 @@ pub(crate) struct QueryRequest {
 }
 
 pub(crate) enum Action {
-    Build(BuildOptions),
+    History(kodstar_core::HistoryRequest),
+    Init(InitOptions),
     Query(Box<QueryRequest>),
     Status {
         doctor: bool,
@@ -36,6 +38,8 @@ pub(crate) enum Action {
     },
     Watch,
     Serve,
+    Install,
+    Uninstall,
     Cache {
         request: CacheRequest,
         refresh: Refresh,
@@ -43,6 +47,7 @@ pub(crate) enum Action {
 }
 
 pub(crate) struct Invocation {
+    pub yes: bool,
     pub project: Option<ProjectOptions>,
     pub action: Action,
     pub format: Format,
@@ -53,11 +58,8 @@ impl Invocation {
         let (name, outer) = matches
             .subcommand()
             .ok_or_else(|| Error::argument("a command is required"))?;
-        let args = if name == "cache" {
-            outer
-                .subcommand()
-                .map(|(_, args)| args)
-                .ok_or_else(|| Error::argument("a cache command is required"))?
+        let args = if matches!(name, "cache" | "history" | "branch") {
+            outer.subcommand().map(|(_, args)| args).unwrap_or(outer)
         } else {
             outer
         };
@@ -67,7 +69,7 @@ impl Invocation {
             Some("tsv") => Format::Tsv,
             _ => Format::Text,
         };
-        let project = if name == "serve" {
+        let project = if matches!(name, "serve" | "__install" | "uninstall") {
             None
         } else {
             let cwd = std::env::current_dir()
@@ -84,7 +86,7 @@ impl Invocation {
             })
         };
         let action = match name {
-            "build" => Action::Build(BuildOptions {
+            "init" => Action::Init(InitOptions {
                 path: value(args, "path"),
                 full: flag(args, "full"),
                 verify: flag(args, "verify"),
@@ -98,6 +100,9 @@ impl Invocation {
             },
             "watch" => Action::Watch,
             "serve" => Action::Serve,
+            "__install" => Action::Install,
+            "uninstall" => Action::Uninstall,
+            "history" | "branch" => Action::History(history::parse(name, outer, args)?),
             "cache" => Action::Cache {
                 request: match outer.subcommand_name() {
                     Some("list") => CacheRequest::List,
@@ -121,6 +126,7 @@ impl Invocation {
             })),
         };
         Ok(Self {
+            yes: flag(args, "yes"),
             project,
             action,
             format,
@@ -129,6 +135,11 @@ impl Invocation {
 }
 
 fn query(name: &str, args: &ArgMatches) -> Result<Query> {
+    if name == "impact"
+        && let Some(since) = value(args, "since")
+    {
+        return Ok(Query::Changes { since });
+    }
     if name == "path" {
         return Ok(Query::Path {
             from: Selector::parse(&required::<String>(args, "from")?)?,
@@ -170,6 +181,7 @@ fn query(name: &str, args: &ArgMatches) -> Result<Query> {
 
 fn query_options(args: &ArgMatches) -> QueryOptions {
     QueryOptions {
+        revision: value(args, "rev"),
         refresh: refresh(args),
         direction: value::<Direction>(args, "direction"),
         relations: args
@@ -228,7 +240,8 @@ impl Action {
     pub(crate) fn command(&self) -> Result<kodstar_core::Command<'_>> {
         use kodstar_core::Command;
         Ok(match self {
-            Self::Build(options) => Command::Build(options),
+            Self::History(request) => Command::History(request),
+            Self::Init(options) => Command::Init(options),
             Self::Query(request) => Command::Query {
                 query: &request.query,
                 options: &request.options,
@@ -243,7 +256,7 @@ impl Action {
                 refresh: *refresh,
             },
             Self::Watch => Command::Watch,
-            Self::Serve => {
+            Self::Serve | Self::Install | Self::Uninstall => {
                 return Err(Error::argument(
                     "session transport is not an engine command",
                 ));

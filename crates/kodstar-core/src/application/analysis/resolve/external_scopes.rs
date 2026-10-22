@@ -45,14 +45,14 @@ impl Lookup<'_, '_> {
         let present = self.external_present;
         if present && frame.parent != frame.child {
             if keep {
-                self.connection.execute("INSERT OR IGNORE INTO resolution_externals SELECT ?1,key FROM resolution_externals WHERE scope=?2",params![frame.parent,self.external_scope_id])?;
+                self.connection.cached_execute("INSERT OR IGNORE INTO resolution_externals SELECT ?1,key FROM resolution_externals WHERE scope=?2",params![frame.parent,self.external_scope_id])?;
             }
-            self.connection.execute(
+            self.connection.cached_execute(
                 "DELETE FROM resolution_externals WHERE scope=?1",
                 [self.external_scope_id],
             )?;
         } else if present && !keep {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "DELETE FROM resolution_externals WHERE scope=?1",
                 [frame.child],
             )?;
@@ -63,7 +63,7 @@ impl Lookup<'_, '_> {
     }
 
     pub(super) fn external_target(&mut self, key: &str) -> Result<()> {
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_externals VALUES(?1,?2)",
             params![self.external_scope_id, key],
         )?;
@@ -77,7 +77,7 @@ impl Lookup<'_, '_> {
 
     pub(super) fn clear_externals(&mut self) -> Result<()> {
         if self.external_present {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "DELETE FROM resolution_externals WHERE scope=?1",
                 [self.external_scope_id],
             )?;
@@ -88,7 +88,7 @@ impl Lookup<'_, '_> {
 
     pub(super) fn external_members(&mut self, name: &str) -> Result<()> {
         if self.has_externals() {
-            self.connection.execute(
+            self.connection.cached_execute(
                 "UPDATE resolution_externals SET key=key||'::'||?2 WHERE scope=?1",
                 params![self.external_scope_id, name],
             )?;

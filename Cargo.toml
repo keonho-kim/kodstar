@@ -14,14 +14,13 @@ kodstar-core = { path = "crates/kodstar-core" }
 clap = { version = "4.6.7", default-features = false, features = ["std", "help", "usage", "error-context", "string"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
-rusqlite = { version = "0.40.2", default-features = false, features = ["libsqlite3-sys", "bundled", "limits", "fallible_uint", "hooks"] }
+rusqlite = { version = "0.40.2", default-features = false, features = ["libsqlite3-sys", "bundled", "limits", "fallible_uint", "hooks", "functions", "vtab"] }
 blake3 = { version = "1.8", default-features = false, features = ["std", "pure"] }
 ignore = "0.4.33"
 globset = "0.4"
 config = { version = "0.15.27", default-features = false, features = ["toml"] }
 notify = "=8.2.0"
 nix = { version = "=0.31.3", default-features = false, features = ["signal", "poll"] }
-windows-sys = { version = "=0.61.2", features = ["Win32_System_Console", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_IO"] }
 tree-sitter = "=0.27.1"
 tree-sitter-python = "=0.25.0"
 tree-sitter-javascript = "=0.25.0"
@@ -57,3 +56,7 @@ unimplemented = "deny"
 
 [patch.crates-io]
 tree-sitter-kotlin-ng = { path = "vendor/tree-sitter-kotlin-ng" }
+
+[profile.dist]
+inherits = "release"
+strip = "symbols"

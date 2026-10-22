@@ -51,8 +51,7 @@ fn all_secondary_commands_synchronize_before_running() -> TestResult {
 }
 
 #[test]
-fn failed_synchronization_stops_the_handler_but_cached_diagnostics_and_cleanup_work() -> TestResult
-{
+fn failed_synchronization_stops_queries_but_diagnostics_and_cleanup_work() -> TestResult {
     let project = Project::new()?;
     project.write("main.rs", "fn first() {}")?;
     let first = project.build(false)?;
@@ -60,15 +59,31 @@ fn failed_synchronization_stops_the_handler_but_cached_diagnostics_and_cleanup_w
     let mut sink = Collected::default();
     let error = project
         .engine
-        .status(
+        .query(
             &project.options(),
-            false,
+            &Query::Symbols {
+                file: "main.rs".into(),
+            },
+            &QueryOptions::default(),
             &Cancellation::default(),
             &mut sink,
         )
         .expect_err("must synchronize");
     assert_eq!(error.kind, ErrorKind::Operation);
     assert!(sink.rows.is_empty());
+    project.engine.status(
+        &project.options(),
+        false,
+        &Cancellation::default(),
+        &mut sink,
+    )?;
+    let state = sink
+        .metadata
+        .ok_or("diagnostic metadata")?
+        .history
+        .ok_or("history")?;
+    assert!(state.analysis_error.is_some());
+    assert_ne!(Some(state.checkpoint), state.analysis_checkpoint);
     let mut cached = Collected::default();
     project.engine.execute(
         &project.options(),
@@ -103,7 +118,7 @@ fn failed_synchronization_stops_the_handler_but_cached_diagnostics_and_cleanup_w
     )?;
     assert_eq!(
         recovered.metadata.ok_or("recovered metadata")?.generation,
-        Some(first.generation)
+        Some(first.generation + 1)
     );
     assert!(recovered.rows.iter().any(|row| matches!(row, QueryRow::Status(status) if status.last_update == "complete" && status.last_error.is_none())));
     project.write("main.rs", "fn broken( {")?;

@@ -13,7 +13,5 @@
 /.kodstar/
 /tmp/
 /artifacts/
-
-# VS Code adapter development output
-/editors/vscode/node_modules/
-/editors/vscode/dist/
+__pycache__/
+*.py[cod]

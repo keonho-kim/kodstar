@@ -1,4 +1,4 @@
-// Purpose: 파일 경로의 package·module 식별.
+// Purpose: 보존 manifest와 파일 경로의 package·module 식별.
 // Pattern: Simple Module.
 // Usage: discovery가 파일 상태 구성 시 호출.
 // Related: crates/kodstar-core/src/application/analysis/discovery.rs.
@@ -7,11 +7,11 @@ use crate::domain::languages::Language;
 use crate::infrastructure::cache::paths::{cache_key, path_bytes};
 use std::path::{Path, PathBuf};
 
-pub(super) fn module_identity(
-    root: &Path,
-    relative: &Path,
+pub(super) fn package_path(
+    entry: &crate::infrastructure::history::inputs::Entry,
     language: Option<Language>,
-) -> (String, String) {
+) -> crate::domain::diagnostics::Result<PathBuf> {
+    let relative = &entry.relative;
     let marker = match language {
         Some(Language::Rust) => "Cargo.toml",
         Some(Language::Go) => "go.mod",
@@ -36,14 +36,23 @@ pub(super) fn module_identity(
             .unwrap_or_else(|| Path::new(""))
             .ancestors()
         {
-            if root.join(directory).join(marker).is_file() {
+            if entry.has_file(&directory.join(marker))? {
                 package_path = directory.to_path_buf();
                 break;
             }
         }
     }
-    let local = relative.strip_prefix(&package_path).unwrap_or(relative);
-    let package = cache_key(&root.join(&package_path));
+    Ok(package_path)
+}
+
+pub(super) fn module_identity(
+    root: &Path,
+    relative: &Path,
+    language: Option<Language>,
+    package_path: &Path,
+) -> (String, String) {
+    let local = relative.strip_prefix(package_path).unwrap_or(relative);
+    let package = cache_key(&root.join(package_path));
     if local.to_str().is_none() {
         return (
             package,

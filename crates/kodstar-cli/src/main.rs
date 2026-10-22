@@ -3,7 +3,12 @@
 // Usage: kodstar 실행 파일.
 // Related: crates/kodstar-cli/src/args.rs, crates/kodstar-cli/src/invocation.rs, crates/kodstar-cli/src/run.rs, crates/kodstar-cli/src/output.rs.
 
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+compile_error!("KodStar supports macOS and Linux only");
+
 mod args;
+mod confirmation;
+mod installation;
 mod invocation;
 mod output;
 mod run;

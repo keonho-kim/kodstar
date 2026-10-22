@@ -3,6 +3,10 @@
 // Usage: engine과 언어·혼합 입력 회귀 사례가 사용.
 // Related: crates/kodstar-core/tests/engine.rs.
 
+pub mod encoding;
+pub mod packed;
+pub mod packed_mutations;
+pub mod postings;
 pub mod snapshot;
 
 use std::fs;
@@ -20,6 +24,16 @@ pub struct Project {
     pub engine: Engine,
 }
 impl Project {
+    pub fn history(&self, request: HistoryRequest) -> Result<Collected> {
+        let mut sink = Collected::default();
+        self.engine.history(
+            &self.options(),
+            &request,
+            &Cancellation::default(),
+            &mut sink,
+        )?;
+        Ok(sink)
+    }
     pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let directory = std::env::temp_dir().join(format!(
@@ -47,10 +61,10 @@ impl Project {
     pub fn options(&self) -> ProjectOptions {
         ProjectOptions::new(self.root.clone())
     }
-    pub fn build(&self, full: bool) -> Result<BuildReport> {
-        self.engine.build(
+    pub fn build(&self, full: bool) -> Result<InitReport> {
+        self.engine.init(
             &self.options(),
-            BuildOptions {
+            InitOptions {
                 full,
                 verify: true,
                 path: None,
@@ -80,7 +94,7 @@ impl Drop for Project {
         let _ = fs::remove_dir_all(&self.directory);
     }
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Collected {
     pub metadata: Option<QueryMetadata>,
     pub rows: Vec<QueryRow>,

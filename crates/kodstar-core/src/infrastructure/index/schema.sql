@@ -1,4 +1,4 @@
--- Purpose: 분석 사실·객체·관계·세대의 저장 제약과 인덱스.
+-- Purpose: 분석 파일·사실·객체·세대의 저장 제약과 인덱스.
 -- Pattern: SQLite Schema.
 -- Usage: 빈 index를 초기화할 때 index adapter가 실행.
 -- Related: crates/kodstar-core/src/infrastructure/index/mod.rs, crates/kodstar-core/src/infrastructure/index/write.rs.
@@ -11,6 +11,8 @@ CREATE TABLE metadata (
     indexed_at INTEGER NOT NULL DEFAULT 0,
     last_update TEXT NOT NULL DEFAULT 'not_built',
     last_error TEXT,
+    checkpoint TEXT,
+    repository TEXT,
     engine_version TEXT NOT NULL,
     extraction_version INTEGER NOT NULL,
     relation_registry_version INTEGER NOT NULL
@@ -26,12 +28,10 @@ CREATE TABLE files (
     path_module TEXT NOT NULL,
     path_package TEXT NOT NULL,
     package TEXT NOT NULL DEFAULT '',
-    content_hash TEXT NOT NULL DEFAULT '',
-    facts_hash TEXT NOT NULL DEFAULT '',
-    environment_hash TEXT NOT NULL DEFAULT '',
+    content_hash BLOB NOT NULL CHECK(length(content_hash)=32),
+    facts_hash BLOB NOT NULL DEFAULT X'' CHECK(length(facts_hash) IN (0,32)),
+    environment_hash BLOB NOT NULL DEFAULT X'' CHECK(length(environment_hash) IN (0,32)),
     size INTEGER NOT NULL CHECK (size >= 0),
-    modified_ns TEXT NOT NULL,
-    changed_ns TEXT NOT NULL,
     seen_generation INTEGER NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('analyzed', 'skipped', 'unsupported', 'auxiliary'))
 );
@@ -60,7 +60,7 @@ CREATE TABLE scopes (
     end_byte INTEGER NOT NULL CHECK (end_byte >= start_byte),
     PRIMARY KEY (file_id, local_id),
     FOREIGN KEY (file_id, parent) REFERENCES scopes(file_id, local_id)
-);
+) WITHOUT ROWID;
 
 CREATE TABLE symbols (
     id INTEGER PRIMARY KEY,
@@ -141,30 +141,22 @@ CREATE TABLE facts (
 CREATE INDEX facts_source ON facts(source_id, relation);
 CREATE INDEX facts_file ON facts(file_id, relation);
 
-CREATE TABLE relationships (
-    id INTEGER PRIMARY KEY,
-    fact_id INTEGER NOT NULL REFERENCES facts(id) ON DELETE CASCADE,
-    source_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
-    target_id INTEGER REFERENCES symbols(id) ON DELETE CASCADE,
-    external_key TEXT,
-    resolution TEXT NOT NULL CHECK (resolution IN ('resolved', 'candidate', 'ambiguous', 'unresolved')),
-    rule TEXT NOT NULL,
-    reason TEXT,
-    CHECK (NOT (target_id IS NOT NULL AND external_key IS NOT NULL)),
-    CHECK (resolution <> 'resolved' OR target_id IS NOT NULL OR external_key IS NOT NULL)
-);
-CREATE INDEX relationships_out ON relationships(source_id, resolution, target_id, fact_id);
-CREATE INDEX relationships_in ON relationships(target_id, resolution, source_id, fact_id);
-CREATE INDEX relationships_fact ON relationships(fact_id);
-
-CREATE TABLE lookup_dependencies (
-    fact_id INTEGER NOT NULL REFERENCES facts(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL,
-    lookup_key TEXT NOT NULL,
-    found INTEGER NOT NULL CHECK (found IN (0, 1)),
-    PRIMARY KEY (fact_id, kind, lookup_key)
-);
-CREATE INDEX lookup_dependencies_key ON lookup_dependencies(kind, lookup_key, fact_id);
+CREATE TABLE lookup_blocks (
+    key_id INTEGER NOT NULL REFERENCES dictionary_ids(id),
+    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    part INTEGER NOT NULL CHECK(part>=0),
+    count INTEGER NOT NULL CHECK(count BETWEEN 1 AND 128),
+    payload BLOB NOT NULL CHECK(length(payload) BETWEEN 1 AND 1280),
+    PRIMARY KEY (key_id, file_id, part)
+) WITHOUT ROWID;
+CREATE INDEX lookup_blocks_file ON lookup_blocks(file_id);
+CREATE VIEW fact_lookups AS
+    SELECT json_extract(j.value,'$[0]') AS fact_id,b.key_id,
+           json_extract(j.value,'$[1]') AS found
+    FROM lookup_blocks b,json_each(kodstar_postings(b.payload,b.count)) j;
+CREATE VIEW lookup_dependencies AS
+    SELECT d.fact_id,k.kind,k.lookup_key,d.found
+    FROM fact_lookups d JOIN lookup_keys k ON k.id=d.key_id;
 
 CREATE TABLE diagnostics (
     id INTEGER PRIMARY KEY,

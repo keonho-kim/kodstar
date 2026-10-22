@@ -23,7 +23,11 @@ pub(super) fn file_id(
     selected: &SelectedProject,
     file: &Path,
 ) -> Result<i64> {
-    let path = relative_source(&selected.root, &selected.cwd, file)?;
+    let path = if selected.historical {
+        crate::infrastructure::history::paths::from_input(&selected.root, &selected.cwd, file)?
+    } else {
+        relative_source(&selected.root, &selected.cwd, file)?
+    };
     connection
         .query_row(
             "SELECT id FROM files WHERE path=?1",

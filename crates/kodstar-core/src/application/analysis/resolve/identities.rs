@@ -5,11 +5,12 @@
 
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 
 pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
     c.execute_batch("DELETE FROM symbol_identities; UPDATE symbols SET logical_key=syntax_key,qualified_name=syntax_qualified_name,kind=syntax_kind;")?;
-    let mut statement=c.prepare("SELECT s.id,s.syntax_key,f.package,s.qualified_name,s.kind,s.condition,
+    let mut statement=c.cached_prepare("SELECT s.id,s.syntax_key,f.package,s.qualified_name,s.kind,s.condition,
         (SELECT b.imported_name FROM bindings b JOIN dotnet_membership d ON d.file_id=b.file_id WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='csharp_partial' AND d.merge_allowed=1 LIMIT 1)
         FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language='csharp' ORDER BY s.id")?;
     let records = statement.query_map([], |r| {
@@ -43,7 +44,7 @@ pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
             hash.update(&(part.len() as u64).to_le_bytes());
             hash.update(part.as_bytes());
         }
-        c.execute(
+        c.cached_execute(
             "UPDATE symbols SET logical_key=?1 WHERE id=?2",
             params![hash.finalize().to_hex().to_string(), id],
         )?;
@@ -73,9 +74,9 @@ pub(super) fn rebuild(c: &Connection) -> Result<()> {
 }
 
 fn erlang(c: &Connection, cancel: &Cancellation) -> Result<()> {
-    c.execute("UPDATE symbols SET exported=EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=symbols.file_id AND b.kind='erlang_export' AND b.name IN (symbols.name,'*')) WHERE language='erlang' AND kind='function'",[])?;
-    c.execute("UPDATE symbols SET exported=EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=symbols.file_id AND b.kind='erlang_type_export' AND b.name=symbols.name) WHERE language='erlang' AND kind='type'",[])?;
-    let mut statement=c.prepare("SELECT s.id,f.package,f.module,f.path,s.qualified_name,s.kind,COALESCE(s.condition,'') FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language='erlang' AND s.kind='function' ORDER BY s.id")?;
+    c.cached_execute("UPDATE symbols SET exported=EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=symbols.file_id AND b.kind='erlang_export' AND b.name IN (symbols.name,'*')) WHERE language='erlang' AND kind='function'",[])?;
+    c.cached_execute("UPDATE symbols SET exported=EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=symbols.file_id AND b.kind='erlang_type_export' AND b.name=symbols.name) WHERE language='erlang' AND kind='type'",[])?;
+    let mut statement=c.cached_prepare("SELECT s.id,f.package,f.module,f.path,s.qualified_name,s.kind,COALESCE(s.condition,'') FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language='erlang' AND s.kind='function' ORDER BY s.id")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         cancel.check()?;
@@ -89,7 +90,7 @@ fn erlang(c: &Connection, cancel: &Cancellation) -> Result<()> {
         let path: Vec<u8> = row.get(3)?;
         hash.update(&(path.len() as u64).to_le_bytes());
         hash.update(&path);
-        c.execute(
+        c.cached_execute(
             "UPDATE symbols SET logical_key=?1 WHERE id=?2",
             params![hash.finalize().to_hex().to_string(), id],
         )?;
@@ -98,7 +99,7 @@ fn erlang(c: &Connection, cancel: &Cancellation) -> Result<()> {
 }
 
 fn elixir(c: &Connection, cancel: &Cancellation) -> Result<()> {
-    let mut statement=c.prepare("SELECT s.id,f.package,f.path,s.qualified_name,s.kind,COALESCE(s.condition,''),b.module_name
+    let mut statement=c.cached_prepare("SELECT s.id,f.package,f.path,s.qualified_name,s.kind,COALESCE(s.condition,''),b.module_name
         FROM symbols s
         JOIN files f ON f.id=s.file_id
         JOIN bindings b ON b.file_id=s.file_id
@@ -120,7 +121,7 @@ fn elixir(c: &Connection, cancel: &Cancellation) -> Result<()> {
         let path: Vec<u8> = row.get(2)?;
         hash.update(&(path.len() as u64).to_le_bytes());
         hash.update(&path);
-        c.execute(
+        c.cached_execute(
             "UPDATE symbols SET logical_key=?1 WHERE id=?2",
             params![hash.finalize().to_hex().to_string(), id],
         )?;
@@ -144,6 +145,6 @@ pub(super) fn candidates(c: &Connection) -> Result<()> {
 }
 
 pub(super) fn relationships(c: &Connection) -> Result<()> {
-    c.execute_batch("UPDATE relationships SET source_id=(SELECT canonical_id FROM symbol_identities WHERE symbol_id=relationships.source_id),target_id=(SELECT canonical_id FROM symbol_identities WHERE symbol_id=relationships.target_id);")?;
+    c.execute_batch("UPDATE relationship_rows SET source_id=(SELECT canonical_id FROM symbol_identities WHERE symbol_id=relationship_rows.source_id),target_id=(SELECT canonical_id FROM symbol_identities WHERE symbol_id=relationship_rows.target_id);")?;
     Ok(())
 }

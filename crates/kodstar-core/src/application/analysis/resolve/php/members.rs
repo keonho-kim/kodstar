@@ -5,7 +5,8 @@
 
 use crate::application::analysis::resolve::Lookup;
 use crate::domain::diagnostics::Result;
-use rusqlite::{Connection, params};
+use crate::infrastructure::index::cached::Sql as Connection;
+use rusqlite::params;
 
 pub(in crate::application::analysis::resolve) fn reset(c: &Connection) -> Result<()> {
     c.execute_batch(include_str!("traits.sql"))?;
@@ -19,8 +20,8 @@ impl Lookup<'_, '_> {
     ) -> Result<()> {
         self.php_prepare_traits()?;
         self.connection
-            .execute("DELETE FROM resolution_members", [])?;
-        self.connection.execute(
+            .cached_execute("DELETE FROM resolution_members", [])?;
+        self.connection.cached_execute(
             include_str!("members.sql"),
             params![name, self.namespace.as_str(), self.fact],
         )?;

@@ -32,7 +32,7 @@ impl Lookup<'_, '_> {
             return Ok(Location::Unmapped);
         };
         let workspace = self.go_workspace(c, &own)?;
-        let mut modules = self.connection.prepare(
+        let mut modules = self.connection.cached_prepare(
             "SELECT m.package,m.declared_module
             FROM files m
             WHERE (m.id=?1
@@ -72,7 +72,7 @@ impl Lookup<'_, '_> {
             }
             return Ok(Location::Project);
         }
-        let replacement=self.connection.query_row("SELECT f.path,b.name,b.imported_name,b.module_name,b.type_name
+        let replacement=self.connection.cached_row("SELECT f.path,b.name,b.imported_name,b.module_name,b.type_name
             FROM bindings b JOIN files f ON f.id=b.file_id
             WHERE b.kind='go_replace' AND (b.file_id=?1 OR b.file_id=?2)
               AND (?3=b.name OR substr(?3,1,length(b.name)+1)=b.name||'/')
@@ -131,7 +131,7 @@ impl Lookup<'_, '_> {
     }
 
     fn go_package_files(&self, package: &str, module: &str, depth: usize) -> Result<()> {
-        self.connection.execute("INSERT OR IGNORE INTO resolution_modules SELECT ?3,id FROM files WHERE language='go' AND package=?1 AND module=?2 AND status='analyzed'",params![package,module,depth])?;
+        self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT ?3,id FROM files WHERE language='go' AND package=?1 AND module=?2 AND status='analyzed'",params![package,module,depth])?;
         Ok(())
     }
 }

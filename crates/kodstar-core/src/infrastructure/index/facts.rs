@@ -21,6 +21,9 @@ pub(crate) struct FileFacts {
     preserve: bool,
 }
 impl FileFacts {
+    pub(crate) fn preserves_definitions(&self) -> bool {
+        self.preserve
+    }
     pub(crate) fn new(id: i64, record: &FileRecord, preserve: bool) -> Self {
         Self {
             id,
@@ -157,7 +160,7 @@ impl<'conn> FactWriter<'conn> {
             }
             Fact::Binding(binding) => {
                 if context.preserve {
-                    if binding.kind == "function" {
+                    if matches!(binding.kind, "function" | "go_signature") {
                         self.statements.execute(
                             Write::UpdateFunctionEnd,
                             params![binding.span.end_byte, file, binding.target],

@@ -34,7 +34,7 @@ impl Lookup<'_, '_> {
         {
             return Ok(ValueOrigin::Other);
         }
-        let marked:Option<bool>=self.connection.query_row("SELECT b.module_name='getattr' FROM bindings b JOIN facts f ON f.file_id=b.file_id
+        let marked:Option<bool>=self.connection.cached_row("SELECT b.module_name='getattr' FROM bindings b JOIN facts f ON f.file_id=b.file_id
             WHERE f.id=?1 AND b.scope_id=?2 AND b.name_key='@callable-value' AND b.start_byte=?3 AND b.kind='callable_value' LIMIT 1",params![self.fact,scope,position],|r|r.get(0)).optional()?;
         match marked {
             None => Ok(ValueOrigin::Other),
@@ -42,13 +42,13 @@ impl Lookup<'_, '_> {
             Some(true) => {
                 let frame = self.external_scope()?;
                 self.expression(context, scope, position, "getattr", 0)?;
-                let builtin:bool=self.connection.query_row("SELECT
+                let builtin:bool=self.connection.cached_row("SELECT
                     NOT EXISTS(SELECT 1 FROM resolution_candidates)
                     AND EXISTS(SELECT 1 FROM resolution_externals WHERE scope=?1 AND key='builtin:python:getattr')
                     AND NOT EXISTS(SELECT 1 FROM resolution_externals WHERE scope=?1 AND key<>'builtin:python:getattr')
                     AND NOT EXISTS(SELECT 1 FROM resolution_dependencies WHERE fact_id=?2 AND kind LIKE 'scope:%' AND lookup_key GLOB '*:getattr' AND found=1)",params![self.external_scope_id,self.fact],|r|r.get(0))?;
                 self.connection
-                    .execute("DELETE FROM resolution_candidates", [])?;
+                    .cached_execute("DELETE FROM resolution_candidates", [])?;
                 self.finish_external_scope(frame, false)?;
                 self.reason = None;
                 self.candidate_only = false;
@@ -74,16 +74,16 @@ impl Lookup<'_, '_> {
         let getattr = origin == ValueOrigin::Getattr;
         let previous: u64 =
             self.connection
-                .query_row("SELECT COUNT(*) FROM resolution_candidates", [], |r| {
+                .cached_row("SELECT COUNT(*) FROM resolution_candidates", [], |r| {
                     r.get(0)
                 })?;
-        self.connection.execute("DELETE FROM resolution_candidates WHERE id NOT IN (SELECT id FROM symbols WHERE kind IN ('function','method'))",[])?;
+        self.connection.cached_execute("DELETE FROM resolution_candidates WHERE NOT EXISTS (SELECT 1 FROM symbols WHERE id=resolution_candidates.id AND (kind IN ('function','method')))",[])?;
         if self.relation == "indirect_call" {
-            self.connection.execute("DELETE FROM resolution_candidates WHERE id IN (SELECT s.id FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind IN ('python_property','callable_accessor'))",[])?;
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE id IN (SELECT s.id FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind IN ('python_property','callable_accessor'))",[])?;
         }
         let count: u64 =
             self.connection
-                .query_row("SELECT COUNT(*) FROM resolution_candidates", [], |r| {
+                .cached_row("SELECT COUNT(*) FROM resolution_candidates", [], |r| {
                     r.get(0)
                 })?;
         self.dependency("callable_value", expression, count > 0)?;
@@ -96,7 +96,7 @@ impl Lookup<'_, '_> {
             self.rule = "indirect_function_value";
             self.reason = Some("function value may be invoked; execution is not established");
         } else {
-            let accessor:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind IN ('python_property','callable_accessor'))",[],|r|r.get(0))?;
+            let accessor:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind IN ('python_property','callable_accessor'))",[],|r|r.get(0))?;
             self.rule = if accessor {
                 "accessor_value_origin_reference"
             } else if getattr {

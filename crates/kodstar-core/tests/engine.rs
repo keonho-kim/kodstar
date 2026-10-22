@@ -55,12 +55,30 @@ mod fields;
 mod formats;
 #[path = "cases/getattr_values.rs"]
 mod getattr_values;
+#[path = "cases/go_incremental.rs"]
+mod go_incremental;
 #[path = "cases/go_interfaces.rs"]
 mod go_interfaces;
 #[path = "cases/go_paths.rs"]
 mod go_paths;
+#[path = "cases/history_impact.rs"]
+mod history_impact;
+#[path = "cases/history_operations.rs"]
+mod history_operations;
+#[path = "cases/history_paths.rs"]
+mod history_paths;
+#[path = "cases/history_recovery.rs"]
+mod history_recovery;
+#[path = "cases/history_streaming.rs"]
+mod history_streaming;
+#[path = "cases/history_upgrade.rs"]
+mod history_upgrade;
+#[path = "cases/history_watch.rs"]
+mod history_watch;
 #[path = "cases/identities.rs"]
 mod identities;
+#[path = "cases/incremental_inputs.rs"]
+mod incremental_inputs;
 #[path = "cases/javascript.rs"]
 mod javascript;
 #[path = "cases/kotlin.rs"]
@@ -75,6 +93,8 @@ mod lisp;
 mod lisp_bindings;
 #[path = "cases/lisp_packages.rs"]
 mod lisp_packages;
+#[path = "cases/local_history.rs"]
+mod local_history;
 #[path = "cases/module_rules.rs"]
 mod module_rules;
 #[path = "cases/namespaces.rs"]
@@ -107,6 +127,8 @@ mod python_scope;
 mod razor;
 #[path = "cases/razor_ranges.rs"]
 mod razor_ranges;
+#[path = "cases/refresh_reuse.rs"]
+mod refresh_reuse;
 #[path = "cases/requests.rs"]
 mod requests;
 #[path = "cases/resolution.rs"]
@@ -301,9 +323,9 @@ fn byte_path_identity_and_symlink_root_are_not_display_string_identity() -> Test
         let link = project.directory.join("linked-project");
         symlink(&project.root, &link)?;
         let options = ProjectOptions::new(link);
-        let report = project.engine.build(
+        let report = project.engine.init(
             &options,
-            BuildOptions::default(),
+            InitOptions::default(),
             &Cancellation::default(),
             &mut |_| Ok(()),
         )?;

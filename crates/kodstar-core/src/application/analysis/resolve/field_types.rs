@@ -8,21 +8,21 @@ use crate::domain::diagnostics::Result;
 
 impl Lookup<'_, '_> {
     pub(super) fn field_types(&mut self) -> Result<()> {
-        let present:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c JOIN symbols s ON s.id=c.id WHERE s.kind='field')",[],|r|r.get(0))?;
+        let present:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id WHERE s.kind='field')",[],|r|r.get(0))?;
         if !present {
             return Ok(());
         }
         let depth = self.member_depth;
         self.connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS resolution_fields(depth INTEGER,id INTEGER,PRIMARY KEY(depth,id)); CREATE TEMP TABLE IF NOT EXISTS resolution_field_results(depth INTEGER,id INTEGER,PRIMARY KEY(depth,id));")?;
         self.connection
-            .execute("DELETE FROM resolution_fields WHERE depth=?1", [depth])?;
-        self.connection.execute(
+            .cached_execute("DELETE FROM resolution_fields WHERE depth=?1", [depth])?;
+        self.connection.cached_execute(
             "DELETE FROM resolution_field_results WHERE depth=?1",
             [depth],
         )?;
-        self.connection.execute("INSERT INTO resolution_fields SELECT ?1,s.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id WHERE s.kind='field'",[depth])?;
-        self.connection.execute("INSERT INTO resolution_field_results SELECT ?1,c.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id WHERE s.kind<>'field'",[depth])?;
-        let mut fields = self.connection.prepare(
+        self.connection.cached_execute("INSERT INTO resolution_fields SELECT ?1,s.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id WHERE s.kind='field'",[depth])?;
+        self.connection.cached_execute("INSERT INTO resolution_field_results SELECT ?1,c.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id WHERE s.kind<>'field'",[depth])?;
+        let mut fields = self.connection.cached_prepare(
             "SELECT s.file_id,b.scope_id,b.start_byte,CASE WHEN b.kind='swift_environment' THEN b.imported_name ELSE b.type_name END,s.language,b.imported_name,b.kind
             FROM resolution_fields c JOIN symbols s ON s.id=c.id
             JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id
@@ -50,7 +50,7 @@ impl Lookup<'_, '_> {
                 continue;
             };
             self.connection
-                .execute("DELETE FROM resolution_candidates", [])?;
+                .cached_execute("DELETE FROM resolution_candidates", [])?;
             if kind == "swift_environment"
                 && !self.swift_environment(&context, scope, position, depth + 1)?
             {
@@ -70,14 +70,14 @@ impl Lookup<'_, '_> {
             } else if let Some(producer) = producer {
                 self.call_result(&context, scope, position, &producer, depth + 1)?;
             }
-            self.connection.execute("INSERT OR IGNORE INTO resolution_field_results SELECT ?1,c.id FROM resolution_candidates c JOIN symbols s ON s.id=c.id WHERE s.kind IN ('class','struct','enum','type','interface','trait')",[depth])?;
+            self.connection.cached_execute("INSERT OR IGNORE INTO resolution_field_results SELECT ?1,c.id FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id WHERE s.kind IN ('class','struct','enum','type','interface','trait')",[depth])?;
         }
         self.connection
-            .execute("DELETE FROM resolution_candidates", [])?;
-        self.connection.execute("INSERT INTO resolution_candidates SELECT id FROM resolution_field_results WHERE depth=?1",[depth])?;
+            .cached_execute("DELETE FROM resolution_candidates", [])?;
+        self.connection.cached_execute("INSERT INTO resolution_candidates SELECT id FROM resolution_field_results WHERE depth=?1",[depth])?;
         self.connection
-            .execute("DELETE FROM resolution_fields WHERE depth=?1", [depth])?;
-        self.connection.execute(
+            .cached_execute("DELETE FROM resolution_fields WHERE depth=?1", [depth])?;
+        self.connection.cached_execute(
             "DELETE FROM resolution_field_results WHERE depth=?1",
             [depth],
         )?;

@@ -23,12 +23,12 @@ impl Lookup<'_, '_> {
         if context.language != Language::Python || scope == 0 {
             return Ok(None);
         }
-        let directive:Option<String>=self.connection.query_row(
+        let directive:Option<String>=self.connection.cached_row(
             "SELECT kind FROM bindings WHERE file_id=?1 AND scope_id=?2 AND name_key=?3 AND kind IN ('python_global','python_nonlocal') LIMIT 1",params![context.id,scope,key],|r|r.get(0)).optional()?;
         match directive.as_deref() {
             Some("python_global") => Ok(Some(Some(0))),
             Some("python_nonlocal") => {
-                let scope:Option<u32>=self.connection.query_row(
+                let scope:Option<u32>=self.connection.cached_row(
                     "WITH RECURSIVE parents(id,parent,depth) AS (
                        SELECT local_id,parent,0 FROM scopes WHERE file_id=?1 AND local_id=?2
                        UNION ALL SELECT s.local_id,s.parent,p.depth+1 FROM parents p JOIN scopes s ON s.file_id=?1 AND s.local_id=p.parent WHERE p.depth<1024

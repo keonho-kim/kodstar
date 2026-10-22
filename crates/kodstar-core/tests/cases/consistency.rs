@@ -9,7 +9,7 @@ use serde_json::Value;
 
 #[test]
 fn failure_during_staged_publication_preserves_the_last_complete_generation() -> TestResult {
-    for table in ["lookup_dependencies", "relationships"] {
+    for table in ["lookup_blocks", "relation_blocks"] {
         let project = Project::new()?;
         project.write(
             "main.rs",
@@ -18,11 +18,12 @@ fn failure_during_staged_publication_preserves_the_last_complete_generation() ->
         let first = project.build(false)?;
         let database =
             rusqlite::Connection::open(std::path::Path::new(&first.cache).join("index.sqlite"))?;
+        postings::register(&database)?;
         let proofs=|c:&rusqlite::Connection|->std::result::Result<Vec<(String,String,bool)>,rusqlite::Error>{
             c.prepare("SELECT kind,lookup_key,found FROM lookup_dependencies ORDER BY fact_id,kind,lookup_key")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect()
         };
         let before = proofs(&database)?;
-        database.execute_batch(&format!("CREATE TRIGGER fail_publication BEFORE INSERT ON {table} WHEN EXISTS(SELECT 1 FROM {table}) BEGIN SELECT RAISE(ABORT,'fixture publication failure'); END;"))?;
+        database.execute_batch(&format!("CREATE TRIGGER fail_publication BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'fixture publication failure'); END;"))?;
         project.write(
             "main.rs",
             "fn changed() {} fn caller() { changed(); changed(); }",
@@ -106,24 +107,34 @@ fn explicit_root_queries_never_create_an_initial_index() -> TestResult {
 }
 
 #[test]
-fn failed_initial_build_does_not_authorize_initial_analysis_from_a_query() -> TestResult {
+fn initialized_history_retries_analysis_after_a_failed_first_generation() -> TestResult {
     let project = Project::new()?;
     project.write("main.rs", "fn broken( {")?;
     assert!(project.build(false).is_err());
     project.write("main.rs", "fn fixed() {}")?;
-    let error = project
-        .engine
-        .query(
-            &project.options(),
-            &Query::Symbols {
-                file: "main.rs".into(),
-            },
-            &QueryOptions::default(),
-            &Cancellation::default(),
-            &mut Collected::default(),
-        )
-        .expect_err("no completed generation exists");
-    assert_eq!(error.kind, ErrorKind::NotFound);
+    let mut sink = Collected::default();
+    project.engine.query(
+        &project.options(),
+        &Query::Symbols {
+            file: "main.rs".into(),
+        },
+        &QueryOptions::default(),
+        &Cancellation::default(),
+        &mut sink,
+    )?;
+    assert!(
+        sink.rows
+            .iter()
+            .any(|r| matches!(r,QueryRow::Symbol(s) if s.name=="fixed"))
+    );
+    assert_eq!(
+        sink.metadata
+            .ok_or("metadata")?
+            .history
+            .ok_or("history")?
+            .checkpoint,
+        "c2"
+    );
     Ok(())
 }
 
@@ -136,15 +147,15 @@ fn unchanged_oversized_inputs_do_not_create_new_generations() -> TestResult {
     )?;
     let mut options = project.options();
     options.overrides.max_file_bytes = Some(32);
-    let first = project.engine.build(
+    let first = project.engine.init(
         &options,
-        BuildOptions::default(),
+        InitOptions::default(),
         &Cancellation::default(),
         &mut |_| Ok(()),
     )?;
-    let next = project.engine.build(
+    let next = project.engine.init(
         &options,
-        BuildOptions::default(),
+        InitOptions::default(),
         &Cancellation::default(),
         &mut |_| Ok(()),
     )?;

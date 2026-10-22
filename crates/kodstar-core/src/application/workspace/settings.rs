@@ -139,13 +139,20 @@ impl Settings {
             .and_then(|bytes| bytes.checked_add(self.fact_batch_bytes))
             .and_then(|bytes| {
                 self.db_cache_bytes
-                    .checked_mul(2)
+                    .checked_mul(3)
                     .and_then(|cache| bytes.checked_add(cache))
+            })
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    crate::infrastructure::history::CACHE_BYTES
+                        + crate::infrastructure::history::SNAPSHOT_CACHE_BYTES
+                        + 512 * 1024,
+                )
             })
             .ok_or_else(|| Error::argument("resource settings overflow the host address space"))?;
         if controlled > self.memory_budget {
             return Err(Error::argument(
-                "memory_budget must cover worker inputs and metadata staging, queued facts, and two DB page caches; AST/RSS are additional runtime costs",
+                "memory_budget must cover worker inputs, queued facts, three analysis DB caches, history/snapshot caches and storage buffers; AST/RSS are additional runtime costs",
             ));
         }
         if self.max_file_bytes > i32::MAX as usize || self.fact_batch_bytes > self.queue_bytes {

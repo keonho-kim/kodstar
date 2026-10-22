@@ -31,7 +31,7 @@ pub(crate) fn run(
         unresolved_count: initial.coverage.unresolved,
         ..QuerySummary::default()
     };
-    sink.row(&QueryRow::Build(initial))?;
+    sink.row(&QueryRow::Init(initial))?;
     let period = Duration::from_secs(if changes.polling_only() { 1 } else { 30 });
     let mut last_scan = Instant::now();
     let mut last_event = None;
@@ -67,7 +67,7 @@ pub(crate) fn run(
                     Ok(report) => {
                         summary.unresolved_count = report.coverage.unresolved;
                         if report.changed {
-                            sink.row(&QueryRow::Build(report))?;
+                            sink.row(&QueryRow::Init(report))?;
                             summary.result_count += 1;
                         }
                     }

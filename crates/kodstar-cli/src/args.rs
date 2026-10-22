@@ -3,14 +3,19 @@
 // Usage: main이 clap 명령을 생성.
 // Related: crates/kodstar-cli/src/main.rs, crates/kodstar-cli/src/args/options.rs, crates/kodstar-cli/src/args/queries.rs.
 
+mod history;
 mod options;
 mod queries;
 use clap::Command;
 
 pub(crate) fn command() -> Command {
-    let build = options::format(options::project(
-        Command::new("build")
-            .about("Register a project and build or refresh its index")
+    let initialize = options::format(options::project(
+        Command::new("init")
+            .about("Initialize local history and analyze the captured source state")
+            .arg(options::flag(
+                "yes",
+                "Confirm the displayed initialization target without prompting",
+            ))
             .arg(options::path("path", false))
             .arg(options::flag(
                 "full",
@@ -28,7 +33,16 @@ pub(crate) fn command() -> Command {
         ))
         .arg_required_else_help(true)
         .subcommand_required(true)
-        .subcommand(build)
+        .subcommand(initialize)
+        .subcommand(Command::new("__install").hide(true))
+        .subcommand(
+            Command::new("uninstall")
+                .about("Remove installation, settings, caches and registered project histories")
+                .arg(options::flag(
+                    "yes",
+                    "Confirm complete removal without prompting",
+                )),
+        )
         .subcommand(
             Command::new("serve")
                 .about("Run a versioned editor session")
@@ -61,6 +75,7 @@ pub(crate) fn command() -> Command {
                 )))),
         )
         .subcommands(queries::commands())
+        .subcommands(history::commands())
         .subcommand(options::format(options::refresh(options::project(
             Command::new("languages").about("Show actual language capabilities and limitations"),
             true,

@@ -48,7 +48,7 @@ impl<'conn> Statements<'conn> {
             WHERE id=?2",
             "UPDATE scopes SET start_byte=?1,end_byte=?2 WHERE file_id=?3 AND local_id=?4",
             "UPDATE symbols SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND local_id=?8",
-            "UPDATE bindings SET end_byte=?1 WHERE file_id=?2 AND target_local=?3 AND kind='function'",
+            "UPDATE bindings SET end_byte=?1 WHERE file_id=?2 AND target_local=?3 AND kind IN ('function','go_signature')",
         ] {
             statements.push(connection.prepare(sql)?);
         }

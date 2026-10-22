@@ -9,18 +9,38 @@ use kodstar_core::{Engine, Error, QuerySummary, Result};
 use std::io;
 use std::process::ExitCode;
 
-pub(crate) fn execute(invocation: Invocation) -> Result<ExitCode> {
+pub(crate) fn execute(mut invocation: Invocation) -> Result<ExitCode> {
+    match invocation.action {
+        Action::Install => return crate::installation::install(),
+        Action::Uninstall => return crate::installation::uninstall(invocation.yes),
+        _ => {}
+    }
     if matches!(invocation.action, Action::Serve) {
+        let _lease = Engine::from_environment()?.hold_local_data(&crate::signals::cancellation())?;
         let _signals = crate::signals::SignalGuard::install()?;
         crate::session::run(&crate::signals::cancellation())?;
         return Ok(ExitCode::SUCCESS);
     }
     let stdout = io::stdout();
     let mut sink = Renderer::new(stdout.lock(), invocation.format);
-    let project = invocation
+    let mut project = invocation
         .project
         .ok_or_else(|| Error::argument("project options are required"))?;
     let engine = Engine::from_environment()?;
+    if let Action::Init(options) = &mut invocation.action {
+        let target = engine.initialization_target(&project, options)?;
+        if !target.initialized {
+            crate::confirmation::ask(
+                &format!(
+                    "Initialize KodStar in {}? Source changes will be stored in this project's .kodstar history.",
+                    target.root.display()
+                ),
+                invocation.yes,
+            )?;
+        }
+        project.root = Some(target.root.clone());
+        options.path = Some(target.root);
+    }
     let _signals = crate::signals::SignalGuard::install()?;
     let cancel = crate::signals::cancellation();
     let summary = engine.execute(&project, invocation.action.command()?, &cancel, &mut sink)?;

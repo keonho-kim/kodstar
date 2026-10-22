@@ -7,7 +7,22 @@ use super::{Depth, Direction, Error, Limit, Query, QueryOptions, Result, Selecto
 use std::path::Path;
 
 pub(super) fn validate(options: &QueryOptions, query: &Query) -> Result<()> {
+    if options
+        .revision
+        .as_ref()
+        .is_some_and(|s| s.trim().is_empty() || s.contains('\0'))
+    {
+        return Err(Error::argument(
+            "checkpoint selector must be nonempty and contain no NUL",
+        ));
+    }
     match query {
+        Query::Changes { since } => {
+            name(since)?;
+            if options.revision.is_some() {
+                return Err(Error::argument("--since cannot be combined with --rev"));
+            }
+        }
         Query::Symbols { file } | Query::Files { file } => path(file)?,
         Query::Search { name: value, .. } => name(value)?,
         Query::Related { selector }
@@ -43,10 +58,12 @@ pub(super) fn validate(options: &QueryOptions, query: &Query) -> Result<()> {
             "deps cannot traverse incoming relationships",
         ));
     }
-    if matches!(query, Query::Refs { .. } | Query::Impact { .. })
-        && options
-            .direction
-            .is_some_and(|value| value != Direction::In)
+    if matches!(
+        query,
+        Query::Refs { .. } | Query::Impact { .. } | Query::Changes { .. }
+    ) && options
+        .direction
+        .is_some_and(|value| value != Direction::In)
     {
         return Err(Error::argument(
             "refs and impact cannot traverse outgoing relationships",
@@ -59,6 +76,7 @@ pub(super) fn validate(options: &QueryOptions, query: &Query) -> Result<()> {
             | Query::Deps { .. }
             | Query::Refs { .. }
             | Query::Impact { .. }
+            | Query::Changes { .. }
             | Query::Path { .. }
     );
     if definitions

@@ -20,9 +20,9 @@ fn configuration_errors_preserve_the_cause_without_echoing_values() -> TestResul
         options.config = Some(path.clone());
         let error = project
             .engine
-            .build(
+            .init(
                 &options,
-                BuildOptions::default(),
+                InitOptions::default(),
                 &Cancellation::default(),
                 &mut |_| Ok(()),
             )

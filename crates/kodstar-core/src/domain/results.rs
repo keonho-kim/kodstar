@@ -24,6 +24,7 @@ pub struct MaintenanceReport {
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct QueryMetadata {
+    pub history: Option<super::history::HistoryState>,
     pub maintenance: Option<MaintenanceReport>,
     pub schema_version: u32,
     pub relation_registry_version: u32,
@@ -99,6 +100,7 @@ pub struct LanguageCapability {
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct Status {
+    pub history: Option<super::history::HistoryState>,
     pub maintenance: Option<MaintenanceReport>,
     pub root: String,
     pub cache: String,
@@ -128,7 +130,8 @@ pub struct CacheEntry {
 #[derive(serde::Serialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum QueryRow {
-    Build(BuildReport),
+    History(super::history::HistoryRow),
+    Init(InitReport),
     Symbol(Symbol),
     Relationship(Box<Relationship>),
     File(FileConnection),
@@ -157,7 +160,8 @@ pub struct Progress {
 }
 
 #[derive(serde::Serialize, Clone, Debug)]
-pub struct BuildReport {
+pub struct InitReport {
+    pub history: Option<super::history::HistoryState>,
     pub maintenance: Option<MaintenanceReport>,
     pub root: String,
     pub root_encoding: Option<PathEncoding>,
@@ -173,12 +177,13 @@ pub struct BuildReport {
     pub coverage: Coverage,
 }
 
-impl BuildReport {
+impl InitReport {
     /// Metadata for this completed report; the caller declares which source verification was requested.
     pub fn metadata(&self, freshness: super::query::Refresh) -> QueryMetadata {
         QueryMetadata {
+            history: self.history.clone(),
             maintenance: self.maintenance.clone(),
-            schema_version: 1,
+            schema_version: 2,
             relation_registry_version: super::relations::RELATION_REGISTRY_VERSION,
             engine_version: crate::VERSION,
             root: Some(self.root.clone()),

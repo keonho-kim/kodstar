@@ -18,12 +18,12 @@ impl Lookup<'_, '_> {
     ) -> Result<Option<Binding>> {
         let key = context.language.lookup_key(name);
         let pascal_class: Option<u32> = if context.language == Language::Pascal {
-            self.connection.query_row("SELECT CASE WHEN o.file_id=?1 AND o.kind IN ('class','interface','type') THEN o.local_id END FROM facts f JOIN symbols s ON s.id=f.source_id LEFT JOIN symbols o ON o.id=s.owner_id WHERE f.id=?2",params![context.id,self.fact],|r|r.get(0)).optional()?.flatten()
+            self.connection.cached_row("SELECT CASE WHEN o.file_id=?1 AND o.kind IN ('class','interface','type') THEN o.local_id END FROM facts f JOIN symbols s ON s.id=f.source_id LEFT JOIN symbols o ON o.id=s.owner_id WHERE f.id=?2",params![context.id,self.fact],|r|r.get(0)).optional()?.flatten()
         } else {
             None
         };
         let mut class_visited = false;
-        let ruby_method=context.language==Language::Ruby && self.connection.query_row("SELECT EXISTS(SELECT 1 FROM facts f JOIN symbols s ON s.id=f.source_id WHERE f.id=?1 AND s.kind IN ('method','function'))",[self.fact],|r|r.get::<_,bool>(0))?;
+        let ruby_method=context.language==Language::Ruby && self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM facts f JOIN symbols s ON s.id=f.source_id WHERE f.id=?1 AND s.kind IN ('method','function'))",[self.fact],|r|r.get::<_,bool>(0))?;
         let module = if context.language == Language::Elixir {
             crate::application::analysis::resolve::namespaces::nearest_module(
                 self.connection,
@@ -132,7 +132,7 @@ impl Lookup<'_, '_> {
                     return Ok(Some(binding));
                 }
             }
-            let parent: Option<u32> = self.connection.query_row(
+            let parent: Option<u32> = self.connection.cached_row(
                 "SELECT parent FROM scopes WHERE file_id=?1 AND local_id=?2",
                 params![context.id, scope],
                 |row| row.get(0),

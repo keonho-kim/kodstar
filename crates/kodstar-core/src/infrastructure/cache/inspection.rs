@@ -12,6 +12,9 @@ pub(super) const MANAGED_FILES: &[&str] = &[
     "index.sqlite",
     "index.sqlite-wal",
     "index.sqlite-shm",
+    "past.sqlite",
+    "past.sqlite-wal",
+    "past.sqlite-shm",
     "writer.lock",
     "lease.lock",
 ];
@@ -39,14 +42,14 @@ impl ScanBudget {
     }
 }
 
-pub(super) struct Inspection {
+pub(crate) struct Inspection {
     pub bytes: u64,
     pub safe: bool,
     pub bytes_complete: bool,
     pub reason: Option<&'static str>,
 }
 
-pub(super) fn inspect(
+pub(crate) fn inspect(
     directory: &Path,
     cancel: &Cancellation,
     mut budget: Option<&mut ScanBudget>,

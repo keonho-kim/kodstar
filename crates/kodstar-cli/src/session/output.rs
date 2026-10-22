@@ -79,7 +79,7 @@ impl Output {
     }
     pub(super) fn error(&self, id: Option<&Id>, error: &Error) -> Result<()> {
         self.send(&Failure {
-            protocol_version: 1,
+            protocol_version: 2,
             id,
             kind: "error",
             code: error.kind.exit_code(),
@@ -88,7 +88,7 @@ impl Output {
     }
     pub(super) fn complete(&self, id: Option<&Id>, exit_code: u8) -> Result<()> {
         self.send(&Complete {
-            protocol_version: 1,
+            protocol_version: 2,
             id,
             kind: "complete",
             exit_code,
@@ -96,7 +96,7 @@ impl Output {
     }
     fn event(&self, id: &Id, kind: &'static str, data: &impl Serialize) -> Result<()> {
         self.send(&Event {
-            protocol_version: 1,
+            protocol_version: 2,
             id: Some(id),
             kind,
             data,

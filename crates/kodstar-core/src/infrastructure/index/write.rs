@@ -17,8 +17,6 @@ pub(crate) struct FileRecord {
     pub package: String,
     pub content_hash: String,
     pub size: u64,
-    pub modified_ns: String,
-    pub changed_ns: String,
     pub status: &'static str,
 }
 
@@ -30,11 +28,17 @@ impl FileRecord {
             + self.module.capacity()
             + self.package.capacity()
             + self.content_hash.capacity()
-            + self.modified_ns.capacity()
-            + self.changed_ns.capacity()
     }
     pub(crate) fn refresh_metadata(&self, connection: &Connection, generation: i64) -> Result<()> {
-        connection.execute("UPDATE files SET content_hash=?1,size=?2,modified_ns=?3,changed_ns=?4,seen_generation=?5 WHERE path=?6", params![self.content_hash,self.size,self.modified_ns,self.changed_ns,generation,path_bytes(&self.path)])?;
+        connection.execute(
+            "UPDATE files SET content_hash=?1,size=?2,seen_generation=?3 WHERE path=?4",
+            params![
+                &super::hash_bytes(&self.content_hash)?[..],
+                self.size,
+                generation,
+                path_bytes(&self.path)
+            ],
+        )?;
         Ok(())
     }
 
@@ -59,11 +63,15 @@ impl FileRecord {
         Ok(())
     }
 
-    pub(crate) fn persist(&self, connection: &Connection, generation: i64) -> Result<i64> {
-        connection.execute("INSERT INTO files(path,display_path,language,module,package,content_hash,size,modified_ns,changed_ns,seen_generation,status,path_module,path_package) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?4,?5) ON CONFLICT(path) DO UPDATE SET display_path=excluded.display_path,language=excluded.language,module=excluded.module,path_module=excluded.path_module,path_package=excluded.path_package,package=excluded.package,content_hash=excluded.content_hash,size=excluded.size,modified_ns=excluded.modified_ns,changed_ns=excluded.changed_ns,seen_generation=excluded.seen_generation,status=excluded.status",
-            params![path_bytes(&self.path), self.path.to_string_lossy(), self.language, self.module, self.package, self.content_hash,
-                self.size, self.modified_ns, self.changed_ns, generation, self.status])?;
-        Ok(connection.query_row(
+    pub(crate) fn persist(
+        &self,
+        connection: &super::cached::Sql<'_>,
+        generation: i64,
+    ) -> Result<i64> {
+        connection.cached_execute("INSERT INTO files(path,display_path,language,module,package,content_hash,size,seen_generation,status,path_module,path_package) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?4,?5) ON CONFLICT(path) DO UPDATE SET display_path=excluded.display_path,language=excluded.language,module=excluded.module,path_module=excluded.path_module,path_package=excluded.path_package,package=excluded.package,content_hash=excluded.content_hash,size=excluded.size,seen_generation=excluded.seen_generation,status=excluded.status",
+            params![path_bytes(&self.path), self.path.to_string_lossy(), self.language, self.module, self.package, &super::hash_bytes(&self.content_hash)?[..],
+                self.size, generation, self.status])?;
+        Ok(connection.cached_row(
             "SELECT id FROM files WHERE path=?1",
             [path_bytes(&self.path)],
             |row| row.get(0),
@@ -71,15 +79,27 @@ impl FileRecord {
     }
 }
 
-pub(crate) fn clear_file(connection: &Connection, id: i64) -> Result<()> {
-    connection.execute(
-        "UPDATE files SET module=path_module,declared_module='',facts_hash='',environment_hash='' WHERE id=?1",
+pub(crate) fn clear_file(connection: &super::cached::Sql<'_>, id: i64) -> Result<()> {
+    connection.cached_execute("DELETE FROM lookup_blocks WHERE file_id=?1", [id])?;
+    connection.cached_execute("DELETE FROM relation_blocks WHERE file_id=?1", [id])?;
+    connection.cached_execute(
+        "UPDATE files SET module=path_module,declared_module='',facts_hash=X'',environment_hash=X'' WHERE id=?1",
         [id],
     )?;
-    connection.execute("DELETE FROM facts WHERE file_id=?1", [id])?;
-    connection.execute("DELETE FROM bindings WHERE file_id=?1", [id])?;
-    connection.execute("DELETE FROM symbols WHERE file_id=?1", [id])?;
-    connection.execute("DELETE FROM scopes WHERE file_id=?1", [id])?;
-    connection.execute("DELETE FROM diagnostics WHERE file_id=?1", [id])?;
+    connection.cached_execute("DELETE FROM diagnostics WHERE file_id=?1", [id])?;
+    // Every definition, binding and fact has a scope FK. New and inert files
+    // therefore need no statement planning for their empty cascade trees.
+    let scoped: bool = connection.cached_row(
+        "SELECT EXISTS(SELECT 1 FROM scopes WHERE file_id=?1)",
+        [id],
+        |r| r.get(0),
+    )?;
+    if !scoped {
+        return Ok(());
+    }
+    connection.cached_execute("DELETE FROM facts WHERE file_id=?1", [id])?;
+    connection.cached_execute("DELETE FROM bindings WHERE file_id=?1", [id])?;
+    connection.cached_execute("DELETE FROM symbols WHERE file_id=?1", [id])?;
+    connection.cached_execute("DELETE FROM scopes WHERE file_id=?1", [id])?;
     Ok(())
 }

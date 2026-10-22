@@ -15,7 +15,7 @@ impl Lookup<'_, '_> {
         {
             return Ok(());
         }
-        let method:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c JOIN symbols s ON s.id=c.id WHERE s.kind='method')",[],|r|r.get(0))?;
+        let method:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id WHERE s.kind='method')",[],|r|r.get(0))?;
         if method {
             self.candidate_only = true;
             self.rule = "lisp_method_name_candidate";

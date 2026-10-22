@@ -77,9 +77,9 @@ fn cancellation_after_reused_or_replayed_file_rolls_back_its_generation() -> Tes
     ] {
         p.write("main.rs", &changed)?;
         let cancel = Cancellation::default();
-        let result = p.engine.build(
+        let result = p.engine.init(
             &p.options(),
-            BuildOptions::default(),
+            InitOptions::default(),
             &cancel,
             &mut |event| {
                 if event.phase == "parse" {
@@ -109,9 +109,9 @@ fn cached_header_language_is_reused_and_changed_content_is_reclassified() -> Tes
     let p = Project::new()?;
     p.write("api.h", "class Target {};")?;
     p.build(false)?;
-    let unchanged = p.engine.build(
+    let unchanged = p.engine.init(
         &p.options(),
-        BuildOptions::default(),
+        InitOptions::default(),
         &Cancellation::default(),
         &mut |_| Ok(()),
     )?;
@@ -133,10 +133,11 @@ fn cached_header_language_is_reused_and_changed_content_is_reclassified() -> Tes
 }
 
 fn relationship_ids(
-    report: &BuildReport,
+    report: &InitReport,
     file: &str,
 ) -> std::result::Result<Vec<i64>, Box<dyn std::error::Error>> {
     let c = rusqlite::Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
+    postings::register(&c)?;
     let mut statement = c.prepare("SELECT r.id FROM relationships r JOIN facts u ON u.id=r.fact_id JOIN files f ON f.id=u.file_id WHERE f.display_path=?1 ORDER BY r.id")?;
     Ok(statement
         .query_map([file], |r| r.get(0))?
@@ -144,12 +145,11 @@ fn relationship_ids(
 }
 
 fn mark_relationship_ids(
-    report: &BuildReport,
+    report: &InitReport,
     file: &str,
 ) -> std::result::Result<Vec<i64>, Box<dyn std::error::Error>> {
     let c = rusqlite::Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
-    // Large valid row IDs make an accidental DELETE/reinsert observable without changing graph facts.
-    c.execute("UPDATE relationships SET id=id+1000000 WHERE fact_id IN (SELECT u.id FROM facts u JOIN files f ON f.id=u.file_id WHERE f.display_path=?1)",[file])?;
+    packed_mutations::mark(&c, file)?;
     drop(c);
     let ids = relationship_ids(report, file)?;
     assert!(!ids.is_empty());

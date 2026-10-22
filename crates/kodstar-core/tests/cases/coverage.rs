@@ -45,8 +45,9 @@ fn generation_coverage_matches_rows_after_update_delete_and_failed_extraction() 
     Ok(())
 }
 
-fn assert_rows(report: &BuildReport) -> TestResult {
+fn assert_rows(report: &InitReport) -> TestResult {
     let c = rusqlite::Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
+    postings::register(&c)?;
     let actual: (u64,u64,u64,u64,u64,u64,u64,u64) = c.query_row(
         "SELECT COUNT(*),COALESCE(SUM(status='analyzed'),0),
           COALESCE(SUM(status='skipped'),0),COALESCE(SUM(status='unsupported'),0),

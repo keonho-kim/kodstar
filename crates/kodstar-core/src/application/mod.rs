@@ -9,6 +9,8 @@ pub(crate) mod analysis;
 pub(crate) mod cache;
 pub(crate) mod engine;
 pub(crate) mod execution;
+pub(crate) mod history;
+pub(crate) mod installation;
 pub(crate) mod maintenance;
 pub(crate) mod query;
 pub(crate) mod workspace;

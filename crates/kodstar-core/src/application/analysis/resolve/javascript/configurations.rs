@@ -16,7 +16,7 @@ impl Lookup<'_, '_> {
     ) -> Result<Option<i64>> {
         let cached: Option<Option<i64>> = self
             .connection
-            .query_row(
+            .cached_row(
                 "SELECT configuration FROM resolution_configuration_selection WHERE file_id=?1",
                 [context.id],
                 |r| r.get(0),
@@ -38,7 +38,7 @@ impl Lookup<'_, '_> {
                 "jsconfig.json",
                 "jsconfig.jsonc",
             ] {
-                selected=self.connection.query_row("SELECT f.id FROM files f WHERE f.path=?1 AND f.status='auxiliary' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='configuration')",[path_bytes(&directory.join(name))],|r|r.get(0)).optional()?;
+                selected=self.connection.cached_row("SELECT f.id FROM files f WHERE f.path=?1 AND f.status='auxiliary' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='configuration')",[path_bytes(&directory.join(name))],|r|r.get(0)).optional()?;
                 if selected.is_some() {
                     break;
                 }
@@ -47,7 +47,7 @@ impl Lookup<'_, '_> {
                 break;
             }
         }
-        self.connection.execute(
+        self.connection.cached_execute(
             "INSERT INTO resolution_configuration_selection VALUES(?1,?2)",
             params![context.id, selected],
         )?;
@@ -60,7 +60,7 @@ impl Lookup<'_, '_> {
         id: i64,
         depth: usize,
     ) -> Result<()> {
-        if self.connection.execute(
+        if self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_configuration_seen VALUES(?1,?2)",
             params![root, id],
         )? == 0
@@ -74,15 +74,15 @@ impl Lookup<'_, '_> {
             ));
         }
         // Child patterns win. Only the last declaration of a duplicate JSON key participates.
-        self.connection.execute("INSERT OR IGNORE INTO resolution_path_patterns(root,pattern,configuration)
+        self.connection.cached_execute("INSERT OR IGNORE INTO resolution_path_patterns(root,pattern,configuration)
             SELECT ?1,b.name,?2 FROM bindings b WHERE b.file_id=?2 AND b.kind='path_alias'
             AND b.start_byte>(SELECT COALESCE(MAX(d.start_byte),-1) FROM bindings d WHERE d.file_id=b.file_id AND d.kind='path_alias_start' AND d.name=b.name)
             GROUP BY b.name ORDER BY MIN(b.start_byte)",params![root,id])?;
         let bytes: Vec<u8> =
             self.connection
-                .query_row("SELECT path FROM files WHERE id=?1", [id], |r| r.get(0))?;
+                .cached_row("SELECT path FROM files WHERE id=?1", [id], |r| r.get(0))?;
         let path = path_from_bytes(&bytes)?;
-        let mut links=self.connection.prepare("SELECT name,module_name FROM bindings WHERE file_id=?1 AND kind='configuration_link' ORDER BY CASE name WHEN 'reference' THEN 0 ELSE 1 END,start_byte DESC,id DESC")?;
+        let mut links=self.connection.cached_prepare("SELECT name,module_name FROM bindings WHERE file_id=?1 AND kind='configuration_link' ORDER BY CASE name WHEN 'reference' THEN 0 ELSE 1 END,start_byte DESC,id DESC")?;
         let links = links.query_map([id], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?;

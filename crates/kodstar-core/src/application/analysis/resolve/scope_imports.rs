@@ -18,16 +18,16 @@ impl Lookup<'_, '_> {
     ) -> Result<bool> {
         for _ in 0..1025 {
             if context.language == Language::Go {
-                let mut defaults=self.connection.prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND scope_id=?2 AND kind='go_import' ORDER BY id")?;
+                let mut defaults=self.connection.cached_prepare("SELECT module_name FROM bindings WHERE file_id=?1 AND scope_id=?2 AND kind='go_import' ORDER BY id")?;
                 let defaults =
                     defaults.query_map(params![context.id, scope], |r| r.get::<_, String>(0))?;
                 let mut present = false;
                 for module in defaults {
                     let module = module?;
                     self.connection
-                        .execute("DELETE FROM resolution_modules WHERE depth=64", [])?;
+                        .cached_execute("DELETE FROM resolution_modules WHERE depth=64", [])?;
                     self.module_files(context, scope, &module, 64)?;
-                    let matches:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM files f JOIN resolution_modules m ON m.id=f.id WHERE m.depth=64 AND f.declared_module=?1)",[name],|r|r.get(0))?;
+                    let matches:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM files f JOIN resolution_modules m ON m.id=f.id WHERE m.depth=64 AND f.declared_module=?1)",[name],|r|r.get(0))?;
                     if matches {
                         self.module(context, scope, &module, None, depth + 1)?;
                         present = true;
@@ -37,7 +37,7 @@ impl Lookup<'_, '_> {
                     return Ok(true);
                 }
             }
-            let mut imports = self.connection.prepare("SELECT module_name,imported_name FROM bindings WHERE file_id=?1 AND scope_id=?2 AND name='*' AND kind IN ('import','export','include') AND module_name IS NOT NULL ORDER BY id")?;
+            let mut imports = self.connection.cached_prepare("SELECT module_name,imported_name FROM bindings WHERE file_id=?1 AND scope_id=?2 AND name='*' AND kind IN ('import','export','include') AND module_name IS NOT NULL ORDER BY id")?;
             let records = imports.query_map(params![context.id, scope], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
             })?;
@@ -45,7 +45,7 @@ impl Lookup<'_, '_> {
             for module in records {
                 let (module, prefix) = module?;
                 if context.language == Language::Elixir {
-                    let excluded:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND scope_id=?2 AND kind='elixir_import_exclusion' AND module_name=?3 AND name=?4)",params![context.id,scope,module,name],|r|r.get(0))?;
+                    let excluded:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE file_id=?1 AND scope_id=?2 AND kind='elixir_import_exclusion' AND module_name=?3 AND name=?4)",params![context.id,scope,module,name],|r|r.get(0))?;
                     if excluded {
                         continue;
                     }
@@ -67,7 +67,7 @@ impl Lookup<'_, '_> {
                 && (context.language != Language::Python
                     || self.has_externals()
                     || self.candidate_only
-                    || self.connection.query_row(
+                    || self.connection.cached_row(
                         "SELECT EXISTS(SELECT 1 FROM resolution_candidates)",
                         [],
                         |r| r.get::<_, bool>(0),
@@ -75,7 +75,7 @@ impl Lookup<'_, '_> {
             {
                 return Ok(true);
             }
-            let parent: Option<u32> = self.connection.query_row(
+            let parent: Option<u32> = self.connection.cached_row(
                 "SELECT parent FROM scopes WHERE file_id=?1 AND local_id=?2",
                 params![context.id, scope],
                 |r| r.get(0),
@@ -93,8 +93,8 @@ impl Lookup<'_, '_> {
         name: &str,
     ) -> Result<bool> {
         self.connection
-            .execute("DELETE FROM resolution_modules WHERE depth=64", [])?;
+            .cached_execute("DELETE FROM resolution_modules WHERE depth=64", [])?;
         self.module_files(context, 0, module, 64)?;
-        Ok(self.connection.query_row("SELECT NOT EXISTS(SELECT 1 FROM resolution_modules WHERE depth=64) OR EXISTS(SELECT 1 FROM files f JOIN resolution_modules m ON m.id=f.id WHERE m.depth=64 AND f.declared_module=?1)",[name],|r|r.get(0))?)
+        Ok(self.connection.cached_row("SELECT NOT EXISTS(SELECT 1 FROM resolution_modules WHERE depth=64) OR EXISTS(SELECT 1 FROM files f JOIN resolution_modules m ON m.id=f.id WHERE m.depth=64 AND f.declared_module=?1)",[name],|r|r.get(0))?)
     }
 }
