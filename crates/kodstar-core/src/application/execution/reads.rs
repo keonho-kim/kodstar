@@ -103,6 +103,7 @@ impl CommandHandler for Status<'_> {
                 return Err(Error::operation("index foreign-key check failed"));
             }
             index::dictionary::verify(&snapshot)?;
+            index::atoms::verify(&snapshot)?;
             index::dependencies::verify(&snapshot)?;
             index::relations::verify(&snapshot)?;
             Some(check)

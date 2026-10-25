@@ -22,6 +22,33 @@ fn install(project: &Project) -> TestResult {
 }
 
 #[test]
+fn installation_prepares_only_cli_and_application_home_without_project_data() -> TestResult {
+    let project = Project::new()?;
+    install(&project)?;
+    let directory = project.home.join(".kodstar");
+    let mut files = fs::read_dir(&directory)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<Result<Vec<_>, _>>()?;
+    files.sort();
+    assert_eq!(files, ["install.json", "installation.lock"]);
+    assert!(project.home.join(".local/bin/kodstar").is_file());
+    assert!(fs::read_dir(&project.root)?.next().is_none());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(directory)?.permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(project.home.join(".local/bin/kodstar"))?
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn initial_confirmation_requires_consent_and_root_is_always_rejected() -> TestResult {
     let project = Project::new()?;
     project.write("fn target() {}")?;

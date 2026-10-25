@@ -106,7 +106,23 @@ pub fn register(c: &Connection) -> Result<()> {
     if !exists {
         return Ok(());
     }
-    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    let flags = FunctionFlags::SQLITE_UTF8
+        | FunctionFlags::SQLITE_DETERMINISTIC
+        | FunctionFlags::SQLITE_INNOCUOUS;
+    c.create_scalar_function("kodstar_routes", 1, flags, |ctx| {
+        serde_json::to_string(&routes(ctx.get_raw(0).as_blob()?)?)
+            .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+    })?;
+    c.create_scalar_function("kodstar_route_at", 2, flags, |ctx| {
+        let slot: usize = ctx.get(1)?;
+        if slot >= 128 {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        Ok(routes(ctx.get_raw(0).as_blob()?)?
+            .iter()
+            .find(|r| r[0] == slot as i64)
+            .map_or(0, |r| r[1]))
+    })?;
     c.create_scalar_function("reference_keys", 2, flags, |ctx| {
         serde_json::to_string(&keys(ctx.get_raw(0).as_blob()?, ctx.get(1)?)?)
             .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
@@ -119,4 +135,28 @@ pub fn register(c: &Connection) -> Result<()> {
         CREATE TEMP VIEW lookup_dependencies AS SELECT d.fact_id,k.kind,k.lookup_key,d.found FROM fact_lookups d JOIN lookup_keys k ON k.id=d.key_id;
         CREATE TEMP VIEW relationship_rows AS SELECT json_extract(j.value,'$[0]') id,json_extract(j.value,'$[1]') fact_id,json_extract(j.value,'$[2]') source_id,json_extract(j.value,'$[3]') target_id,json_extract(j.value,'$[4]') external_key,json_extract(j.value,'$[5]') resolution,json_extract(j.value,'$[6]') rule_id,json_extract(j.value,'$[7]') reason_id FROM relation_blocks b,json_each(reference_edges(b.payload,b.count,b.source_id)) j;
         CREATE TEMP VIEW relationships AS SELECT r.id,r.fact_id,r.source_id,r.target_id,r.external_key,r.resolution,(SELECT value FROM relation_texts WHERE id=r.rule_id) rule,(SELECT value FROM relation_texts WHERE id=r.reason_id) reason FROM relationship_rows r;")
+}
+
+fn routes(mut bytes: &[u8]) -> Result<Vec<[i64; 2]>> {
+    let mut rows = Vec::new();
+    let mut at = 0usize;
+    while at < 128 {
+        let n = usize::try_from(number(&mut bytes)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let block =
+            i64::try_from(number(&mut bytes)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let end = at
+            .checked_add(n)
+            .filter(|end| n > 0 && *end <= 128)
+            .ok_or(rusqlite::Error::InvalidQuery)?;
+        if block > 0 {
+            for slot in at..end {
+                rows.push([slot as i64, block]);
+            }
+        }
+        at = end;
+    }
+    if !bytes.is_empty() {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    Ok(rows)
 }

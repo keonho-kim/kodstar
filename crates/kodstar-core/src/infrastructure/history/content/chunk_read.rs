@@ -10,35 +10,47 @@ use rusqlite::{Connection, Row};
 const COLUMNS: &str =
     "d.hash,d.size,d.codec,d.base,d.lines,d.first_newline,d.last_newline,d.content";
 
-pub(in crate::infrastructure::history) fn load(
-    connection: &Connection,
-    id: i64,
-) -> Result<Vec<u8>> {
-    let mut statement =
-        connection.prepare(&format!("SELECT {COLUMNS} FROM chunk_data d WHERE d.id=?1"))?;
-    let mut rows = statement.query([id])?;
-    let row = rows.next()?.ok_or_else(invalid)?;
-    let base: Option<i64> = row.get(3)?;
-    let dictionary = if let Some(base) = base {
-        if base >= id {
-            return Err(invalid());
-        }
-        let mut select =
-            connection.prepare(&format!("SELECT {COLUMNS} FROM chunk_data d WHERE d.id=?1"))?;
-        let mut bases = select.query([base])?;
-        let row = bases.next()?.ok_or_else(invalid)?;
-        if row.get::<_, Option<i64>>(3)?.is_some() {
-            return Err(invalid());
-        }
-        decode(row, &[])?
-    } else {
-        Vec::new()
-    };
-    decode(row, &dictionary)
+pub(in crate::infrastructure::history) struct Reader<'conn> {
+    connection: &'conn Connection,
+    decoder: encoding::Decoder,
 }
 
-fn decode(row: &Row<'_>, dictionary: &[u8]) -> Result<Vec<u8>> {
-    let bytes = encoding::decode(
+impl<'conn> Reader<'conn> {
+    pub fn new(connection: &'conn Connection) -> Self {
+        Self {
+            connection,
+            decoder: encoding::Decoder::default(),
+        }
+    }
+
+    pub fn load(&mut self, id: i64) -> Result<Vec<u8>> {
+        let connection = self.connection;
+        let mut statement =
+            connection.prepare(&format!("SELECT {COLUMNS} FROM chunk_data d WHERE d.id=?1"))?;
+        let mut rows = statement.query([id])?;
+        let row = rows.next()?.ok_or_else(invalid)?;
+        let base: Option<i64> = row.get(3)?;
+        let dictionary = if let Some(base) = base {
+            if base >= id {
+                return Err(invalid());
+            }
+            let mut select =
+                connection.prepare(&format!("SELECT {COLUMNS} FROM chunk_data d WHERE d.id=?1"))?;
+            let mut bases = select.query([base])?;
+            let row = bases.next()?.ok_or_else(invalid)?;
+            if row.get::<_, Option<i64>>(3)?.is_some() {
+                return Err(invalid());
+            }
+            decode(row, &[], &mut self.decoder)?
+        } else {
+            Vec::new()
+        };
+        decode(row, &dictionary, &mut self.decoder)
+    }
+}
+
+fn decode(row: &Row<'_>, dictionary: &[u8], decoder: &mut encoding::Decoder) -> Result<Vec<u8>> {
+    let bytes = decoder.decode(
         row.get_ref(7)?.as_blob().map_err(|_| invalid())?,
         row.get(2)?,
         row.get(1)?,

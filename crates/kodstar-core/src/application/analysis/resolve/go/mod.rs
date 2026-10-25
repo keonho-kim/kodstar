@@ -131,7 +131,12 @@ impl Lookup<'_, '_> {
     }
 
     fn go_package_files(&self, package: &str, module: &str, depth: usize) -> Result<()> {
-        self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT ?3,id FROM files WHERE language='go' AND package=?1 AND module=?2 AND status='analyzed'",params![package,module,depth])?;
+        let found = self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT ?3,id FROM files WHERE language_id=(SELECT id FROM atoms WHERE value='go') AND package_id=(SELECT id FROM atoms WHERE value=?1) AND module_id=(SELECT id FROM atoms WHERE value=?2) AND status_id=(SELECT id FROM atoms WHERE value='analyzed')",params![package,module,depth])? > 0;
+        self.dependency(
+            "go_package",
+            &crate::domain::resolve::lookup_keys::go_package(package, module),
+            found,
+        )?;
         Ok(())
     }
 }

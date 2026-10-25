@@ -25,24 +25,10 @@ impl SourceSpan {
     pub(crate) fn at(source: &[u8], start: usize, end: usize) -> Self {
         let start = start.min(source.len());
         let end = end.max(start).min(source.len());
-        let line = source[..start]
-            .iter()
-            .filter(|&&byte| byte == b'\n')
-            .count()
-            + 1;
-        let line_start = source[..start]
-            .iter()
-            .rposition(|&byte| byte == b'\n')
-            .map_or(0, |offset| offset + 1);
-        let end_line = line
-            + source[start..end]
-                .iter()
-                .filter(|&&byte| byte == b'\n')
-                .count();
-        let end_line_start = source[..end]
-            .iter()
-            .rposition(|&byte| byte == b'\n')
-            .map_or(0, |offset| offset + 1);
+        let line = memchr::memchr_iter(b'\n', &source[..start]).count() + 1;
+        let line_start = memchr::memrchr(b'\n', &source[..start]).map_or(0, |offset| offset + 1);
+        let end_line = line + memchr::memchr_iter(b'\n', &source[start..end]).count();
+        let end_line_start = memchr::memrchr(b'\n', &source[..end]).map_or(0, |offset| offset + 1);
         Self {
             start_byte: start,
             end_byte: end,

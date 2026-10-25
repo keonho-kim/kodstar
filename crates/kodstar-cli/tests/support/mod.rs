@@ -6,32 +6,27 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type TestResult = Result<(), Box<dyn std::error::Error>>;
-static NEXT: AtomicU64 = AtomicU64::new(0);
 
 pub struct Project {
-    directory: PathBuf,
+    temporary: Option<tempfile::TempDir>,
     pub root: PathBuf,
     pub home: PathBuf,
 }
 
 impl Project {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "kodstar-cli-{}-{nonce}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+        let temporary = tempfile::Builder::new()
+            .prefix("kodstar-cli-test-")
+            .tempdir()?;
+        let directory = temporary.path().to_path_buf();
         let root = directory.join("project");
         let home = directory.join("home");
         fs::create_dir_all(&root)?;
         fs::create_dir(&home)?;
         Ok(Self {
-            directory,
+            temporary: Some(temporary),
             root,
             home,
         })
@@ -63,6 +58,14 @@ impl Project {
 
 impl Drop for Project {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
+        if let Some(directory) = self.temporary.take()
+            && let Err(error) = directory.close()
+        {
+            if std::thread::panicking() {
+                eprintln!("test directory cleanup failed: {error}");
+            } else {
+                panic!("test directory cleanup failed: {error}");
+            }
+        }
     }
 }

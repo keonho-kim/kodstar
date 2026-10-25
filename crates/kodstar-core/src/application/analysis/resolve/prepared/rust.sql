@@ -10,27 +10,27 @@ WHERE NOT EXISTS(
 FROM symbols s
 WHERE s.id=resolution_candidates.id
   AND CASE ?1
-            WHEN 'macro' THEN s.kind='macro'
-            WHEN 'type' THEN s.kind IN ('module','struct','enum','trait','type','class','interface')
+            WHEN 'macro' THEN s.kind_id IN (SELECT id FROM atoms WHERE value='macro')
+            WHEN 'type' THEN s.kind_id IN (SELECT id FROM atoms WHERE value IN ('module','struct','enum','trait','type','class','interface'))
               OR EXISTS(SELECT 1
 FROM bindings b
 WHERE b.file_id=s.file_id
   AND b.target_local=s.local_id
-  AND b.kind='enum_case')
-            WHEN 'value' THEN s.kind IN ('function','method','constructor')
-              OR (s.kind IN ('struct','field')
+  AND b.kind_id IN (SELECT id FROM atoms WHERE value='enum_case'))
+            WHEN 'value' THEN s.kind_id IN (SELECT id FROM atoms WHERE value IN ('function','method','constructor'))
+              OR (s.kind_id IN (SELECT id FROM atoms WHERE value IN ('struct','field'))
   AND (
                 EXISTS(SELECT 1
 FROM bindings b
 WHERE b.file_id=s.file_id
   AND b.target_local=s.local_id
-  AND b.kind='rust_constructor')
+  AND b.kind_id IN (SELECT id FROM atoms WHERE value='rust_constructor'))
                 OR (?2<>'calls'
-  AND (s.kind='field' OR EXISTS(SELECT 1
+  AND (s.kind_id IN (SELECT id FROM atoms WHERE value='field') OR EXISTS(SELECT 1
 FROM bindings b
 WHERE b.file_id=s.file_id
   AND b.target_local=s.local_id
-  AND b.kind='value_constructor')))
+  AND b.kind_id IN (SELECT id FROM atoms WHERE value='value_constructor'))))
               ))
             ELSE 1 END
            )

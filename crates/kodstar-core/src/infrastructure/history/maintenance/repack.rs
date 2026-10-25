@@ -39,6 +39,8 @@ fn compact(c: &Connection, cancel: &Cancellation) -> Result<()> {
         CREATE INDEX repack_bases_path ON repack_bases(path,id);
         CREATE INDEX repack_bases_size ON repack_bases(size,id);")?;
     let mut last = 0i64;
+    let mut reader = chunk_read::Reader::new(c);
+    let mut encoder = encoding::Encoder::default();
     loop {
         cancel.check()?;
         let mut select=c.prepare("SELECT d.id,d.codec,d.base,length(d.content),o.path,EXISTS(SELECT 1 FROM repack_pinned p WHERE p.id=d.id) FROM chunk_data d LEFT JOIN repack_origins o ON o.chunk=d.id WHERE d.id>?1 ORDER BY d.id LIMIT 1")?;
@@ -52,12 +54,22 @@ fn compact(c: &Connection, cancel: &Cancellation) -> Result<()> {
         let mut best: usize = row.get(3)?;
         let path: Option<Vec<u8>> = row.get(4)?;
         let retained: bool = row.get(5)?;
-        let raw = chunk_read::load(c, id)?;
+        let raw = reader.load(id)?;
         drop(rows);
         drop(select);
-        let independent = encoding::encode(&raw, &[]);
+        if raw.len() < encoding::MIN_INPUT {
+            if codec != 2 {
+                c.execute(
+                    "INSERT INTO repack_bases VALUES(?1,?2,?3)",
+                    params![id, path, raw.len()],
+                )?;
+            }
+            last = id;
+            continue;
+        }
+        let independent = encoder.encode(&raw, &[])?;
         let mut payload = None;
-        if independent.len() + 32 < best {
+        if independent.len() + encoding::SAVINGS < best {
             best = independent.len();
             payload = Some(independent);
             codec = 1;
@@ -70,9 +82,9 @@ fn compact(c: &Connection, cancel: &Cancellation) -> Result<()> {
             while let Some(row) = rows.next()? {
                 cancel.check()?;
                 let candidate: i64 = row.get(0)?;
-                let dictionary = chunk_read::load(c, candidate)?;
-                let delta = encoding::encode(&raw, &dictionary);
-                if delta.len() + 32 < best {
+                let dictionary = reader.load(candidate)?;
+                let delta = encoder.encode(&raw, &dictionary)?;
+                if delta.len() + encoding::SAVINGS < best {
                     best = delta.len();
                     payload = Some(delta);
                     codec = 2;

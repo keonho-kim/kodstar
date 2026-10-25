@@ -21,6 +21,7 @@ pub(super) fn run(
         let mut sink = Sink {
             id: job.id.clone(),
             output: output.clone(),
+            cancel: job.cancel.clone(),
         };
         let outcome = if job.cancel.is_cancelled() {
             Err(Error::new(

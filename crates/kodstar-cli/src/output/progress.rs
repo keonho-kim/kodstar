@@ -1,6 +1,6 @@
 // Purpose: 대량 파일 처리의 진행을 stderr에 제한적으로 표시.
 // Pattern: Output Adapter.
-// Usage: build callback과 CLI 결과 sink가 진행 이벤트를 전달.
+// Usage: 분석 callback과 CLI 결과 sink가 진행 이벤트를 전달.
 // Related: crates/kodstar-cli/src/output.rs, crates/kodstar-cli/src/run.rs.
 
 use kodstar_core::{Error, Progress, Result};

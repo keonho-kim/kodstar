@@ -31,11 +31,9 @@ pub(super) fn changed(
             .zip(&right[..count])
             .take_while(|(a, b)| a == b)
             .count();
-        for (index, byte) in left[..equal].iter().enumerate() {
-            if *byte == b'\n' {
-                start = offset + index as u64 + 1;
-                line += 1;
-            }
+        if let Some(index) = memchr::memrchr(b'\n', &left[..equal]) {
+            start = offset + index as u64 + 1;
+            line += memchr::memchr_iter(b'\n', &left[..equal]).count() as u64;
         }
         offset += equal as u64;
         if equal < count {
@@ -66,7 +64,7 @@ pub(super) fn changed(
     while adjustment < extra {
         let count = (extra - adjustment).min(CHUNK as u64) as usize;
         a.read_at(a.size - suffix + adjustment, &mut left[..count], cancel)?;
-        if let Some(index) = left[..count].iter().position(|b| *b == b'\n') {
+        if let Some(index) = memchr::memchr(b'\n', &left[..count]) {
             adjustment += index as u64 + 1;
             found_newline = true;
             break;

@@ -5,10 +5,12 @@
 
 //! SQLite resource ownership. Writers publish facts and relationships in one transaction.
 
+pub(crate) mod atoms;
 pub(crate) mod cached;
 mod definitions;
 pub(crate) mod dependencies;
 pub(crate) mod dictionary;
+mod display_path;
 mod fact_statements;
 mod facts;
 pub(crate) mod inert_inputs;
@@ -17,9 +19,10 @@ mod lisp_metadata;
 mod packed;
 mod previous;
 mod reader;
+mod records;
 pub(crate) mod relations;
 mod runtime;
-mod statistics;
+pub(crate) mod statistics;
 mod write;
 
 use std::path::Path;
@@ -37,10 +40,11 @@ pub(crate) use facts::{FactWriter, FileFacts};
 pub(crate) use previous::PreviousFiles;
 pub(crate) use reader::{SymbolReader, symbol};
 pub(crate) use runtime::{limit_reads, observe_cancellation, stop_observing};
+pub(crate) use statistics::Update as CoverageUpdate;
 pub(crate) use write::{FileRecord, clear_file};
 
-pub(crate) const STORAGE_VERSION: u32 = 12;
-pub(crate) const EXTRACTION_VERSION: u32 = 44;
+pub(crate) const STORAGE_VERSION: u32 = 14;
+pub(crate) const EXTRACTION_VERSION: u32 = 45;
 pub(crate) fn require_history(
     connection: &Connection,
     repository: &str,
@@ -62,14 +66,14 @@ pub(crate) fn require_history(
 const APPLICATION_ID: u32 = 0x4b535441;
 
 pub(crate) const SYMBOL_COLUMNS: &str = "
-    COALESCE((SELECT canonical_id FROM symbol_identities WHERE symbol_id=s.id),s.id),
+    COALESCE((SELECT canonical_id FROM symbol_aliases WHERE symbol_id=s.id),s.id),
     s.logical_key,s.name,s.qualified_name,s.kind,s.language,f.display_path,
     s.start_byte,s.end_byte,s.line,s.column_byte,s.end_line,s.end_column_byte,
     s.signature,s.condition,
-    (SELECT canonical_id FROM symbol_identities WHERE symbol_id=s.owner_id),
+    COALESCE((SELECT canonical_id FROM symbol_aliases WHERE symbol_id=s.owner_id),s.owner_id),
     f.path,f.module,f.package,s.scope_id,
-    (SELECT COUNT(*) FROM symbol_identities WHERE canonical_id=
-        COALESCE((SELECT canonical_id FROM symbol_identities WHERE symbol_id=s.id),s.id))";
+    (1+(SELECT COUNT(*) FROM symbol_aliases WHERE canonical_id=
+        COALESCE((SELECT canonical_id FROM symbol_aliases WHERE symbol_id=s.id),s.id)))";
 
 pub(crate) fn open(
     path: &Path,
@@ -109,6 +113,8 @@ fn open_mode(
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "trusted_schema", false)?;
     connection.pragma_update(None, "temp_store", "FILE")?;
+    display_path::register(&connection)?;
+    atoms::register(&connection)?;
     dependencies::register(&connection)?;
     packed::register(&connection)?;
     // Compact rows and disk staging share the budget with prepared lookups and block codecs.
@@ -137,8 +143,11 @@ fn open_mode(
             ));
         }
         let transaction = connection.transaction()?;
+        transaction.execute_batch(atoms::SCHEMA)?;
         transaction.execute_batch(dictionary::SCHEMA)?;
         transaction.execute_batch(include_str!("schema.sql"))?;
+        records::create(&transaction)?;
+        transaction.execute_batch(include_str!("dependencies/schema.sql"))?;
         transaction.execute_batch(relations::SCHEMA)?;
         transaction.execute("INSERT INTO metadata(singleton,root,engine_version,extraction_version,relation_registry_version) VALUES(1,?1,?2,?3,?4)",
             rusqlite::params![path_bytes(root), crate::VERSION, EXTRACTION_VERSION, RELATION_REGISTRY_VERSION])?;
@@ -164,7 +173,7 @@ fn open_mode(
         connection.pragma_update(None, "synchronous", "FULL")?;
         connection.execute_batch(
             "CREATE TEMP TABLE dictionary_retirements(id INTEGER PRIMARY KEY);
-            CREATE TEMP TRIGGER dictionary_retire_lookup BEFORE DELETE ON main.lookup_blocks BEGIN
+            CREATE TEMP TRIGGER dictionary_retire_lookup BEFORE DELETE ON main.lookup_rows BEGIN
             INSERT OR IGNORE INTO dictionary_retirements VALUES(OLD.key_id); END;",
         )?;
     }
@@ -189,8 +198,12 @@ pub(crate) fn coverage(connection: &Connection) -> Result<Coverage> {
     statistics::read(connection)
 }
 
-pub(crate) fn refresh_coverage(connection: &Connection, generation: i64) -> Result<()> {
-    statistics::refresh(connection, generation)
+pub(crate) fn refresh_coverage(
+    connection: &Connection,
+    generation: i64,
+    update: CoverageUpdate,
+) -> Result<()> {
+    statistics::refresh(connection, generation, update)
 }
 
 pub(crate) fn symbol_from_row(row: &Row<'_>) -> rusqlite::Result<Symbol> {

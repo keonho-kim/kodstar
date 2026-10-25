@@ -1,151 +1,153 @@
-// Purpose: 제한된 원문 블록의 literal·copy 표현과 단일 기준 델타.
-// Pattern: Bounded Encoding.
-// Usage: 청크 adapter가 원문 주소와 별개인 물리 payload를 선택·복원.
-// Related: crates/kodstar-core/src/infrastructure/history/content/chunks.rs, crates/kodstar-core/src/infrastructure/history/content/encoding/tests.rs.
+// Purpose: 제한된 Zstd frame과 깊이 1 원문 dictionary의 압축·복원.
+// Pattern: Bounded Codec Adapter.
+// Usage: 쓰기·읽기 작업이 context를 소유하고 청크 사이에 재사용.
+// Related: crates/kodstar-core/src/infrastructure/history/content/chunks.rs, crates/kodstar-core/src/infrastructure/history/content/chunk_read.rs.
 
 use crate::domain::diagnostics::{Error, Result};
+use zstd::zstd_safe::{
+    self, CCtx, CParameter, DCtx, DParameter, InBuffer, OutBuffer, ResetDirective,
+};
 
 #[cfg(test)]
 mod tests;
 
-pub(in crate::infrastructure::history) const MAX: usize = 65536;
-const SLOTS: usize = 8192;
+const WINDOW_LOG: u32 = 16;
+pub(in crate::infrastructure::history) const MAX: usize = 1 << WINDOW_LOG;
+pub(in crate::infrastructure::history) const MIN_INPUT: usize = 128;
+pub(in crate::infrastructure::history) const SAVINGS: usize = 32;
 
-pub(in crate::infrastructure::history) fn encode(input: &[u8], base: &[u8]) -> Vec<u8> {
-    let mut table = [u32::MAX; SLOTS];
-    for at in (0..base.len().saturating_sub(3)).step_by(4) {
-        table[slot(&base[at..])] = at as u32;
-    }
-    let mut output = Vec::with_capacity(input.len());
-    let (mut cursor, mut literal) = (0, 0);
-    while cursor + 4 <= input.len() {
-        let key = slot(&input[cursor..]);
-        let candidate = table[key] as usize;
-        table[key] = (base.len() + cursor) as u32;
-        let mut matched = 0;
-        if candidate < base.len() + cursor {
-            while cursor + matched < input.len() {
-                let source = candidate + matched;
-                let byte = if source < base.len() {
-                    base[source]
-                } else {
-                    input[source - base.len()]
-                };
-                if byte != input[cursor + matched] {
-                    break;
-                }
-                matched += 1;
-            }
-        }
-        if matched < 4 {
-            cursor += 1;
-            continue;
-        }
-        literals(&mut output, &input[literal..cursor]);
-        integer(&mut output, ((matched - 4) as u64) * 2 + 1);
-        integer(&mut output, candidate as u64);
-        // One candidate per slot bounds collision work; every accepted match consumes input.
-        cursor += matched;
-        literal = cursor;
-    }
-    literals(&mut output, &input[literal..]);
-    output
+#[derive(Default)]
+pub(in crate::infrastructure::history) struct Encoder {
+    context: Option<CCtx<'static>>,
 }
 
-pub(in crate::infrastructure::history) fn decode(
-    payload: &[u8],
-    codec: u8,
-    size: usize,
-    base: &[u8],
-) -> Result<Vec<u8>> {
-    if size == 0
-        || size > MAX
-        || payload.len() > MAX
-        || base.len() > MAX
-        || codec > 2
-        || codec != 2 && !base.is_empty()
-        || codec == 2 && base.is_empty()
-    {
-        return Err(invalid());
-    }
-    if codec == 0 {
-        return if payload.len() == size {
-            Ok(payload.to_vec())
-        } else {
-            Err(invalid())
-        };
-    }
-    let mut output = Vec::with_capacity(size);
-    let mut offset = 0;
-    while offset < payload.len() {
-        let token = read_integer(payload, &mut offset)?;
-        let length = (token >> 1)
-            .checked_add(if token & 1 == 0 { 1 } else { 4 })
-            .ok_or_else(invalid)?;
-        let length = usize::try_from(length).map_err(|_| invalid())?;
-        if length > size - output.len() {
+impl Encoder {
+    pub fn encode(&mut self, input: &[u8], base: &[u8]) -> Result<Vec<u8>> {
+        if input.is_empty() || input.len() > MAX || base.len() > MAX {
             return Err(invalid());
         }
-        if token & 1 == 0 {
-            let end = offset.checked_add(length).ok_or_else(invalid)?;
-            output.extend_from_slice(payload.get(offset..end).ok_or_else(invalid)?);
-            offset = end;
-        } else {
-            let source =
-                usize::try_from(read_integer(payload, &mut offset)?).map_err(|_| invalid())?;
-            if source >= base.len() + output.len() {
+        let context = match &mut self.context {
+            Some(context) => context,
+            slot @ None => {
+                let mut context = CCtx::try_create()
+                    .ok_or_else(|| Error::operation("allocate history compression context"))?;
+                context
+                    .set_parameter(CParameter::CompressionLevel(1))
+                    .map_err(failure)?;
+                context
+                    .set_parameter(CParameter::WindowLog(WINDOW_LOG))
+                    .map_err(failure)?;
+                context
+                    .set_parameter(CParameter::ContentSizeFlag(true))
+                    .map_err(failure)?;
+                slot.insert(context)
+            }
+        };
+        context
+            .reset(ResetDirective::SessionOnly)
+            .map_err(failure)?;
+        context.load_dictionary(dictionary(base)).map_err(failure)?;
+        let mut encoded = Vec::with_capacity(zstd_safe::compress_bound(input.len()));
+        context.compress2(&mut encoded, input).map_err(failure)?;
+        Ok(encoded)
+    }
+}
+
+#[derive(Default)]
+pub(in crate::infrastructure::history) struct Decoder {
+    context: Option<DCtx<'static>>,
+}
+
+impl Decoder {
+    pub fn decode(
+        &mut self,
+        payload: &[u8],
+        codec: u8,
+        size: usize,
+        base: &[u8],
+    ) -> Result<Vec<u8>> {
+        if size == 0
+            || size > MAX
+            || payload.len() > MAX
+            || base.len() > MAX
+            || codec > 2
+            || (codec == 2) != !base.is_empty()
+        {
+            return Err(invalid());
+        }
+        if codec == 0 {
+            return if payload.len() == size {
+                Ok(payload.to_vec())
+            } else {
+                Err(invalid())
+            };
+        }
+        if zstd_safe::get_frame_content_size(payload).map_err(|_| invalid())? != Some(size as u64)
+            || zstd_safe::find_frame_compressed_size(payload).map_err(|_| invalid())?
+                != payload.len()
+        {
+            return Err(invalid());
+        }
+        // Direct-output decoding may not need a window allocation, so enforce the
+        // declared frame window as well as libzstd's allocation limit. Zstd's
+        // descriptor encodes 2^(10+exponent) plus eighths of that size.
+        if payload.get(4).ok_or_else(invalid)? & 0x20 == 0
+            && u32::from(*payload.get(5).ok_or_else(invalid)?) > (WINDOW_LOG - 10) << 3
+        {
+            return Err(invalid());
+        }
+        let context = match &mut self.context {
+            Some(context) => context,
+            slot @ None => {
+                let mut context = DCtx::try_create()
+                    .ok_or_else(|| Error::operation("allocate history decompression context"))?;
+                context
+                    .set_parameter(DParameter::WindowLogMax(WINDOW_LOG))
+                    .map_err(failure)?;
+                slot.insert(context)
+            }
+        };
+        context
+            .reset(ResetDirective::SessionOnly)
+            .map_err(failure)?;
+        context.load_dictionary(dictionary(base)).map_err(failure)?;
+        let mut decoded = vec![0; size];
+        let mut input = InBuffer::around(payload);
+        let mut output = OutBuffer::around(decoded.as_mut_slice());
+        loop {
+            let before = (input.pos(), output.pos());
+            let remaining = context
+                .decompress_stream(&mut output, &mut input)
+                .map_err(failure)?;
+            if remaining == 0 {
+                break;
+            }
+            if input.pos() == payload.len() || before == (input.pos(), output.pos()) {
                 return Err(invalid());
             }
-            for at in source..source + length {
-                let byte = if at < base.len() {
-                    base[at]
-                } else {
-                    output[at - base.len()]
-                };
-                output.push(byte);
-            }
         }
-    }
-    if output.len() != size {
-        return Err(invalid());
-    }
-    Ok(output)
-}
-
-fn slot(bytes: &[u8]) -> usize {
-    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-    (value.wrapping_mul(2654435761) >> 19) as usize
-}
-
-fn literals(output: &mut Vec<u8>, bytes: &[u8]) {
-    if !bytes.is_empty() {
-        integer(output, ((bytes.len() - 1) as u64) * 2);
-        output.extend_from_slice(bytes);
-    }
-}
-
-fn integer(output: &mut Vec<u8>, mut value: u64) {
-    while value >= 128 {
-        output.push(value as u8 | 128);
-        value >>= 7;
-    }
-    output.push(value as u8);
-}
-
-fn read_integer(bytes: &[u8], offset: &mut usize) -> Result<u64> {
-    let mut value = 0;
-    for shift in (0..=63).step_by(7) {
-        let byte = *bytes.get(*offset).ok_or_else(invalid)?;
-        *offset += 1;
-        if shift == 63 && byte > 1 || shift > 0 && byte == 0 {
+        if input.pos() != payload.len() || output.pos() != size {
             return Err(invalid());
         }
-        value |= u64::from(byte & 127) << shift;
-        if byte < 128 {
-            return Ok(value);
-        }
+        Ok(decoded)
     }
-    Err(invalid())
+}
+
+fn dictionary(base: &[u8]) -> &[u8] {
+    // Source bytes are never trained dictionaries. Excluding one magic byte prevents
+    // libzstd from interpreting arbitrary source content as a dictionary header.
+    if base.starts_with(&[0x37, 0xa4, 0x30, 0xec]) {
+        &base[1..]
+    } else {
+        base
+    }
+}
+
+fn failure(code: usize) -> Error {
+    Error::operation(format!(
+        "history chunk checksum mismatch: zstd {}",
+        zstd_safe::get_error_name(code)
+    ))
 }
 
 fn invalid() -> Error {

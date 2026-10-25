@@ -4,7 +4,7 @@
 // Related: crates/kodstar-core/src/infrastructure/index/relations/mod.rs.
 
 use crate::domain::diagnostics::{Error, Result};
-use rusqlite::{Connection, params, types::Value};
+use rusqlite::{Connection, params};
 
 pub(crate) fn verify(c: &Connection) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE relation_expected_ids(id INTEGER PRIMARY KEY,block INTEGER);
@@ -19,23 +19,22 @@ pub(crate) fn verify(c: &Connection) -> Result<()> {
         let block: i64 = block.get(0)?;
         let (file, source, rows) = super::load(c, block)?;
         for row in rows {
-            if !references
-                .query_row(params![row[1], file, source, row[3], row[6], row[7]], |r| {
-                    r.get::<_, bool>(0)
-                })?
-            {
+            if !references.query_row(
+                params![row.fact, file, source, row.target, row.rule, row.reason],
+                |r| r.get::<_, bool>(0),
+            )? {
                 return Err(Error::operation(
                     "packed relationship references a missing or different owner",
                 ));
             }
-            ids.execute(params![row[0], block])?;
-            routes.execute(params![1, row[1], block])?;
-            routes.execute(params![6, row[6], block])?;
-            if row[7] != Value::Null {
-                routes.execute(params![6, row[7], block])?;
+            ids.execute(params![row.id, block])?;
+            routes.execute(params![1, row.fact, block])?;
+            routes.execute(params![6, row.rule, block])?;
+            if row.reason.is_some() {
+                routes.execute(params![6, row.reason, block])?;
             }
-            if row[3] != Value::Null {
-                routes.execute(params![3, row[3], block])?;
+            if row.target.is_some() {
+                routes.execute(params![3, row.target, block])?;
             }
         }
     }

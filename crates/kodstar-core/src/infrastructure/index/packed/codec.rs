@@ -24,7 +24,7 @@ pub(crate) fn text(bytes: &mut Vec<u8>, value: &str) {
 
 pub(crate) struct Input<'a>(pub &'a [u8]);
 
-impl Input<'_> {
+impl<'a> Input<'a> {
     pub fn integer(&mut self) -> Result<u64> {
         let mut value = 0;
         for shift in (0..=63).step_by(7) {
@@ -45,12 +45,12 @@ impl Input<'_> {
         i64::try_from(self.integer()?).map_err(|_| invalid())
     }
 
-    pub fn text(&mut self) -> Result<String> {
+    pub fn text_ref(&mut self) -> Result<&'a str> {
         let length = usize::try_from(self.integer()?).map_err(|_| invalid())?;
         let bytes = self.0.get(..length).ok_or_else(invalid)?;
         let text = std::str::from_utf8(bytes).map_err(|_| invalid())?;
         self.0 = &self.0[length..];
-        Ok(text.to_owned())
+        Ok(text)
     }
 
     pub fn finish(self) -> Result<()> {

@@ -34,8 +34,8 @@ impl Lookup<'_, '_> {
             "INSERT OR IGNORE INTO resolution_candidates
              SELECT s.id FROM symbols s JOIN files f ON f.id=s.file_id
              JOIN symbols o ON o.id=s.owner_id
-             WHERE f.language=?1 AND f.module=?2 AND f.package=?3 AND s.name_key=?4
-               AND f.declared_module=?5 AND o.kind IN ('file','module')",
+             WHERE f.language_id=(SELECT id FROM atoms WHERE value=?1) AND f.module_id=(SELECT id FROM atoms WHERE value=?2) AND f.package_id=(SELECT id FROM atoms WHERE value=?3) AND s.name_key_id=(SELECT id FROM atoms WHERE value=?4)
+               AND f.declared_module_id=(SELECT id FROM atoms WHERE value=?5) AND o.kind_id IN (SELECT id FROM atoms WHERE value IN ('file','module'))",
             params![
                 context.language.as_str(),
                 context.module,

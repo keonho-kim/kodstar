@@ -10,7 +10,7 @@ use crate::domain::{
 use rusqlite::{Connection, Statement, params};
 
 pub(crate) struct Reader<'conn> {
-    connection: &'conn Connection,
+    chunks: super::chunk_read::Reader<'conn>,
     statement: Statement<'conn>,
     blob: i64,
     cached_start: u64,
@@ -23,7 +23,7 @@ impl<'conn> Reader<'conn> {
     pub fn verified(connection: &'conn Connection, blob: i64) -> Result<Self> {
         let size =
             connection.query_row("SELECT size FROM blobs WHERE id=?1", [blob], |r| r.get(0))?;
-        Ok(Self { connection,blob,size,cached_start:0,cached:Vec::new(),
+        Ok(Self { chunks:super::chunk_read::Reader::new(connection),blob,size,cached_start:0,cached:Vec::new(),
             statement:connection.prepare("SELECT start,chunk FROM chunk_refs WHERE blob=?1 AND start<=?2 ORDER BY start DESC LIMIT 1")? })
     }
 
@@ -45,7 +45,7 @@ impl<'conn> Reader<'conn> {
                     .statement
                     .query_row(params![self.blob, offset], |r| Ok((r.get(0)?, r.get(1)?)))?;
                 self.cached.clear();
-                self.cached = super::chunk_read::load(self.connection, id)?;
+                self.cached = self.chunks.load(id)?;
                 self.cached_start = start;
                 if start > self.size || self.cached.len() as u64 > self.size - start {
                     return Err(Error::operation("history chunk exceeds declared blob size"));

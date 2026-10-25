@@ -21,8 +21,8 @@ pub(crate) fn run(
         crate::domain::diagnostics::Error::operation("watch initial synchronization is missing")
     })?;
     let changes = project
-        .changes
-        .take()
+        .input
+        .take_observer()
         .ok_or_else(|| crate::domain::diagnostics::Error::operation("watch observer is missing"))?;
     sink.begin(&initial.metadata(crate::domain::query::Refresh::Metadata))?;
     let mut summary = QuerySummary {

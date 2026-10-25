@@ -1,9 +1,11 @@
 // Purpose: 조회 의존성을 파일·key별 제한된 차이 정수 블록으로 저장.
 // Pattern: Storage Adapter.
 // Usage: resolver publication과 index 연결 초기화가 호출.
-// Related: crates/kodstar-core/src/infrastructure/index/dependencies/codec.rs, crates/kodstar-core/src/infrastructure/index/schema.sql.
+// Related: crates/kodstar-core/src/infrastructure/index/dependencies/codec.rs, crates/kodstar-core/src/infrastructure/index/dependencies/schema.sql.
 
 mod codec;
+mod selection;
+pub(crate) use selection::remove_selected;
 #[cfg(test)]
 mod tests;
 
@@ -56,6 +58,7 @@ pub(crate) fn verify(connection: &Connection) -> Result<()> {
 
 pub(crate) fn publish(connection: &Connection) -> Result<()> {
     super::dictionary::publish(connection)?;
+
     connection.execute_batch(
         "CREATE TEMP TABLE dependency_rows(key_id INTEGER,file_id INTEGER,fact_id INTEGER,found INTEGER,
             PRIMARY KEY(key_id,file_id,fact_id)) WITHOUT ROWID;
@@ -63,11 +66,22 @@ pub(crate) fn publish(connection: &Connection) -> Result<()> {
         FROM resolution_dependencies d JOIN dictionary_pending k ON k.kind=d.kind AND k.lookup_key=d.lookup_key
         JOIN facts f ON f.id=d.fact_id;",
     )?;
+    // A fact selection may leave other consumers of the same key/file block alive.
+    // Merge those postings on disk before replacing the touched key/file groups.
+    connection.execute_batch("INSERT OR IGNORE INTO dependency_rows
+        SELECT b.key_id,b.file_id,json_extract(j.value,'$[0]'),json_extract(j.value,'$[1]')
+        FROM (SELECT DISTINCT key_id,file_id FROM dependency_rows) selected
+        CROSS JOIN lookup_rows b ON b.key_id=selected.key_id AND b.file_id=selected.file_id
+        CROSS JOIN json_each(kodstar_postings(b.payload,b.count)) j;
+        DELETE FROM lookup_rows WHERE (key_id,file_id) IN (SELECT key_id,file_id FROM dependency_rows);")?;
+
     let mut select = connection.prepare(
         "SELECT key_id,file_id,fact_id,found FROM dependency_rows ORDER BY key_id,file_id,fact_id",
     )?;
     let mut rows = select.query([])?;
-    let mut insert = connection.prepare("INSERT INTO lookup_blocks VALUES(?1,?2,?3,?4,?5)")?;
+    let mut insert = connection.prepare(
+        "INSERT INTO lookup_rows(key_id,file_id,part,count,payload) VALUES(?1,?2,?3,?4,?5)",
+    )?;
     let mut current = None;
     let mut part = 0;
     let mut previous = 0;
@@ -93,6 +107,7 @@ pub(crate) fn publish(connection: &Connection) -> Result<()> {
     if let Some((key, file)) = current {
         insert.execute(params![key, file, part, count, bytes])?;
     }
+
     drop(rows);
     drop(select);
     drop(insert);

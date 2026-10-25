@@ -22,14 +22,31 @@ pub(super) fn push(output: &mut Vec<u8>, fact: i64, previous: i64, found: bool) 
 }
 
 pub(super) fn json(bytes: &[u8], count: usize) -> Result<String> {
+    let mut output = String::with_capacity(count.min(MAX_COUNT) * 25 + 2);
+    output.push('[');
+    let mut first = true;
+    visit(bytes, count, |fact, found| {
+        if !first {
+            output.push(',');
+        }
+        first = false;
+        write!(&mut output, "[{fact},{}]", u8::from(found)).map_err(|_| invalid())
+    })?;
+    output.push(']');
+    Ok(output)
+}
+
+pub(super) fn visit(
+    bytes: &[u8],
+    count: usize,
+    mut consume: impl FnMut(i64, bool) -> Result<()>,
+) -> Result<()> {
     if count == 0 || count > MAX_COUNT || bytes.len() > MAX_COUNT * 10 {
         return Err(invalid());
     }
-    let mut output = String::with_capacity(count * 25 + 2);
-    output.push('[');
     let mut offset = 0;
     let mut previous = 0u64;
-    for index in 0..count {
+    for _ in 0..count {
         let mut value = 0u64;
         let mut shift = 0;
         loop {
@@ -48,17 +65,13 @@ pub(super) fn json(bytes: &[u8], count: usize) -> Result<String> {
         if fact <= previous || fact > i64::MAX as u64 {
             return Err(invalid());
         }
-        if index != 0 {
-            output.push(',');
-        }
-        write!(&mut output, "[{fact},{}]", value & 1).map_err(|_| invalid())?;
+        consume(fact as i64, value & 1 == 1)?;
         previous = fact;
     }
     if offset != bytes.len() {
         return Err(invalid());
     }
-    output.push(']');
-    Ok(output)
+    Ok(())
 }
 
 fn invalid() -> Error {

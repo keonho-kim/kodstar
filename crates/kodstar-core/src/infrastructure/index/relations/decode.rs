@@ -1,0 +1,106 @@
+// Purpose: 전체 블록을 검증하면서 빌린 관계 행을 소비자에게 순차 전달.
+// Pattern: Visitor.
+// Usage: codec의 전체 읽기와 조건 선택이 같은 decoder를 사용.
+// Related: crates/kodstar-core/src/infrastructure/index/relations/codec.rs, crates/kodstar-core/src/infrastructure/index/relations/row.rs.
+
+use super::super::packed::codec::{self, Input};
+use super::Relation;
+use crate::domain::relations::Resolution;
+use rusqlite::{Result, types::ValueRef};
+
+pub(super) struct Borrowed<'a> {
+    id: i64,
+    fact: i64,
+    source: i64,
+    target: Option<i64>,
+    external: Option<&'a str>,
+    state: Resolution,
+    rule: i64,
+    reason: Option<i64>,
+}
+
+impl Borrowed<'_> {
+    pub fn value(&self, column: usize) -> ValueRef<'_> {
+        match column {
+            0 => ValueRef::Integer(self.id),
+            1 => ValueRef::Integer(self.fact),
+            2 => ValueRef::Integer(self.source),
+            3 => self.target.map_or(ValueRef::Null, ValueRef::Integer),
+            4 => self
+                .external
+                .map_or(ValueRef::Null, |s| ValueRef::Text(s.as_bytes())),
+            5 => ValueRef::Text(self.state.as_str().as_bytes()),
+            6 => ValueRef::Integer(self.rule),
+            7 => self.reason.map_or(ValueRef::Null, ValueRef::Integer),
+            _ => ValueRef::Null,
+        }
+    }
+
+    pub fn into_owned(self) -> Relation {
+        Relation {
+            id: self.id,
+            fact: self.fact,
+            source: self.source,
+            target: self.target,
+            external: self.external.map(str::to_owned),
+            state: self.state,
+            rule: self.rule,
+            reason: self.reason,
+        }
+    }
+}
+
+pub(super) fn visit(
+    bytes: &[u8],
+    count: usize,
+    source: i64,
+    mut consume: impl FnMut(Borrowed<'_>) -> Result<()>,
+) -> Result<()> {
+    if !(1..=128).contains(&count) || source <= 0 {
+        return Err(codec::invalid());
+    }
+    let mut input = Input(bytes);
+    let (mut previous, mut fact) = (0i64, 0i64);
+    for _ in 0..count {
+        let gap = input.id()?;
+        let id = previous.checked_add(gap).ok_or_else(codec::invalid)?;
+        let delta = input.integer()?;
+        let delta = ((delta >> 1) as i64) ^ -((delta & 1) as i64);
+        fact = fact.checked_add(delta).ok_or_else(codec::invalid)?;
+        let target = input.id()?;
+        let rule = input.id()?;
+        let reason = input.id()?;
+        let flags = input.integer()?;
+        if gap == 0 || fact <= 0 || rule == 0 || flags > 7 {
+            return Err(codec::invalid());
+        }
+        let external = if flags & 1 == 1 {
+            Some(input.text_ref()?)
+        } else {
+            None
+        };
+        let state = match flags >> 1 {
+            0 => Resolution::Resolved,
+            1 => Resolution::Candidate,
+            2 => Resolution::Ambiguous,
+            _ => Resolution::Unresolved,
+        };
+        if target > 0 && external.is_some()
+            || state == Resolution::Resolved && target == 0 && external.is_none()
+        {
+            return Err(codec::invalid());
+        }
+        consume(Borrowed {
+            id,
+            fact,
+            source,
+            target: (target > 0).then_some(target),
+            external,
+            state,
+            rule,
+            reason: (reason > 0).then_some(reason),
+        })?;
+        previous = id;
+    }
+    input.finish()
+}

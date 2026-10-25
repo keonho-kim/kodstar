@@ -1,4 +1,4 @@
-// Purpose: 갱신 전 이름·모듈 lookup과 대상 참조의 소비 파일을 디스크 집합으로 보존.
+// Purpose: 갱신 전 이름·모듈 lookup과 대상 참조의 소비 fact를 디스크 집합으로 보존.
 // Pattern: Storage Query.
 // Usage: incremental 정책이 선언을 지우기 전에 호출하고 부분 resolver가 범위를 읽음.
 // Related: crates/kodstar-core/src/application/analysis/incremental.rs, crates/kodstar-core/src/application/analysis/resolve/mod.rs.
@@ -44,30 +44,34 @@ pub(crate) fn only_go(connection: &Connection) -> Result<bool> {
 
 pub(crate) fn capture(connection: &Connection, record: &FileRecord) -> Result<()> {
     let prefix = format!("{}:{}:", record.package, record.module);
-    // Imported namespaces may be mapped through go.work or replace. Observe every Go module
-    // consumer conservatively; same-package names can use the exact package/module prefix.
+    // Record the provider selected by go.work/replace, including empty package lookups.
+    let package = crate::domain::resolve::lookup_keys::go_package(&record.package, &record.module);
     connection.execute(
-        "INSERT OR IGNORE INTO dependent_files
-        SELECT b.file_id FROM lookup_keys k CROSS JOIN lookup_blocks b ON b.key_id=k.id
+        "INSERT OR IGNORE INTO affected_facts
+        SELECT json_extract(j.value,'$[0]') FROM lookup_keys k CROSS JOIN lookup_blocks b ON b.key_id=k.id
         JOIN files u ON u.id=b.file_id
-        WHERE u.language='go' AND (k.kind='module'
+        CROSS JOIN json_each(kodstar_postings(b.payload,b.count)) j
+        WHERE u.language='go' AND ((k.kind='go_package' AND k.lookup_key=?2)
             OR (k.kind='module_name' AND substr(k.lookup_key,1,length(?1))=?1))",
-        [&prefix],
+        rusqlite::params![prefix, package],
     )?;
     connection.execute(
-        "INSERT OR IGNORE INTO dependent_files
-        SELECT u.file_id FROM relationships r JOIN facts u ON u.id=r.fact_id
+        "INSERT OR IGNORE INTO affected_facts
+        SELECT r.fact_id FROM relationships r
         JOIN symbols target ON target.id=r.target_id JOIN files f ON f.id=target.file_id
         WHERE f.path=?1",
         [path_bytes(&record.path)],
     )?;
     let key = blake3::hash(&path_bytes(&record.path)).to_hex().to_string();
     connection.execute(
-        "INSERT OR IGNORE INTO dependent_files
-        SELECT b.file_id FROM lookup_keys k CROSS JOIN lookup_blocks b ON b.key_id=k.id
+        "INSERT OR IGNORE INTO affected_facts
+        SELECT json_extract(j.value,'$[0]') FROM lookup_keys k CROSS JOIN lookup_blocks b ON b.key_id=k.id
+        CROSS JOIN json_each(kodstar_postings(b.payload,b.count)) j
         WHERE k.kind='file' AND k.lookup_key=?1",
         [&key],
     )?;
+    include_dispatch(connection)?;
+    connection.execute_batch("INSERT OR IGNORE INTO dependent_files SELECT f.file_id FROM affected_facts a JOIN facts f ON f.id=a.id;")?;
     Ok(())
 }
 
@@ -108,12 +112,36 @@ pub(crate) fn capture_deleted(connection: &Connection) -> Result<bool> {
 }
 
 pub(crate) fn prepare_partial(connection: &Connection) -> Result<()> {
-    connection
-        .execute_batch("INSERT OR IGNORE INTO changed_files SELECT id FROM dependent_files;")?;
+    include_dispatch(connection)?;
     super::relations::partial(connection)?;
+    super::dependencies::remove_selected(connection)?;
     connection.execute_batch("
-        INSERT OR IGNORE INTO symbol_identities SELECT id,id FROM symbols WHERE language='go';
-        DELETE FROM facts WHERE relation='dispatch_candidate' AND file_id IN (SELECT id FROM changed_files);
-        DELETE FROM lookup_blocks WHERE file_id IN (SELECT id FROM changed_files);")?;
+        DELETE FROM facts WHERE relation='dispatch_candidate'
+            AND (file_id IN (SELECT id FROM changed_files) OR id IN (SELECT id FROM affected_facts));")?;
+    Ok(())
+}
+
+pub(crate) fn rust_function_environment(connection: &Connection) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM files WHERE language='rust' AND status='analyzed')
+         AND NOT EXISTS(SELECT 1 FROM files WHERE status='analyzed' AND language<>'rust')
+         AND NOT EXISTS(SELECT 1 FROM symbols WHERE kind<>'file'
+             AND (language<>'rust' OR kind NOT IN ('function','module')))
+         AND NOT EXISTS(SELECT 1 FROM bindings b JOIN files f ON f.id=b.file_id
+             WHERE f.language='rust' AND b.kind NOT IN ('function','parameter','import','local','module'))
+         AND NOT EXISTS(SELECT 1 FROM facts WHERE relation IN
+             ('inherits','implements','mixes_in','overrides','dispatch_candidate'))", [], |r| r.get(0),
+    )?)
+}
+
+pub(crate) fn include_dispatch(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "INSERT OR IGNORE INTO affected_facts
+        SELECT derived.id FROM affected_facts selected JOIN facts origin ON origin.id=selected.id
+        JOIN facts derived ON derived.file_id=origin.file_id AND derived.source_id=origin.source_id
+            AND derived.scope_id=origin.scope_id AND derived.start_byte=origin.start_byte
+            AND derived.end_byte=origin.end_byte AND derived.expression=origin.expression
+        WHERE origin.relation='calls' AND derived.relation='dispatch_candidate';",
+    )?;
     Ok(())
 }

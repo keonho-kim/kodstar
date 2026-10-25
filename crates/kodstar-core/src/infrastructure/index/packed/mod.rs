@@ -5,6 +5,8 @@
 
 pub(crate) mod codec;
 mod cursor;
+mod rows;
+pub(super) use rows::{Rows, key_matches, matches};
 
 use rusqlite::{
     Connection, Result, ffi,
@@ -18,10 +20,11 @@ pub(super) enum Kind {
     Dictionary,
     Relations,
 }
-pub(super) type Row = Vec<Value>;
 pub(super) type Filter = (usize, Value);
 
 pub(super) fn register(connection: &Connection) -> Result<()> {
+    super::dictionary::routing::register(connection)?;
+    connection.execute_batch(super::relations::PRIOR_SCHEMA)?;
     const KEYS: Module<Table> = Module::eponymous_only_module();
     const EDGES: Module<Table> = Module::update_module();
     connection.create_module(c"kodstar_keys", &KEYS, Some(Kind::Dictionary))?;

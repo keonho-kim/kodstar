@@ -30,4 +30,6 @@ def decode(payload, count):
 
 def register(database):
     register_packed(database)
+    database.create_function("kodstar_display_path", 1,
+                             lambda value: value.decode("utf-8", errors="replace"), deterministic=True)
     database.create_function("kodstar_postings", 2, decode, deterministic=True)

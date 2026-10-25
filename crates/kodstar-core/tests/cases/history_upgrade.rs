@@ -7,6 +7,52 @@ use crate::support::*;
 use kodstar_core::*;
 
 #[test]
+fn v4_history_is_preserved_until_explicit_upgrade() -> TestResult {
+    let p = Project::new()?;
+    let source = "fn preserved() {}\n";
+    p.write("main.rs", source)?;
+    let first = p.build(false)?;
+    p.history(HistoryRequest::Save {
+        name: "saved".into(),
+    })?;
+    let path = p.root.join(".kodstar/repository.sqlite");
+    let db = rusqlite::Connection::open(&path)?;
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM chunk_data WHERE codec<>0", [], |r| {
+            r.get::<_, u64>(0)
+        })?,
+        0
+    );
+    let identity: String = db.query_row("SELECT identity FROM repository", [], |r| r.get(0))?;
+    db.execute_batch("PRAGMA user_version=4;")?;
+    let error = p.build(false).expect_err("format 4 was silently accepted");
+    assert!(error.to_string().contains("history upgrade"), "{error}");
+    assert_eq!(
+        db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
+        4
+    );
+    p.history(HistoryRequest::Upgrade)?;
+    assert_eq!(
+        db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
+        5
+    );
+    assert_eq!(
+        db.query_row("SELECT identity FROM repository", [], |r| r
+            .get::<_, String>(0))?,
+        identity
+    );
+    assert_eq!(
+        db.query_row("SELECT checkpoint FROM names WHERE name='saved'", [], |r| r
+            .get::<_, i64>(0))?,
+        1
+    );
+    let again = p.build(false)?;
+    assert_eq!(again.generation, first.generation);
+    assert_eq!(std::fs::read_to_string(p.root.join("main.rs"))?, source);
+    Ok(())
+}
+
+#[test]
 fn current_format_repack_preserves_checkpoint_identity_and_actual_restore() -> TestResult {
     let p = Project::new()?;
     let initial = "fn original() {}\n".repeat(100);
@@ -68,7 +114,7 @@ fn shared_v2_history_requires_explicit_upgrade_and_keeps_all_content() -> TestRe
     encoding::register(&db)?;
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        4
+        5
     );
     let saved: Vec<u8> = db.query_row("SELECT content FROM chunks", [], |r| r.get(0))?;
     assert_eq!(saved, content.as_bytes());
@@ -118,7 +164,7 @@ fn legacy_history_requires_explicit_upgrade_and_preserves_its_checkpoint() -> Te
     encoding::register(&connection)?;
     assert_eq!(
         connection.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        4
+        5
     );
     assert_eq!(
         connection.query_row("SELECT identity FROM repository", [], |r| r

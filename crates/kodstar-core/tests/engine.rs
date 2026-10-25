@@ -79,6 +79,8 @@ mod history_watch;
 mod identities;
 #[path = "cases/incremental_inputs.rs"]
 mod incremental_inputs;
+#[path = "cases/incremental_statistics.rs"]
+mod incremental_statistics;
 #[path = "cases/javascript.rs"]
 mod javascript;
 #[path = "cases/kotlin.rs"]
@@ -145,6 +147,10 @@ mod rust_macros;
 mod rust_namespaces;
 #[path = "cases/scala.rs"]
 mod scala;
+#[path = "cases/storage_atoms.rs"]
+mod storage_atoms;
+#[path = "cases/storage_projection.rs"]
+mod storage_projection;
 mod support;
 #[path = "cases/swift.rs"]
 mod swift;

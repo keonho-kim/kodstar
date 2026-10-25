@@ -4,7 +4,7 @@
 -- Related: crates/kodstar-core/src/infrastructure/index/relations/mod.rs.
 
 CREATE TABLE relation_texts(id INTEGER PRIMARY KEY,value TEXT NOT NULL UNIQUE);
-CREATE TABLE relation_blocks(id INTEGER PRIMARY KEY,file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,source_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,count INTEGER NOT NULL CHECK(count BETWEEN 1 AND 128),payload BLOB NOT NULL);
+CREATE TABLE relation_blocks(id INTEGER PRIMARY KEY,file_id INTEGER NOT NULL REFERENCES files_rows(id) ON DELETE CASCADE,source_id INTEGER NOT NULL REFERENCES symbols_rows(id) ON DELETE CASCADE,count INTEGER NOT NULL CHECK(count BETWEEN 1 AND 128),payload BLOB NOT NULL);
 CREATE INDEX relation_blocks_file ON relation_blocks(file_id);
 CREATE INDEX relation_blocks_source ON relation_blocks(source_id,file_id);
 CREATE TABLE relation_ids(id INTEGER PRIMARY KEY,block INTEGER NOT NULL REFERENCES relation_blocks(id) ON DELETE CASCADE);
@@ -22,5 +22,5 @@ CREATE TRIGGER relationship_insert INSTEAD OF INSERT ON relationships BEGIN
     VALUES(NEW.id,NEW.fact_id,NEW.source_id,NEW.target_id,NEW.external_key,NEW.resolution,
         (SELECT id FROM relation_texts WHERE value=NEW.rule),(SELECT id FROM relation_texts WHERE value=NEW.reason));
 END;
-CREATE TRIGGER relation_fact_delete BEFORE DELETE ON facts WHEN EXISTS(SELECT 1 FROM relation_routes WHERE kind=1 AND entity=OLD.id) BEGIN DELETE FROM relationship_rows WHERE fact_id=OLD.id; END;
-CREATE TRIGGER relation_target_delete BEFORE DELETE ON symbols WHEN EXISTS(SELECT 1 FROM relation_routes WHERE kind=3 AND entity=OLD.id) BEGIN DELETE FROM relationship_rows WHERE target_id=OLD.id; END;
+CREATE TRIGGER relation_fact_delete BEFORE DELETE ON facts_rows WHEN EXISTS(SELECT 1 FROM relation_routes WHERE kind=1 AND entity=OLD.id) BEGIN DELETE FROM relationship_rows WHERE fact_id=OLD.id; END;
+CREATE TRIGGER relation_target_delete BEFORE DELETE ON symbols_rows WHEN EXISTS(SELECT 1 FROM relation_routes WHERE kind=3 AND entity=OLD.id) BEGIN DELETE FROM relationship_rows WHERE target_id=OLD.id; END;

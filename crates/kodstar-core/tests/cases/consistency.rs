@@ -9,7 +9,7 @@ use serde_json::Value;
 
 #[test]
 fn failure_during_staged_publication_preserves_the_last_complete_generation() -> TestResult {
-    for table in ["lookup_blocks", "relation_blocks"] {
+    for table in ["lookup_rows", "relation_blocks"] {
         let project = Project::new()?;
         project.write(
             "main.rs",

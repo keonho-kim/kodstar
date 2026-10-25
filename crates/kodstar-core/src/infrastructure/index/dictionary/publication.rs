@@ -87,9 +87,7 @@ pub(crate) fn publish(c: &Connection) -> Result<()> {
     )?;
     let mut input = select.query([])?;
     let mut mapped = c.prepare("INSERT INTO dictionary_pending VALUES(?1,?2,?3)")?;
-    let mut next: i64 = c.query_row("SELECT coalesce(max(id),0) FROM dictionary_ids", [], |r| {
-        r.get(0)
-    })?;
+    let mut next = super::routing::next(c)?;
     let mut current: Option<Pending> = None;
     while let Some(row) = input.next()? {
         let kind: String = row.get(0)?;

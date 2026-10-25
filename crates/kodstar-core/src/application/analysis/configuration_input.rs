@@ -23,7 +23,6 @@ pub(super) fn parse(
     selected: &SelectedProject,
     inputs: &mut crate::infrastructure::history::inputs::Reader<'_>,
     connection: &Connection<'_>,
-    generation: i64,
     file: File<'_>,
     parser: &mut ParseSession,
     cancel: &Cancellation,
@@ -65,7 +64,7 @@ pub(super) fn parse(
         size: source.len() as u64,
         status: "auxiliary",
     };
-    record.persist(connection, generation)?;
+    record.persist(connection)?;
     index::clear_file(connection, id)?;
     let mut context = index::FileFacts::new(id, &record, false);
     let mut writer = index::FactWriter::new(connection)?;

@@ -17,11 +17,12 @@ impl Repository {
 
 pub(super) fn verify(connection: &rusqlite::Connection, cancel: &Cancellation) -> Result<()> {
     references(connection)?;
+    let mut reader = super::super::content::chunk_read::Reader::new(connection);
     let mut chunks = connection.prepare("SELECT id FROM chunk_data")?;
     let mut chunks = chunks.query([])?;
     while let Some(row) = chunks.next()? {
         cancel.check()?;
-        super::super::content::chunk_read::load(connection, row.get(0)?)?;
+        reader.load(row.get(0)?)?;
     }
     let mut statement = connection.prepare("SELECT id FROM blobs ORDER BY id")?;
     let mut rows = statement.query([])?;

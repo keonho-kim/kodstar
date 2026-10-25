@@ -5,14 +5,40 @@
 
 use crate::domain::diagnostics::{Coverage, Result};
 use rusqlite::Connection;
+pub(crate) mod delta;
 
-pub(super) fn refresh(connection: &Connection, generation: i64) -> Result<()> {
+#[derive(Clone, Copy)]
+pub(crate) enum Update {
+    Files,
+    Selected,
+    All,
+}
+#[cfg(test)]
+mod tests;
+
+pub(super) fn refresh(connection: &Connection, generation: i64, update: Update) -> Result<()> {
+    if matches!(update, Update::Selected)
+        && let Some((resolved, bad)) = delta::difference(connection)?
+        && delta::apply(connection, generation, resolved, bad)?
+    {
+        return Ok(());
+    }
+    if matches!(update, Update::Files) && connection.execute(
+        "INSERT OR REPLACE INTO coverage
+         SELECT 1,?1,input.scanned,input.analyzed,input.skipped,input.unsupported,input.bytes,
+             previous.symbols,previous.relationships,previous.unresolved
+         FROM (SELECT COUNT(*) AS scanned,COALESCE(SUM(status='analyzed'),0) AS analyzed,
+             COALESCE(SUM(status='skipped'),0) AS skipped,COALESCE(SUM(status='unsupported'),0) AS unsupported,
+             COALESCE(SUM(CASE WHEN status='analyzed' THEN size ELSE 0 END),0) AS bytes FROM files) input
+         CROSS JOIN coverage previous JOIN metadata m ON m.generation=previous.generation
+         WHERE previous.singleton=1 AND m.singleton=1", [generation],
+    )? == 1 { return Ok(()); }
     connection.execute(
         "INSERT OR REPLACE INTO coverage
          SELECT 1,?1,COUNT(*),COALESCE(SUM(status='analyzed'),0),
            COALESCE(SUM(status='skipped'),0),COALESCE(SUM(status='unsupported'),0),
            COALESCE(SUM(CASE WHEN status='analyzed' THEN size ELSE 0 END),0),
-           (SELECT COUNT(DISTINCT logical_key) FROM symbols),
+           (SELECT COUNT(DISTINCT key_blob) FROM symbols),
            (SELECT COUNT(*) FROM relationships WHERE resolution='resolved'),
            (SELECT COUNT(DISTINCT fact_id) FROM relationships
              WHERE resolution IN ('unresolved','ambiguous'))

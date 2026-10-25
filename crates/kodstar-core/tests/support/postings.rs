@@ -5,6 +5,27 @@
 
 pub fn register(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
     super::packed::register(connection)?;
+    display_path(connection)?;
+    connection.create_scalar_function(
+        "kodstar_digest",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            use rusqlite::types::ValueRef;
+            match ctx.get_raw(0) {
+                ValueRef::Null => Ok(None),
+                ValueRef::Blob(v) if v.len() == 32 => Ok(Some(v.to_vec())),
+                ValueRef::Text(v) => {
+                    let text = std::str::from_utf8(v).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    let bytes =
+                        blake3::Hash::from_hex(text).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    Ok(Some(bytes.as_bytes().to_vec()))
+                }
+                _ => Err(rusqlite::Error::InvalidQuery),
+            }
+        },
+    )?;
     connection.create_scalar_function(
         "kodstar_postings",
         2,
@@ -34,5 +55,15 @@ pub fn register(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
             serde_json::to_string(&pairs)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
         },
+    )
+}
+
+pub fn display_path(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
+    connection.create_scalar_function(
+        "kodstar_display_path",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| Ok(String::from_utf8_lossy(context.get_raw(0).as_blob()?).into_owned()),
     )
 }

@@ -3,27 +3,23 @@
 | 항목 | 정의 |
 |---|---|
 | 프로젝트 이름 | **KodStar** |
-| 시각적 브랜드 표기 | **kod<sup>☆</sup>** — 소문자 `kod` 오른쪽 위의 별. 로고 아래 줄에 작은 연회색 `kodstar` 병기 |
+| 시각적 브랜드 표기 | **kod<sup>☆</sup>**, 실행 명령은 `kodstar` |
 | 실행 명령 | `kodstar` |
 | 구현 언어 | 분석 엔진과 CLI 모두 Rust |
 | 실행 플랫폼 | macOS·Linux. Windows는 지원하지 않음 |
 | 제품 형태 | 로컬 소스코드 관계 분석과 자동 변경 이력을 제공하는 CLI와 재사용 가능한 엔진 |
-| 분석기 기반 | Graphify의 선정 언어 추출·해석 로직을 참고하고 Rust로 포팅 |
 | 핵심 우선순위 | 분석 근거와 한계의 명확성, 낮은 메모리 사용량, 빠른 조회와 증분 갱신 |
 | 분석 대상 | 프로그래밍 언어 19개, 웹 컴포넌트·템플릿 6개, 코드 해석용 보조 입력 |
 | 저장 위치 | 프로젝트 내부의 영구 이력 저장소와 사용자 홈의 프로젝트 경로별 분석 캐시 |
 | 저장 방식 | 수명을 분리한 SQLite 기반 소스 이력과 관계 인덱스 |
 
-이 문서는 제품의 기능·동작·외부 계약을 정의한다. 현재 구현 범위는 [README](README.md)와 `kodstar languages`에서 확인한다. 내부 구조는 [아키텍처 문서](docs/architecture.md), 개발·검증 절차는 [개발 문서](docs/development.md)에 둔다.
+이 문서는 제공하는 기능·동작·외부 계약을 정의한다. 명령 사용 예시는 [README](README.md), 언어별 capability는 `kodstar languages`에서 확인한다. 내부 구조는 [아키텍처 문서](docs/architecture.md), 개발·검증 절차는 [개발 문서](docs/development.md)에 둔다.
 
-VS Code 확장의 구현·배포는 프로젝트 범위에서 제외한다. 외부 도구 연동은 Rust 엔진 API,
-구조화된 CLI 출력과 `serve --stdio` 계약으로 제공한다.
+외부 도구 연동은 Rust 엔진 API, 구조화된 CLI 출력과 `serve --stdio` 계약으로 제공한다.
 
-**현재 제공:** `init`, 자동 체크포인트, `history`, `branch`, `--rev`, `impact --since`. 공개 출력은 schema 2, stdio는 protocol 2이며 `build` 명령·메서드는 제공하지 않는다. 언어·framework 규칙의 포팅 완료 여부와 실제 capability는 README·`languages`를 따른다.
+## 1. 개요
 
-## 1. 제품 목표
-
-kod<sup>☆</sup>는 현재 프로젝트에서 다음 질문에 답하는 도구다.
+kod<sup>☆</sup>는 프로젝트의 코드 관계와 소스 이력을 조회한다.
 
 - 이 소스 파일과 연결된 다른 파일은 무엇인가?
 - 이 파일에 어떤 함수·클래스·타입·메서드가 정의되어 있는가?
@@ -87,9 +83,7 @@ kodstar history diff
 
 ## 3. 지원 언어
 
-지원 언어는 Graphify에 존재하는 분석기 중 제품 목적에 맞게 선정한다. Stack Overflow 설문 사용률을 지원 여부의 기준으로 사용하지 않는다.
-
-**19개 언어 모두 분석 목표에 포함한다.** Java·Go를 비롯한 주요 언어를 파일명 판별만 지원하는 형태로 취급하지 않는다. 다만 언어마다 정적으로 확인 가능한 관계가 다르므로, 제공하는 구문과 관계 종류를 별도로 공개한다.
+19개 언어의 구문 정의와 정적으로 확인 가능한 관계를 분석한다. 언어마다 제공하는 구문·관계와 제한 사항을 별도로 공개한다.
 
 | 언어 | 대표 입력 | 분석 대상 기능 |
 |---|---|---|
@@ -118,7 +112,6 @@ kodstar history diff
 ### 3.1 구문 변형과 혼합 입력
 
 - JSX는 JavaScript에, TSX는 TypeScript에 포함한다.
-- CUDA·Metal 입력은 Graphify의 C++ 경로에서 실제 처리하는 구문 범위만 표시한다. 독립적인 GPU 언어 의미 분석을 약속하지 않는다.
 - `.h`는 C/C++를 구분한다. Objective-C 입력으로 판단되면 현재 범위에서 지원하지 않는다고 표시한다.
 - Objective-C·MATLAB 입력을 C/C++로 강제 해석하지 않는다.
 - `.inc`처럼 언어 간에 공유하는 확장자는 명시적 override로 의미를 지정할 수 있다.
@@ -148,7 +141,7 @@ grammar가 등록되어 있다는 사실만으로 전체 관계 분석을 지원
 | Laravel Blade | `.blade.php` | layout 상속·include·component·확인 가능한 PHP 참조 |
 | Razor | `.razor`, `.cshtml` | page·model·inherits·타입·handler·component 참조 |
 
-Vue·Svelte·Astro는 모두 지원 목표다. 혼합 파일에서 추출한 정의와 사용 위치는 원본 파일의 위치로 표시한다. script 블록 분리·masking 때문에 byte 위치가 틀어지지 않도록 원본 위치 관계를 보존한다.
+혼합 파일에서 추출한 정의와 사용 위치는 원본 파일의 위치로 표시한다. script 블록 분리·masking 때문에 byte 위치가 틀어지지 않도록 원본 위치 관계를 보존한다.
 
 React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 사용한다. 프레임워크 이름만으로 런타임 라우팅·반응성·템플릿 실행·생성 코드 전체를 해석한다고 표시하지 않는다. CSS 자체의 관계 분석은 범위 밖이다.
 
@@ -170,30 +163,25 @@ React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 
 
 `.fsproj`·`.vbproj`의 정적 프로젝트 참조를 읽는 것과 F#·VB.NET 소스 함수를 분석하는 것은 별개다. 보조 입력에서 제외 언어의 경계를 발견해도 해당 언어 분석을 지원한다고 표시하지 않는다.
 
-## 6. 범위에서 제외하는 기능
+## 6. 분석 범위와 제약
 
-| 구분 | 현재 제품 범위 밖 |
-|---|---|
-| 명시적 제외 언어·DSL | SQL, Terraform/HCL, Robot Framework, Apex, Dart, COBOL, Bash/Shell, PowerShell |
-| 선정하지 않은 원본 언어 | R, Solidity, Groovy, Lua, VB.NET, Objective-C, Julia, Fortran, OCaml, Verilog/SystemVerilog, BYOND DreamMaker |
-| 기타 독립 언어 분석 | CSS, HTML 자체, Assembly, F# 등 선정 목록에 없는 언어 |
-| 제외 보조 포맷 | PowerShell manifest, BYOND 자산, MCP 설정 그래프, Markdown 구조 링크 |
-| 의미·미디어 분석 | 문서·PDF·Office·이미지·오디오·영상의 의미 추출 |
-| AI 기능 | LLM 호출, 임베딩, 벡터 검색, 자연어 질문의 생성형 답변 |
-| 그래프 부가 분석 | 커뮤니티 군집화, 의미 유사도 기반 객체 병합, 사용 이력 기반 관계 변경 |
-| 외부 운영 | 클라우드 동기화, 원격 DB push, 원격 저장소 수집·PR 운영 도구 |
-| 이력 확장 | Git 호환 저장소·원격 전송, merge·rebase, 자동 이력 삭제. 로컬 백업·내보내기는 후속 범위 |
-| 자동 환경 변경 | 에이전트 스킬·Git hook·에디터 설정·시스템 서비스 자동 설치 |
-| 실행 기반 분석 | 대상 프로그램 실행, 매크로 평가, 빌드 실행, 완전한 런타임 호출 수집 |
+분석 대상은 3~5절의 언어·포맷과 디스크에 저장된 파일이다. 소스의 정적 구조와 명시적인 참조를
+읽으며 대상 코드·빌드 스크립트·매크로를 실행하거나 의존성을 내려받지 않는다. 동적 표현과
+정밀 타입 추론의 한계는 [분석 한계](#13-해석-상태와-분석-한계)를 따른다.
 
-선정한 웹 컴포넌트·템플릿 안에서 구조를 판별하기 위해 markup 일부를 읽을 수 있지만, 이를 독립 HTML/CSS 분석으로 집계하지 않는다.
+로컬 이력은 체크포인트·이름·브랜치·diff·복원을 제공한다. 원격 전송·브랜치 병합·자동 이력 삭제는
+제공하지 않는다. 선택한 웹 입력의 구조를 읽는 기능은 독립 HTML/CSS 의미 분석을 포함하지 않는다.
 
 ## 7. CLI 명령어 전체
 
 ### 설치·최초 실행·제거
 
-- 저장소의 `./install.sh`는 고정 toolchain으로 release 빌드하고 `$HOME/.local/bin/kodstar`에
-  원자적으로 설치한다. 재실행하면 기존 설치를 새 빌드로 교체한다. 자동 네트워크 갱신은 하지 않는다.
+- 저장소의 `./install.sh`는 고정 toolchain의 `dist` profile로 CLI만 임시 디렉터리에서 빌드하고
+  `$HOME/.local/bin/kodstar`에 원자적으로 설치한다. 성공·실패·처리 가능한 중단 시 전용 임시 빌드
+  디렉터리를 정리한다. 재실행하면 기존 설치를 새 빌드로 교체한다. 자동 네트워크 갱신은 하지 않는다.
+- 설치 시 `$HOME/.kodstar`를 준비하고 설치 기록·잠금만 저장한다. 프로젝트 등록부·이력·분석 DB는
+  실제 프로젝트 사용 시 생성한다. `--binary PATH`는 호출 위치 기준의 실행 파일을 선택해 빌드를 생략한다.
+  소스 checkout·Rust toolchain·Cargo 공유 다운로드 캐시는 설치된 CLI와 별도로 관리한다.
 - 사용자 shell의 PATH에 설치 경로를 등록한다. 새 터미널에는 자동 적용한다. 기존 shell은
   설치 출력의 PATH 적용 명령을 한 번 실행해야 할 수 있다. sudo와 시스템 서비스는 사용하지 않는다.
 - 최초 CLI `init`은 canonical 대상 경로와 소스 이력 저장을 알리고 기본 거절로 확인한다.
@@ -219,7 +207,7 @@ React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 
 
 초기화하지 않은 프로젝트의 조회는 `init` 실행을 안내한다. 유효한 이력 저장소가 있고 분석 캐시만 없으면 다음 분석 명령이 캐시를 재생성한다. `--no-refresh`에서는 재생성을 생략하고 필요한 인덱스가 없다고 알린다.
 
-`build`의 역할은 `init`이 대체한다. 별도 `--rebuild` 옵션이나 병행하는 `build` 별칭은 없다. Rust API는 `Engine::init`·`InitOptions`·`InitReport`를 사용하며 stdio도 같은 초기화 경로를 호출한다. 기존 분석 캐시만 있는 프로젝트에는 명시적인 `init`을 안내한다. 저장 형식이 다른 분석 캐시는 진단 후 `cache clean --root /path/to/project`와 `init /path/to/project`로 명시적으로 재생성한다.
+Rust API는 `Engine::init`·`InitOptions`·`InitReport`를 사용하며 stdio도 같은 초기화 경로를 호출한다. 기존 분석 캐시만 있는 프로젝트에는 명시적인 `init`을 안내한다. 저장 형식이 다른 분석 캐시는 진단 후 `cache clean --root /path/to/project`와 `init /path/to/project`로 명시적으로 재생성한다.
 
 ### 7.2 파일·객체 조회
 
@@ -246,6 +234,10 @@ React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 
 | `kodstar --help` | 명령어·옵션 도움말 |
 | `kodstar --version` | CLI·엔진 버전 표시 |
 
+모든 공개 명령·하위 명령의 `-h`는 목적·사용법·인자·옵션을 요약하고,
+`--help`는 상세 동작·기본값·제약·실행 예시를 함께 표시한다.
+도움말과 버전은 프로젝트·캐시를 생성하거나 설정 파일을 읽지 않는다.
+
 `status`와 `doctor`는 기존 프로젝트를 증분 동기화한 뒤 실행한다. `languages`와 `cache list`도 선택한 등록 프로젝트가 있으면 같은 준비를 수행한다. 등록 프로젝트가 없으면 전역 보고만 제공하며 초기 분석을 시작하지 않는다.
 
 명시적인 `--no-refresh`는 변경 확인·자동 체크포인트·분석 갱신을 함께 생략하고 `not_checked` 최신성을 표시한다. 도움말·버전, 캐시 복구·정리·GC, 세션 전송·취소·종료 제어는 동기화를 우회한다. 도움말과 버전 표시를 위해 DB나 parser를 초기화하지 않는다. `status`·`doctor`는 갱신 실패 시 저장된 체크포인트와 마지막 정상 분석의 불일치를 진단할 수 있어야 한다.
@@ -270,8 +262,6 @@ React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 
 일반 CLI 사용에는 `watch`나 `serve`를 실행할 필요가 없다. 시스템 서비스나 상주 데몬을 자동 설치하지 않는다. 초기화하지 않은 프로젝트의 `watch`·관계 요청 역시 `init` 안내 정책을 따른다. 캐시만 없으면 7.1절의 재생성 정책을 적용한다.
 
 ### 7.6 이력: `history`
-
-새 최상위 명령은 `history`와 `branch` 두 개로 제한한다. 별도 `log`, `diff`, `restore`, `checkpoint`, `commit`, `push` 명령을 만들지 않는다.
 
 | 명령 | 동작 |
 |---|---|
@@ -299,7 +289,7 @@ React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 
 | `kodstar branch switch NAME` | 현재 변경을 보존한 뒤 대상 브랜치의 소스 상태로 전환 |
 | `kodstar branch delete NAME` | 현재 사용 중이지 않은 브랜치 참조 삭제 |
 
-브랜치는 체크포인트를 가리키는 참조이며 파일 내용이나 분석 DB 전체를 복제하지 않는다. 목록 조회·참조 삭제는 자동 체크포인트를 만들지 않는다. 브랜치를 삭제해도 체크포인트와 이름을 자동 삭제하지 않는다. 생성·전환은 현재 변경 보존 실패 시 진행하지 않으며, 추적하지 않은 파일과의 충돌을 보고한다. 저장·전환은 분석 실패와 구분한다. 초기 범위에는 브랜치 병합이 없다.
+브랜치는 체크포인트를 가리키는 참조이며 파일 내용이나 분석 DB 전체를 복제하지 않는다. 목록 조회·참조 삭제는 자동 체크포인트를 만들지 않는다. 브랜치를 삭제해도 체크포인트와 이름을 자동 삭제하지 않는다. 생성·전환은 현재 변경 보존 실패 시 진행하지 않으며, 추적하지 않은 파일과의 충돌을 보고한다. 저장·전환은 분석 실패와 구분한다. 브랜치 병합은 제공하지 않는다.
 
 ## 8. 명령어별 결과 의미
 
@@ -408,9 +398,9 @@ kodstar related src/order.rs create_order --transitive --all --max-nodes 0 --for
 | `--include-candidates` | 후보 관계를 상태 표시와 함께 포함 |
 | `--include-external` | 외부 package·module·객체도 포함 |
 | `--format text\|json\|jsonl\|tsv` | 출력 형식 선택 |
-| `--limit N` | 출력 행 제한. 기본 제안값 200 |
+| `--limit N` | 출력 행 제한. 기본값 200 |
 | `--all` | 출력 행 제한 해제 |
-| `--max-nodes N` | 탐색 방문 객체 제한. 기본 제안값 100,000, `0`은 명시적 상한 해제 |
+| `--max-nodes N` | 탐색 방문 객체 제한. 기본값 100,000, `0`은 명시적 상한 해제 |
 | `--jobs N` | 분석 워커 수 조정 |
 | `--memory-budget <크기>` | 분석·탐색 작업 메모리 예산 조정 |
 | `--max-file-bytes N` | 파일당 분석 입력 크기 상한 조정 |
@@ -537,7 +527,7 @@ size·mtime·가능한 ctime과 최근 기록 시각을 빠른 변경 확인에 
 
 함수 값의 확인된 대상은 `references`로 보존하고, 잠재 실행은 `indirect_call` 후보로 분리한다. 콜백을 실행하지 않는 소비자도 있을 수 있으므로 직접 `calls`로 승격하지 않는다.
 
-각 관계의 코드·이름·도메인은 버전 있는 registry로 관리한다. 출력 metadata의 `relation_registry_version`은 인덱스에 사용한 관계 registry를 표시한다. 모든 언어가 모든 관계를 제공하지는 않는다. Graphify의 원본 관계와 context는 의미에 맞게 정규화하며, 서로 다른 관계를 `calls` 하나로 합치지 않는다.
+각 관계의 코드·이름·도메인은 버전 있는 registry로 관리한다. 출력 metadata의 `relation_registry_version`은 인덱스에 사용한 관계 registry를 표시한다. 모든 언어가 모든 관계를 제공하지는 않는다. 구문·언어별 context에 따라 관계를 구분하며 서로 다른 관계를 `calls` 하나로 합치지 않는다.
 
 자기 재귀와 상호 호출을 보존한다. 같은 객체 쌍 사이의 호출·타입 사용·상속도 별도 관계로 유지한다. 같은 관계가 여러 위치에서 발생하면 개별 사용 위치를 보존하고, 기본 출력에서는 집계할 수 있다.
 
@@ -608,52 +598,47 @@ partial 선언·분리된 구현처럼 의미상 같은 객체의 여러 정의 
 
 stdout에는 선택한 결과 형식만 기록한다. 자동 갱신 진행·경고·진단은 stderr로 보낸다. JSON 결과에 진행 메시지를 섞지 않는다.
 
-```text
-$ kodstar related src/order.rs create_order
+text는 프로젝트·세대·최신성을 먼저 표시하고 관계별 방향·종류·대상·해석 상태·규칙을 출력한다.
+객체의 정의 위치는 `definition`, 사용 위치는 `use` 행으로 구분한다.
 
-대상: create_order  src/order.rs:24:1
+### 14.2 구조화된 출력
 
-사용하는 객체
-  calls      Payment::charge  src/payment.rs:48:5  사용 src/order.rs:31:9
-  uses_type  Order            src/models.rs:8:1    사용 src/order.rs:24:20
+JSON은 공통 metadata와 `results` 배열, 마지막 요약 필드를 하나의 객체로 출력한다.
+JSONL은 `type: metadata`, 여러 `type: result`, 마지막 `type: summary` 행 순서다.
+각 이벤트의 필드는 평면으로 놓이며 stdio의 `data` envelope를 사용하지 않는다.
+마지막 summary가 없으면 완료된 결과로 취급하지 않는다.
 
-사용하는 쪽
-  calls      submit_order     src/api.rs:73:1      사용 src/api.rs:81:5
+| 구분 | 필드 | 의미 |
+|---|---|---|
+| metadata | `schema_version` | 공개 출력 계약 버전 **2** |
+| metadata | `relation_registry_version` | 관계 종류 registry 버전 |
+| metadata | `engine_version` | 분석 엔진 버전 |
+| metadata | `root`, `root_encoding` | 프로젝트 루트와 필요한 경우 손실 없는 경로 표현. 전역 보고는 null |
+| metadata | `generation`, `indexed_at` | 조회 세대·분석 시각. 분석 인덱스 없는 결과는 null |
+| metadata | `freshness` | metadata 확인·내용 검증·미확인·고정 체크포인트 구분 |
+| metadata | `coverage` | 파일·소스 바이트·객체·관계·미해결 수 |
+| metadata | `history` | 저장소·브랜치·체크포인트와 분석 연결 상태. 해당 상태가 없으면 null |
+| metadata | `maintenance` | 자동 캐시 정리 결과. 실행하지 않았으면 null |
+| metadata·JSONL summary | `unresolved_count` | 인덱스의 미해결·모호한 fact 수 |
+| summary | `complete`, `truncated` | 요청 완료 여부·한도에 따른 잘림 여부 |
+| summary | `result_count`, `visited_count` | 반환 행 수·탐색 방문 수 |
+| summary | `reasons` | 잘림·불완전 결과의 사유 |
 
-미해결 참조: 1개
-```
+`complete=true`는 선택한 인덱스·필터 안의 요청 완료를 뜻한다. 런타임 관계 전체의 완전성을
+뜻하지 않는다. 결과 행은 명령별 구조를 사용한다. 객체 위치는 `definition`, 관계 사용 위치는
+`site.file`·`site.span`에 있으며 byte range와 line·column을 포함한다.
 
-예시는 가상 결과다. 객체의 정의 위치와 그 객체를 사용한 위치를 분리해 표시한다.
+`history` metadata는 `repository`, `branch`, `checkpoint`, `created`, `changed_files`,
+`tracked_files`, `analysis_checkpoint`, `analysis_error`, `comparison`을 가진다. 이력 저장과 분석
+성공을 구분하며 `comparison`은 실제 `from`·`to`를 표시한다. 변경 영향은 양쪽 coverage·설정
+fingerprint·추출 버전을 함께 표시한다.
 
-### 14.2 공통 메타데이터
-
-| 필드 | 의미 |
-|---|---|
-| `schema_version` | 출력 계약 버전 |
-| `relation_registry_version` | 해당 인덱스의 관계 종류 registry 버전 |
-| `engine_version` | 분석 엔진 버전 |
-| `root` | 분석 프로젝트 루트 |
-| `generation` | 조회한 인덱스 세대 |
-| `indexed_at` | 인덱스 생성·갱신 시각 |
-| `freshness` | metadata 확인·내용 검증·미확인 구분 |
-| `complete` | 요청한 인덱스 탐색·출력을 완료했는지 |
-| `truncated` | 결과·방문 한도 때문에 잘렸는지 |
-| `coverage` | 분석 범위·스킵·실패·미지원·capability 정보 |
-| `unresolved_count` | 미해결 참조 수 |
-
-`complete=true`가 런타임 전체 관계의 완전성을 뜻하지 않는다. 선택한 인덱스와 필터 안의 요청 완료 여부다.
-
-JSONL은 metadata 이벤트, result 이벤트들, 마지막 summary 이벤트 순서다. 마지막 summary가 없으면 중간 취소·오류·파이프 종료 등으로 끝났을 수 있으므로 완료 결과로 취급하지 않는다.
-
-```jsonl
-{"type":"metadata","schema_version":2,"relation_registry_version":2,"root":"/work/project","generation":7,"freshness":"metadata_checked"}
-{"type":"result","relation":"calls","direction":"out","resolution":"resolved","source":{"name":"create_order","file":"src/order.rs"},"target":{"name":"Payment::charge","file":"src/payment.rs","line":48,"column":5},"site":{"file":"src/order.rs","line":31,"column":9}}
-{"type":"summary","complete":true,"truncated":false,"result_count":1,"unresolved_count":0}
-```
-
-이 예시는 출력 구조 설명용이다. 실제 결과에는 선택한 명령에 따라 객체 논리 키·byte range·해석 규칙·provider·coverage를 포함한다.
-
-공개 출력은 schema 2다. `history` metadata는 `repository`, `branch`, `checkpoint`, `created`, `changed_files`, `tracked_files`, `analysis_checkpoint`, `analysis_error`, `comparison`을 가진다. 이력 저장과 분석 성공을 구분하며 인덱스 없는 이력 결과의 `generation`은 null이다. `comparison`은 실제 `from`·`to`를 표시하고 변경 영향에서는 양쪽 coverage·설정 fingerprint·추출 버전을 함께 표시한다. 이력 결과 row의 `kind`는 `checkpoint`, `branch`, `change`, `diff_line`, `diff_omitted`, `operation`, `impact`다. `impact` 행은 근거 그래프의 `checkpoint`와 `relationship`을 함께 가진다.
+이력 결과 행의 `kind`는 `checkpoint`, `branch`, `change`, `diff_line`, `diff_omitted`, `operation`,
+`impact`다. `impact` 행은 근거 그래프의 `checkpoint`와 `relationship`을 함께 가진다.
+`init` 결과의 `parsed_files`는 추출한 입력 수이며 보조 입력도 포함한다.
+`coverage.analyzed_files`는 지원 언어·컴포넌트로 분석한 파일 수다.
+전체 결과 타입은 [results.rs](crates/kodstar-core/src/domain/results.rs)와
+[history.rs](crates/kodstar-core/src/domain/history.rs)에 정의한다.
 
 ### 14.3 위치·경로·정렬
 
@@ -685,12 +670,15 @@ JSONL은 metadata 이벤트, result 이벤트들, 마지막 summary 이벤트 �
 | 경로 | 내용 |
 |---|---|
 | `$HOME/.kodstar/config.toml` | 전역 설정 |
+| `$HOME/.kodstar/install.json` | 실행 파일·관리 PATH의 설치 기록 |
+| `$HOME/.kodstar/installation.lock` | 실행·설치·제거의 lease |
+| `$HOME/.kodstar/projects.sqlite` | 캐시와 독립된 프로젝트·저장소 등록부 |
+| `$HOME/.kodstar/registry.lock` | 캐시 열기·GC·삭제의 직렬화 |
 | `$HOME/.kodstar/<path-hash>/project.json` | 원래·정규화 루트, 캐시 키 버전, 최근 사용 정보 |
 | `$HOME/.kodstar/<path-hash>/index.sqlite` | 객체·구문 사실·바인딩·관계·진단·세대 |
 | `$HOME/.kodstar/<path-hash>/index.sqlite-wal` | SQLite의 변경 기록 보조 파일 |
 | `$HOME/.kodstar/<path-hash>/index.sqlite-shm` | SQLite의 공유 상태 보조 파일 |
 | `$HOME/.kodstar/<path-hash>/past.sqlite` | 하나의 재사용 가능한 과거 분석 인덱스. 같은 WAL/SHM·lease·GC 규칙 적용 |
-| `$HOME/.kodstar/<path-hash>/staging/` | 아직 공개하지 않은 분석 데이터 |
 | `$HOME/.kodstar/<path-hash>/lease.lock` | 사용 중인 캐시의 삭제 방지 |
 | `$HOME/.kodstar/<path-hash>/writer.lock` | 중복 갱신의 직렬화 |
 | `$HOME/.kodstar/gc-state.json` | 캐시 정리 진행 정보 |
@@ -701,12 +689,12 @@ JSONL은 metadata 이벤트, result 이벤트들, 마지막 summary 이벤트 �
 
 ### 15.2 수명 정책
 
-| 항목 | 기본 설계 |
+| 항목 | 기본값·동작 |
 |---|---|
-| 미사용 기간 | 마지막 사용 후 30일을 정리 후보 기준으로 제안 |
-| 총 캐시 예산 | 2 GiB를 기본 제안값으로 사용 |
-| 자동 정리 시점 | kod<sup>☆</sup> 실행 시 제한된 빈도로 수행. 기본 제안은 하루 최대 1회 |
-| 사용 중인 캐시 | 조회·빌드·감시·세션이 사용 중이면 삭제하지 않음 |
+| 미사용 기간 | 마지막 사용 후 30일을 정리 후보 기준으로 사용 |
+| 총 캐시 예산 | 2 GiB |
+| 자동 정리 시점 | kod<sup>☆</sup> 실행 시 수행. 기본 간격은 24시간 |
+| 사용 중인 캐시 | 조회·분석·감시·세션이 사용 중이면 삭제하지 않음 |
 | 예산 초과 | 오래 사용하지 않은 정리 가능 캐시부터 처리 |
 | 정리할 후보 없음 | 활성 캐시를 억지로 삭제하지 않고 상태를 표시 |
 | 수동 삭제 후 | 초기화된 프로젝트의 다음 분석 명령에서 재생성. `--no-refresh`는 재생성하지 않음 |
@@ -719,11 +707,11 @@ JSONL은 metadata 이벤트, result 이벤트들, 마지막 summary 이벤트 �
 
 로컬 이력은 `<project>/.kodstar/repository.sqlite`에 보관한다. 파일 내용·프로젝트 상대 경로·복원에 필요한 파일 속성·체크포인트 부모·이름·브랜치를 소유한다. SQLite 부속 파일과 복구 기록도 프로젝트의 이력 수명을 따른다. `.kodstar`와 `.git`은 파일·디렉터리 구분 없이 추적·분석 입력에서 제외한다. 생성하는 이력 디렉터리는 0700, DB는 0600 권한으로 보호한다.
 
-이력은 원본 복원을 위한 소스를 보존하며 분석 캐시와 목적이 다르다. `cache clean`·`cache gc`, 분석 저장 형식 변경, 캐시 예산 초과가 소스 이력을 삭제해서는 안 된다. 같은 내용은 해시로 중복 저장을 피하며, 브랜치마다 소스나 분석 DB 전체를 복사하지 않는다. 초기 범위에는 자동 이력 삭제를 넣지 않는다. 저장 공간 부족을 감지하면 미완료 체크포인트를 공개하지 않고 보존 실패를 보고한다.
+이력은 원본 복원을 위한 소스를 보존하며 분석 캐시와 목적이 다르다. `cache clean`·`cache gc`, 분석 저장 형식 변경, 캐시 예산 초과가 소스 이력을 삭제해서는 안 된다. 같은 내용은 해시로 중복 저장을 피하며, 브랜치마다 소스나 분석 DB 전체를 복사하지 않는다. 자동 이력 삭제는 제공하지 않는다. 저장 공간 부족을 감지하면 미완료 체크포인트를 공개하지 않고 보존 실패를 보고한다.
 
-영구 이력 형식 4는 원문 내용 주소와 물리 인코딩을 분리한다. 같은 내용은 BLAKE3 주소로 공유하고 작은 파일의 변경에는 깊이를 제한한 델타, 큰 파일에는 내용 기반 청크 경계를 사용한다. 실제 공간 이득이 있는 블록은 제한된 literal/copy 표현으로 저장한다. 파일 전체와 각 청크의 원문 해시·크기·순서를 검증하며 복원 메모리는 청크·기준 크기로 제한한다. 기존 형식 1·2·3은 일반 명령에서 변경하지 않으며 `history upgrade`를 안내한다. 전환은 저장소 잠금·트랜잭션 아래 모든 보존 내용과 참조를 검증하고 checkpoint·blob ID·이름·브랜치·복원 journal을 유지한다. 손상·전환 중 취소는 기존 형식으로 rollback한다.
+영구 이력 형식 5는 원문 내용 주소와 물리 인코딩을 분리한다. 같은 내용은 BLAKE3 주소로 공유하고 작은 파일의 변경에는 깊이를 제한한 델타, 큰 파일에는 내용 기반 청크 경계를 사용한다. 128바이트 이상 블록은 Zstd level 1의 독립 frame과 이전 원문을 dictionary로 사용하는 깊이 1 델타를 비교하고, 32바이트보다 큰 공간 이득이 있을 때 압축한다. 큰 파일은 FastCDC로 최소 2KiB·목표 8KiB·최대 32KiB 경계를 선택한다. 파일 전체와 각 청크의 원문 해시·크기·순서를 검증하며 복원 메모리는 청크·기준 크기로 제한한다. 기존 형식 1·2·3·4는 일반 명령에서 변경하지 않으며 `history upgrade`를 안내한다. 전환은 저장소 잠금·트랜잭션 아래 모든 보존 내용과 참조를 검증하고 checkpoint·blob ID·이름·브랜치·복원 journal을 유지한다. 손상·전환 중 취소는 기존 형식으로 rollback한다.
 
-전환 완료 후의 SQLite 빈 페이지 정리는 별도 단계다. 이 단계가 실패·취소돼도 형식 4는 유효하며 `history upgrade`로 다시 정리할 수 있다. 이미 형식 4인 저장소에서도 보존 내용의 물리 표현을 제한된 독립 기준 후보와 비교하여 실제 공간 이득이 있으면 재압축한다. 기준 깊이는 1이며 checkpoint·blob·청크 ID와 원문·계보를 유지한다. 재압축 중 실패·취소는 해당 transaction을 rollback한다. 알 수 없는 schema 객체가 있으면 재압축을 거절한다. 정리는 이력이나 체크포인트를 삭제하지 않으며 작업 파일을 복원하지 않는다. 중단된 checkout은 이후 일반 명령에서 복구한다. 전환·정리에는 기존 DB 외의 임시 디스크 공간이 필요할 수 있다. 분석 캐시 형식 12는 접두어 압축 사전과 관계 블록, source·target·fact 검색 경로를 사용한다. 원래 key·위치·개별 관계·성공·실패 의존성과 구조화된 결과 계약을 유지한다. 기존 정책대로 명시적 cache 정리 후 재생성한다.
+전환 완료 후의 SQLite 빈 페이지 정리는 별도 단계다. 이 단계가 실패·취소돼도 형식 5는 유효하며 `history upgrade`로 다시 정리할 수 있다. 이미 형식 5인 저장소에서도 보존 내용의 물리 표현을 제한된 독립 기준 후보와 비교하여 실제 공간 이득이 있으면 재압축한다. 기준 깊이는 1이며 checkpoint·blob·청크 ID와 원문·계보를 유지한다. 재압축 중 실패·취소는 해당 transaction을 rollback한다. 알 수 없는 schema 객체가 있으면 재압축을 거절한다. 정리는 이력이나 체크포인트를 삭제하지 않으며 작업 파일을 복원하지 않는다. 중단된 checkout은 이후 일반 명령에서 복구한다. 전환·정리에는 기존 DB 외의 임시 디스크 공간이 필요할 수 있다.
 
 ### 15.4 추적 범위와 제한
 
@@ -734,6 +722,17 @@ JSONL은 metadata 이벤트, result 이벤트들, 마지막 summary 이벤트 �
 기본 브랜치는 `main`이다. 체크포인트는 `c` 다음의 양의 정수로 식별한다. 이름은 영문·숫자로 시작하고 영문·숫자·점·밑줄·하이픈으로 구성한 최대 128바이트이며 체크포인트 ID 형식은 예약한다. 분석·이력의 파일 경로는 손실 없는 OS 바이트로 저장한다.
 
 ## 16. 저장 일관성과 장애 시 동작
+
+분석 캐시의 저장 형식은 **14**다. 호환되지 않는 캐시는 변경 없이 거절한다. 초기화된
+프로젝트의 이력을 보존하면서 다음 명령으로 명시적으로 재생성한다.
+
+```bash
+kodstar cache clean --root /work/project
+kodstar init /work/project
+```
+
+캐시는 재생성 가능한 분석 데이터다. 영구 이력의 업그레이드·복구는
+[소스 이력 정책](#153-영구-이력-저장소)을 따르며 캐시 정리와 별개다.
 
 정상 완료한 분석 결과만 새 인덱스 세대로 공개한다. 정의·바인딩·사실·관계·진단·세대 정보가 서로 다른 분석 상태로 섞이지 않도록 한다.
 
@@ -757,24 +756,24 @@ JSONL은 metadata 이벤트, result 이벤트들, 마지막 summary 이벤트 �
 
 파일 교체는 이력 저장소와 같은 파일시스템의 staging 파일을 원자적으로 rename한다. 다른 파일시스템의 대상은 사전 검사에서 거절한다. 파일·디렉터리 전환은 추적하지 않은 내용을 제거하지 않고 빈 디렉터리만 정리한다. 중단된 작업은 다음 저장소 열기에서 journal·실제 파일·해시를 대조해 재개한다. 완료 표시된 파일에 외부 편집이 있으면 추가 쓰기를 멈추고 충돌을 알린다. 추적하지 않은 파일을 덮어쓰거나 충돌을 강제로 해결하는 옵션은 없다.
 
-## 17. 메모리·속도·용량 목표
+## 17. 자원 사용과 한도
 
-### 17.1 핵심 자원 원칙
+### 17.1 자원 관리
 
-| 영역 | 설계 목표 |
+| 영역 | 동작 |
 |---|---|
 | 프로젝트 전체 | 파일 목록·소스·AST·객체 그래프 전체를 동시에 RAM에 유지하지 않음 |
-| 소스 읽기 | 변경 파일 위주로 읽고 가능한 한 같은 바이트 버퍼로 해시·파싱 |
-| 소스 이력 | 바이트 예산 안에서 저장·분석 입력을 공유하고 동일 내용을 중복 저장하지 않음 |
+| 소스 읽기 | 보존 체크포인트 입력을 읽고 크기·해시를 검증한 버퍼로 파싱 |
+| 소스 이력 | 내용 주소로 동일 원문을 공유하고 청크 단위로 보관·복원 |
 | 과거 분석 | 체크포인트·분석 환경을 기준으로 필요한 결과만 준비. 브랜치·체크포인트마다 전체 인덱스를 복제하지 않음 |
 | 구문 트리 | 파일 처리가 끝나면 해제. AST 전체의 장기 cache 금지 |
-| parser | 필요한 언어만 지연 초기화하고 제한된 pool로 재사용 |
+| parser | worker마다 하나를 지연 초기화해 재사용 |
 | 데이터 표현 | 정수 ID·원문 range·관계 enum으로 반복 문자열과 범용 속성 맵 축소 |
-| 병렬 처리 | CPU 개수만이 아니라 메모리 예산으로 동시 작업 수 제한 |
+| 병렬 처리 | worker 수·메모리 예산을 검증하고 입력 바이트 permit으로 동시 작업 제한 |
 | 대기열 | 항목 개수와 전체 바이트 수를 함께 제한 |
 | 이름·경로 cache | 크기가 제한된 cache만 허용 |
 | 직접 조회 | 필요한 방향의 인덱스에서 시작해 표시할 객체만 읽음 |
-| 전이 탐색 | 방문 집합·frontier가 커지면 디스크 임시 저장 사용 |
+| 전이 탐색 | 방문 집합·frontier에 SQLite 임시 테이블과 제한된 page cache 사용 |
 | 출력·정렬 | 전체 결과 배열을 RAM에 만들지 않고 스트리밍·디스크 정렬 활용 |
 | 시작 비용 | 도움말·버전·간단한 조회에 불필요한 grammar·분석기 초기화 금지 |
 
@@ -784,33 +783,23 @@ tree-sitter는 파일 하나의 구문 트리를 여전히 만든다. 입력 cal
 
 ### 17.2 조정 가능한 자원 기본값
 
-| 항목 | 초기 제안값 |
+| 항목 | 기본값 |
 |---|---|
 | 분석 워커 | 2개 |
 | 분석 작업 메모리 예산 | 256 MiB |
 | 파일당 입력 상한 | 2 MiB |
 | fact 배치 | 최대 1 MiB |
 | 대기 데이터 합계 | 8 MiB |
-| 분석 DB cache 예산 | connection별 기본 8 MiB, 최대 세 analysis cache를 합산. writer의 page cache는 절반을 사용하고 유휴 SQL statement는 최대 1 MiB로 제한 |
+| 분석 DB cache 예산 | connection별 기본 8 MiB, 최대 세 analysis cache를 합산. writer의 main·temp page cache 합계는 해당 예산의 1/4을 사용하고 유휴 SQL statement는 최대 1 MiB로 제한 |
 | 이력·스냅샷 page cache | main·temp 합계 각각 4 MiB·2 MiB. 저장 버퍼와 함께 예산에 합산 |
 | 일반 결과 행 수 | 200개 |
 | 탐색 방문 객체 수 | 100,000개 |
 
-이 값은 변경 가능한 기본 설계다. 파일 상한 초과와 자원 제한은 진단·coverage에 표시하며 옵션으로 조정한다. 메모리 예산은 작업 스케줄링 목표이고 임의 입력에 대한 OS 수준의 hard RSS 보장은 아니다.
-
-### 17.3 성능을 판단하는 기준
-
-조회 시간은 변경 확인·파싱·해석·DB 쓰기·탐색·출력으로 구분한다. 전체 metadata 스캔을 포함한 실제 사용자 지연과 `--no-refresh`의 인덱스 조회 지연을 별도로 본다.
-
-이력 통합 후에는 소스 보관 비용과 이력 저장소 용량을 분석 비용·캐시 용량과 따로 측정한다. 반복 조회에서 체크포인트·blob이 불필요하게 증가하는지도 확인한다.
-
-기존 설계의 직접 조회 p95 100 ms·peak RSS 64 MiB, 기본 인덱싱 256 MiB, 영향이 작은 변경의 갱신 p95 500 ms는 비교 환경을 고정해 검토할 초기 목표다. 이미 달성한 수치가 아니다. 작은 변경 갱신 목표는 전체 파일 metadata 스캔 비용을 제외한 조건이다.
-
-모든 성능 수치는 OS·CPU·스토리지·빌드 조건·grammar·대상 파일과 바이트·객체·관계·미해결·스킵 수를 함께 기록해야 의미가 있다. 분석 대상을 덜 읽거나 관계를 덜 추출해서 빨라진 것을 같은 분석의 성능 개선으로 표시하지 않는다.
+설정과 지원하는 CLI 옵션으로 기본값을 조정한다. 파일 상한 초과와 자원 제한은 진단·coverage에 표시하며 옵션으로 조정한다. 메모리 예산은 작업 스케줄링 목표이고 임의 입력에 대한 OS 수준의 hard RSS 보장은 아니다.
 
 ## 18. 엔진과 프런트엔드 계약
 
-Rust 라이브러리 `kodstar-core`는 CLI 없이도 프로젝트 선택·분석·조회·진단을 호출할 수 있어야 한다.
+Rust 라이브러리 `kodstar-core`는 CLI 없이 프로젝트 선택·분석·조회·진단을 제공한다.
 CLI와 에디터의 요청에도 같은 최신성·해석 상태·한도 정책을 적용한다.
 
 | 경계 | 계약 |
@@ -832,7 +821,7 @@ CLI와 에디터의 요청에도 같은 최신성·해석 상태·한도 정책�
 
 다른 CLI 조회와 감시 프로세스도 같은 writer·lease·인덱스 세대 규칙을 따른다.
 
-이력 통합 후에는 각 동기화가 변경된 소스의 체크포인트를 만들고 해당 상태를 분석한다. 동일 상태의 중복 이벤트는 체크포인트를 늘리지 않는다. 감시 이벤트마다 또는 키 입력마다 별도 이력을 만든다고 보장하지 않는다.
+각 동기화는 변경된 소스의 체크포인트를 만들고 해당 상태를 분석한다. 동일 상태의 중복 이벤트는 체크포인트를 늘리지 않는다. 감시 이벤트마다 또는 키 입력마다 별도 이력을 만든다고 보장하지 않는다.
 
 ### 19.2 외부 도구 연동
 
@@ -845,7 +834,7 @@ SQLite를 직접 수정하거나 별도의 분석기를 복제하지 않는다.
 
 ### 19.3 Stdio 세션 protocol 2
 
-protocol 2는 `init`과 이력 요청·체크포인트 metadata를 포함한다. protocol 1과 `build` 메서드는 거절한다. 세션 클라이언트는 CLI가 지원하는 protocol 버전을 사용한다.
+지원하는 stdio protocol은 **2**다. 초기화·분석·이력 요청과 체크포인트 metadata를 제공하며 다른 버전은 인자 오류로 거절한다.
 
 `kodstar serve --stdio`는 UTF-8 JSON 요청을 한 줄씩 받는다. stdout에는 protocol 이벤트만,
 stderr에는 프로세스 진단만 쓴다. 요청은 `protocol_version: 2`, 문자열 또는 정수 `id`,
@@ -897,75 +886,9 @@ CLI JSONL의 평면 행 형식과 세션의 요청 envelope를 구분한다.
 않고 코드 3으로 응답한다. 취소·종료는 대기열을 거치지 않는다. 중복·알 수 없는 필드와
 잘못된 버전·옵션은 코드 2로 거절한다. 큰 프레임은 다음 줄까지 버리고 세션을 계속한다.
 EOF는 수락한 요청을 마친 뒤 종료하고, `shutdown`·SIGINT는 소유 요청을 취소한 뒤 worker를 join한다.
+결과와 제어 출력은 각각 2개·8개의 활성 프레임으로 제한하며 stdout은 한 writer가 순서대로 기록한다.
+프레임은 최대 64KiB만 메모리에 보유하고 더 큰 출력은 권한 0600의 임시 파일을 사용한 뒤 회수한다.
+출력 프레임 크기를 줄이거나 결과를 생략하지 않는다. 제어 출력까지 포화되면 세션을 오류로 종료한다.
+`shutdown`은 취소·worker 종료 후 남은 출력을 배출하되 읽히지 않는 출력에는 500ms의 유예를 적용한다.
+배출 실패·출력 단절·SIGINT는 완료 응답을 보장하지 않으며 성공으로 표시하지 않는다.
 기본 입력은 저장된 디스크 파일이며 에디터의 미저장 버퍼 overlay는 받지 않는다.
-
-## 20. Graphify 참고·포팅 범위
-
-### 20.1 기준
-
-Graphify를 분석기 설계의 주요 참고 프로젝트로 사용한다. 선정한 언어·웹 입력의 **구문 추출 규칙, 모듈·이름 해석, 파일 간 후처리, 회귀 사례**를 Rust로 포팅한다.
-
-- 원본 저장소: [Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify)
-- 조사 버전: `0.9.92`
-- 조사 브랜치: `v8`
-- 고정 커밋: `86c57be8204673c2a1b9849a3292a7dd3ab373d8`
-- 공식 설명: [Supported inputs](https://docs.graphify.com/concepts/supported-inputs)
-
-Python CLI를 감싸서 실행하는 방식이 아니라, 선정한 추출·해석 기능을 Rust 엔진 안에 갖는 것이 목표다. 필요한 tree-sitter grammar는 호환되는 고정 revision의 parser·scanner를 사용한다.
-
-원본의 현재 기능과 kod<sup>☆</sup>의 새 설계를 구분한다. 위의 kod<sup>☆</sup> 기능표 전체가 이미 Graphify에 같은 형태로 구현되어 있다는 뜻은 아니다.
-
-### 20.2 참고하는 공통 기능
-
-| Graphify 영역 | kod<sup>☆</sup>에서 참고·포팅하는 기능 |
-|---|---|
-| `extractors/models.py`, `base.py` | 언어 구성·선언·import/export/alias/use 사실·공통 추출 규칙 |
-| `extractors/engine.py`, `extract.py` | 공통 walker·언어별 config·extra walk·정의·호출·타입·receiver 추출 |
-| `extractors/resolution.py`, `symbol_resolution.py` | import·별칭·재수출·namespace·스코프·대상 해석 |
-| `resolver_registry.py`와 언어별 resolver | 파일 간 멤버·한정 호출·상속 호출 등 후처리 |
-| `interface_dispatch.py`, C#/Swift dispatch | 구현·protocol·override 후보 연결 |
-| `detect.py`, `rcfile.py` | 파일 판별·선정 언어의 shebang·특수 라우팅·override·제외 규칙 |
-| `cache.py`, `watch.py` | fingerprint·불완전 cache 구분·삭제 대상 무효화·변경 배치·동시 갱신 규칙 |
-| `affected.py`, `serve.py` | 역방향 영향·멤버 시드·이웃·BFS·경로 탐색의 개념 |
-| `build.py`, `validate.py` | 방향·정확 중복·endpoint 무결성 검증 |
-| `manifest_ingest.py`, 선정한 포맷 추출기 | 코드 소속·모듈 경계·명시적 프로젝트·템플릿 연결 |
-| `tests/` | 동명·shadowing·receiver·import·방향·캐시 무효화 등 회귀 사례 |
-
-### 20.3 그대로 가져오지 않는 구조와 규칙
-
-| 원본의 구조·기법 | kod<sup>☆</sup> 설계 |
-|---|---|
-| Python dict·전체 결과 목록·NetworkX 그래프 | Rust의 제한된 배치·정수 ID·SQLite 인덱스 |
-| 전체 graph 파일을 읽어 메모리 그래프 복원 | 필요한 관계와 표시 정보만 읽는 조회 |
-| 전체 파일별 결과를 유지하는 전역 후처리 | 저장한 scope·binding·fact를 사용하는 해석 |
-| slug·이름 정규화 중심 ID | 언어·모듈·scope·원래 이름을 보존한 논리 정체성 |
-| 유사도 기반 객체 병합 | 정확한 정체성과 위치·관계 기준 중복 제거 |
-| 전역 유일 이름·경로 근접도 추측 | 명시적 binding 우선, 근거 부족은 후보·미해결 |
-| 단일 추출/추론 표식 | 구문 provenance와 대상 해석 상태를 독립 표시 |
-| JSON 위주의 분석 캐시 | 사실·바인딩·조회 의존·관계를 저장한 증분 인덱스 |
-| 자연어·의미 그래프·군집·클라우드 기능 | 파일·객체 기반의 명시적 로컬 CLI |
-
-Rust 포팅 자체가 원본보다 정확한 분석을 자동으로 만들어 주지는 않는다. 메모리와 실행 구조의 개선, 지원 구문의 보존, 오연결 수정은 각각 구분해서 판단한다.
-
-### 20.4 동작 보존과 분석 품질
-
-선정한 언어의 원본 지원 구문·관계·framework 규칙을 기준으로 기능 대응을 확인한다. 내부 ID 문자열이나 DB 행 순서 대신 이름·scope·정의/사용 위치·방향·관계·조건·외부 여부를 정규화해 비교한다.
-
-원본의 유용한 관계를 대량으로 누락하고 포팅 완료라고 표시하지 않는다. 동시에 원본의 오연결을 그대로 재현하는 것을 목표로 삼지도 않는다. 다른 결과에는 근거·제한·대체 규칙을 남긴다.
-
-정상 전체 분석과 증분 갱신의 결과는 같은 입력·설정에서 정규화한 관계가 같아야 한다. 대소문자·동명·scope shadowing·별칭·재수출·타입·receiver·추가·삭제·새 후보·실패한 lookup의 해소를 포함해 일관성을 확인한다.
-
-현재 근거는 고정 소스와 확인한 회귀 테스트 소스다. 모든 언어를 실제 프로젝트에서 실행해 정확도를 측정한 상태로 설명하지 않는다. `languages`, `status`, `doctor`, 결과 coverage가 실제 제공 기능과 제한을 드러내야 한다.
-
-## 21. 참고 자료
-
-- [Graphify 고정 버전의 추출 dispatch와 언어별 규칙](https://github.com/Graphify-Labs/graphify/blob/86c57be8204673c2a1b9849a3292a7dd3ab373d8/graphify/extract.py)
-- [Graphify 공통 추출 엔진](https://github.com/Graphify-Labs/graphify/blob/86c57be8204673c2a1b9849a3292a7dd3ab373d8/graphify/extractors/engine.py)
-- [Graphify 모듈·이름 해석](https://github.com/Graphify-Labs/graphify/blob/86c57be8204673c2a1b9849a3292a7dd3ab373d8/graphify/extractors/resolution.py)
-- [Graphify 언어별 resolver registry](https://github.com/Graphify-Labs/graphify/blob/86c57be8204673c2a1b9849a3292a7dd3ab373d8/graphify/resolver_registry.py)
-- [Graphify 캐시](https://github.com/Graphify-Labs/graphify/blob/86c57be8204673c2a1b9849a3292a7dd3ab373d8/graphify/cache.py)
-- [Graphify 변경 영향 조회](https://github.com/Graphify-Labs/graphify/blob/86c57be8204673c2a1b9849a3292a7dd3ab373d8/graphify/affected.py)
-- [Tree-sitter Rust API](https://docs.rs/tree-sitter/latest/tree_sitter/struct.Parser.html)
-- [SQLite WAL](https://www.sqlite.org/wal.html)
-- [rusqlite](https://github.com/rusqlite/rusqlite)
-- [BLAKE3](https://github.com/BLAKE3-team/BLAKE3)

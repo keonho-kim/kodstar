@@ -27,6 +27,14 @@ pub(super) fn encode(rows: &[(i64, String)]) -> Vec<u8> {
 }
 
 pub(super) fn decode(bytes: &[u8], count: usize) -> Result<Vec<(i64, String)>> {
+    select(bytes, count, |_, _| true)
+}
+
+pub(super) fn select(
+    bytes: &[u8],
+    count: usize,
+    mut keep: impl FnMut(i64, &str) -> bool,
+) -> Result<Vec<(i64, String)>> {
     if !(1..=32).contains(&count) {
         return Err(codec::invalid());
     }
@@ -34,13 +42,13 @@ pub(super) fn decode(bytes: &[u8], count: usize) -> Result<Vec<(i64, String)>> {
     let mut rows = Vec::with_capacity(count);
     let mut previous = String::new();
     let mut decoded = 0usize;
-    for _ in 0..count {
+    for at in 0..count {
         let id = input.id()?;
         let prefix = usize::try_from(input.integer()?).map_err(|_| codec::invalid())?;
         if id <= 0 || !previous.is_char_boundary(prefix) {
             return Err(codec::invalid());
         }
-        let suffix = input.text()?;
+        let suffix = input.text_ref()?;
         decoded = decoded
             .checked_add(prefix)
             .and_then(|n| n.checked_add(suffix.len()))
@@ -48,13 +56,15 @@ pub(super) fn decode(bytes: &[u8], count: usize) -> Result<Vec<(i64, String)>> {
         if count > 1 && decoded > 65536 {
             return Err(codec::invalid());
         }
-        let mut key = previous[..prefix].to_owned();
-        key.push_str(&suffix);
-        if !rows.is_empty() && key <= previous {
+        // Compare before mutating the reused prefix buffer; retain only selected keys.
+        if at > 0 && suffix.as_bytes() <= &previous.as_bytes()[prefix..] {
             return Err(codec::invalid());
         }
-        previous.clone_from(&key);
-        rows.push((id, key));
+        previous.truncate(prefix);
+        previous.push_str(suffix);
+        if keep(id, &previous) {
+            rows.push((id, previous.clone()));
+        }
     }
     input.finish()?;
     Ok(rows)

@@ -26,7 +26,7 @@ fn fixture() -> Result<(Connection, Vec<Vec<u8>>)> {
     for n in 0..20 {
         let mut raw = original.clone();
         raw[100..104].copy_from_slice(&(n as u32).to_le_bytes());
-        blobs::put(&c, Cursor::new(&raw), None, &Cancellation::default())?;
+        blobs::Writer::new(&c)?.put(Cursor::new(&raw), None, &Cancellation::default())?;
         versions.push(raw);
     }
     Ok((c, versions))

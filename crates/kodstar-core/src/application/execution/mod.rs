@@ -8,6 +8,7 @@ pub(crate) mod context;
 pub(super) mod history;
 mod prepare;
 pub(super) mod reads;
+mod state;
 mod watch;
 
 use super::workspace::ProjectOptions;
@@ -50,11 +51,7 @@ mod tests {
     use crate::application::analysis::InitOptions;
     use crate::application::engine::Engine;
     use crate::domain::diagnostics::Error;
-    use std::{
-        fs,
-        path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::fs;
 
     struct Child;
     impl CommandHandler for Child {
@@ -68,30 +65,19 @@ mod tests {
                 .ok_or_else(|| Error::operation("default synchronization was not performed"))
         }
     }
-    struct Temporary(PathBuf);
-    impl Drop for Temporary {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
     #[test]
     fn a_child_handler_inherits_initialization_gating_and_incremental_synchronization() -> Result<()>
     {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| Error::caused_by("test clock", error))?
-            .as_nanos();
-        let temporary = Temporary(std::env::temp_dir().join(format!(
-            "kodstar-default-command-{}-{nonce}",
-            std::process::id()
-        )));
-        let root = temporary.0.join("project");
+        let temporary = tempfile::Builder::new()
+            .prefix("kodstar-default-command-")
+            .tempdir()
+            .map_err(|error| Error::caused_by("create fixture directory", error))?;
+        let root = temporary.path().join("project");
         fs::create_dir_all(&root).map_err(|error| Error::io("create fixture", &root, error))?;
         let source = root.join("main.rs");
         fs::write(&source, "fn first() {}")
             .map_err(|error| Error::io("write fixture", &source, error))?;
-        let engine = Engine::new(temporary.0.join("cache"))?;
+        let engine = Engine::new(temporary.path().join("cache"))?;
         let options = ProjectOptions::new(root);
         let cancel = Cancellation::default();
         assert!(run(&engine.cache, &options, Child, &cancel).is_err());
@@ -102,6 +88,9 @@ mod tests {
             run(&engine.cache, &options, Child, &cancel)?,
             first.generation + 1
         );
+        temporary
+            .close()
+            .map_err(|error| Error::caused_by("remove fixture directory", error))?;
         Ok(())
     }
 }

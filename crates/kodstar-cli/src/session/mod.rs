@@ -3,10 +3,12 @@
 // Usage: serve --stdio 실행이 세션 전체 수명을 소유.
 // Related: crates/kodstar-cli/src/session/protocol.rs, crates/kodstar-cli/src/session/input.rs, crates/kodstar-cli/src/session/output.rs, crates/kodstar-cli/src/session/worker.rs.
 
+mod frame;
 mod input;
 mod output;
 mod protocol;
 mod query;
+mod transport;
 mod worker;
 use input::{Frame, Input};
 use kodstar_core::{Cancellation, Engine, Error, ErrorKind, Result};
@@ -32,9 +34,17 @@ pub(crate) fn run(process: &Cancellation) -> Result<()> {
         .map_err(|error| Error::caused_by("read session current directory", error))?;
     let engine = Engine::from_environment()?;
     let tokens = Arc::new(Mutex::new(HashMap::new()));
-    let output = Output::new();
+    let (output, transport) = Output::new(process)?;
     let (sender, receiver) = mpsc::sync_channel(2);
     std::thread::scope(|scope| {
+        let transport_stop = process.clone();
+        let writer = scope.spawn(move || {
+            let outcome = transport.run();
+            if outcome.is_err() {
+                transport_stop.cancel();
+            }
+            outcome
+        });
         let worker_output = output.clone();
         let worker_tokens = Arc::clone(&tokens);
         let worker_stop = process.clone();
@@ -43,24 +53,37 @@ pub(crate) fn run(process: &Cancellation) -> Result<()> {
         });
         let outcome = dispatch(&cwd, &sender, &tokens, &output, process);
         if !matches!(outcome, Ok(End::Eof)) {
-            let registry = tokens
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            for token in registry.values() {
-                token.cancel();
-            }
+            cancel_active(&tokens);
+        }
+        if outcome.is_err() {
+            process.cancel();
         }
         drop(sender);
-        let joined = worker
+        let joined = worker.join().unwrap_or_else(|_| {
+            process.cancel();
+            Err(Error::new(ErrorKind::Operation, "session worker panicked"))
+        });
+        if matches!(outcome, Ok(End::Shutdown)) {
+            output.closing();
+        }
+        drop(output);
+        let written = writer
             .join()
-            .map_err(|_| Error::new(ErrorKind::Operation, "session worker panicked"))?;
+            .unwrap_or_else(|_| Err(Error::new(ErrorKind::Operation, "session writer panicked")));
+        let written = match written {
+            Err(error) if error.kind != ErrorKind::Cancelled => return Err(error),
+            other => other,
+        };
         match outcome {
             Err(error) if error.kind != ErrorKind::Cancelled => Err(error),
             Err(error) => {
                 joined?;
                 Err(error)
             }
-            Ok(_) => joined,
+            Ok(_) => {
+                joined?;
+                written
+            }
         }
     })
 }
@@ -114,6 +137,7 @@ fn dispatch(
                 }
             }
             Operation::Shutdown => {
+                cancel_active(tokens);
                 output.complete(Some(&request.id), 0)?;
                 return Ok(End::Shutdown);
             }
@@ -174,4 +198,21 @@ fn dispatch(
 fn reject(output: &Output, id: Option<&Id>, error: &Error) -> Result<()> {
     output.error(id, error)?;
     output.complete(id, error.kind.exit_code())
+}
+
+fn cancel_active(tokens: &Tokens) {
+    let registry = tokens
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for token in registry.values() {
+        token.cancel();
+    }
+}
+
+fn check(cancel: &Cancellation) -> Result<()> {
+    if cancel.is_cancelled() {
+        Err(Error::new(ErrorKind::Cancelled, "session cancelled"))
+    } else {
+        Ok(())
+    }
 }

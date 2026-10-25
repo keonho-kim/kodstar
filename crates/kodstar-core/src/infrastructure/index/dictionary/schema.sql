@@ -6,6 +6,8 @@
 CREATE TABLE dictionary_blocks(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,first TEXT,last TEXT,count INTEGER NOT NULL CHECK(count BETWEEN 1 AND 32),payload BLOB NOT NULL,digest BLOB,CHECK((digest IS NULL)=(first IS NOT NULL AND last IS NOT NULL)),CHECK(digest IS NULL OR (count=1 AND length(digest)=32)));
 CREATE UNIQUE INDEX dictionary_first ON dictionary_blocks(kind,first);
 CREATE INDEX dictionary_digest ON dictionary_blocks(kind,digest) WHERE digest IS NOT NULL;
-CREATE TABLE dictionary_ids(id INTEGER PRIMARY KEY,block INTEGER NOT NULL REFERENCES dictionary_blocks(id) ON DELETE CASCADE);
-CREATE INDEX dictionary_ids_block ON dictionary_ids(block);
+CREATE TABLE dictionary_routes(id INTEGER PRIMARY KEY CHECK(id>=0),payload BLOB NOT NULL CHECK(length(payload) BETWEEN 1 AND 1536),last_id INTEGER NOT NULL CHECK(last_id>=0));
+CREATE INDEX dictionary_routes_last ON dictionary_routes(last_id);
+CREATE VIEW dictionary_ids AS SELECT p.id*128+json_extract(j.value,'$[0]')+1 AS id,json_extract(j.value,'$[1]') AS block
+ FROM dictionary_routes p,json_each(kodstar_routes(p.payload)) j;
 CREATE VIEW lookup_keys AS SELECT id,kind,lookup_key FROM kodstar_keys;

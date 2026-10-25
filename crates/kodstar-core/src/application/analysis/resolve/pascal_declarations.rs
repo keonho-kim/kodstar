@@ -46,7 +46,7 @@ pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
             hash.update(&(part.len() as u64).to_le_bytes());
             hash.update(part.as_bytes());
         }
-        c.cached_execute("UPDATE symbols SET logical_key=?7 WHERE id IN (
+        c.cached_execute("UPDATE symbols SET resolved_key=NULLIF(?7,syntax_key) WHERE id IN (
           SELECT s.id FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='pascal_signature'
           WHERE s.file_id=?1 AND s.owner_id=?2 AND s.name_key=?3 AND s.kind=?4 AND b.module_name=?5 AND COALESCE(s.condition,'')=?6)",
           params![file,owner,name,kind,signature,condition,hash.finalize().to_hex().to_string()])?;

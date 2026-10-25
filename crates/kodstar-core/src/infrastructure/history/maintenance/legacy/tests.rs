@@ -111,7 +111,7 @@ fn shared_versions_preserve_all_original_content_on_success() -> Result<()> {
         super::super::run(&connection, &Cancellation::default())?;
         assert_eq!(
             connection.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-            4
+            5
         );
         for (index, bytes) in expected.into_iter().enumerate() {
             assert_eq!(
@@ -141,7 +141,7 @@ fn upgrade_preserves_valid_unreferenced_content_addresses() -> Result<()> {
         |r| r.get(0),
     )?;
     assert_eq!(
-        crate::infrastructure::history::content::chunk_read::load(&connection, id)?,
+        crate::infrastructure::history::content::chunk_read::Reader::new(&connection).load(id)?,
         content
     );
     Ok(())

@@ -7,6 +7,7 @@ use crate::domain::diagnostics::{Error, Result};
 use rusqlite::{Connection, params};
 
 pub(crate) fn verify(c: &Connection) -> Result<()> {
+    super::routing::verify(c)?;
     c.execute_batch(
         "CREATE TEMP TABLE dictionary_expected(id INTEGER PRIMARY KEY,block INTEGER); CREATE TEMP TABLE dictionary_expected_large(kind TEXT,key TEXT,PRIMARY KEY(kind,key)) WITHOUT ROWID;",
     )?;

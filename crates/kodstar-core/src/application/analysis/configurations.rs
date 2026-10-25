@@ -17,7 +17,6 @@ use std::path::Path;
 pub(super) fn run(
     selected: &SelectedProject,
     connection: &Connection,
-    generation: i64,
     cancel: &Cancellation,
     progress: &mut dyn FnMut(&Progress) -> Result<()>,
 ) -> Result<(bool, u64)> {
@@ -76,7 +75,6 @@ pub(super) fn run(
                     .as_mut()
                     .ok_or_else(|| Error::operation("missing configuration reader"))?,
                 connection,
-                generation,
                 super::configuration_input::File { id, path: &path },
                 parser.get_or_insert_with(|| ParseSession::new(selected.settings.fact_batch_bytes)),
                 cancel,

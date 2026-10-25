@@ -41,7 +41,7 @@ impl Lookup<'_, '_> {
         &self,
         c: &FileContext,
     ) -> Result<Option<Manifest>> {
-        let row=self.connection.cached_row("SELECT id,path,package,declared_module FROM files WHERE package=?1 AND status='auxiliary' AND declared_module<>'' AND (display_path='go.mod' OR display_path LIKE '%/go.mod') LIMIT 1",[&c.package],read).optional()?;
+        let row=self.connection.cached_row("SELECT id,path,package,declared_module FROM files WHERE package_id=(SELECT id FROM atoms WHERE value=?1) AND status_id=(SELECT id FROM atoms WHERE value='auxiliary') AND declared_module<>'' AND (display_path='go.mod' OR display_path LIKE '%/go.mod') LIMIT 1",[&c.package],read).optional()?;
         row.map(|(id, path, package, module)| {
             Ok(Manifest {
                 id,

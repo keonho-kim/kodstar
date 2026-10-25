@@ -3,7 +3,7 @@
 // Usage: Context가 선택한 프로젝트의 실행 자원을 준비.
 // Related: crates/kodstar-core/src/application/execution/context.rs.
 
-use super::context::ProjectContext;
+use super::{context::ProjectContext, state::InputState};
 use crate::application::workspace::SelectedProject;
 use crate::domain::{cancellation::Cancellation, diagnostics::Result, query::Refresh};
 use crate::infrastructure::{cache::CacheStore, history::Repository, index, watch::Changes};
@@ -48,15 +48,17 @@ pub(super) fn project(
     Ok(ProjectContext {
         connection,
         database,
-        changes,
+        input: if watch {
+            InputState::Watching { observer: changes }
+        } else {
+            InputState::Current
+        },
         repository,
         cache,
         selected,
         report: None,
         maintenance: None,
         refresh,
-        revision: false,
-        watching: watch,
     })
 }
 
@@ -114,14 +116,12 @@ pub(super) fn revision(
     Ok(ProjectContext {
         connection,
         database,
-        changes: None,
+        input: InputState::Revision,
         repository,
         cache,
         selected,
         report: None,
         maintenance: None,
         refresh,
-        revision: true,
-        watching: false,
     })
 }

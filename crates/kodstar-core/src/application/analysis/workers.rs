@@ -8,27 +8,22 @@ use crate::domain::diagnostics::{Error, Result};
 use crate::domain::facts::{Fact, Fingerprinter};
 use crate::domain::source::SourceSpan;
 use crate::infrastructure::parse::ParseSession;
-use std::sync::{Arc, Mutex, mpsc};
+use crossbeam_channel as channel;
+use std::sync::Arc;
 use std::time::Duration;
 
-pub(super) fn run(receiver: Arc<Mutex<mpsc::Receiver<Work>>>, events: Events, fact_limit: usize) {
+pub(super) fn run(receiver: channel::Receiver<Work>, events: Events, fact_limit: usize) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut parser = None;
         loop {
             if events.cancel.is_cancelled() {
                 break;
             }
-            let work = match receiver.lock() {
-                Ok(receiver) => receiver.recv_timeout(Duration::from_millis(25)),
-                Err(_) => {
-                    events.fail(Error::operation("analysis queue lock poisoned"));
-                    break;
-                }
-            };
+            let work = receiver.recv_timeout(Duration::from_millis(25));
             let work = match work {
                 Ok(work) => work,
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(channel::RecvTimeoutError::Timeout) => continue,
+                Err(channel::RecvTimeoutError::Disconnected) => break,
             };
             let parser = parser.get_or_insert_with(|| ParseSession::new(fact_limit));
             parser.begin_file(work.previous.is_some());
@@ -53,8 +48,9 @@ fn extract(
 ) -> Result<()> {
     let path = Arc::new(work.record.path.clone());
     let mut preserve = false;
-    if let Some(previous) = &work.previous {
+    let ready = if let Some(previous) = &work.previous {
         let mut fingerprint = Fingerprinter::default();
+        let mut replay = super::replay::Replay::new(fact_limit);
         super::extraction::run(
             parser,
             &path,
@@ -63,6 +59,7 @@ fn extract(
             &events.cancel,
             &mut |language, mut fact: Fact| {
                 fingerprint.push(language, &mut fact);
+                replay.push(language, fact);
                 Ok(())
             },
         )?;
@@ -74,12 +71,26 @@ fn extract(
             });
         }
         preserve = next.environment == previous.environment;
+        Some((next, replay.finish()))
+    } else {
+        None
+    };
+    if !matches!(ready, Some((_, Some(_)))) {
         parser.replay();
     }
     events.send(Event::Begin {
         record: work.record,
         preserve,
     })?;
+    if let Some((fingerprints, Some(facts))) = ready {
+        if !facts.is_empty() {
+            events.send(Event::Facts {
+                path: Arc::clone(&path),
+                facts,
+            })?;
+        }
+        return events.send(Event::End { path, fingerprints });
+    }
     let mut fingerprint = Fingerprinter::default();
     let mut batch = super::batches::BatchSender::new(events, Arc::clone(&path), fact_limit);
     super::extraction::run(

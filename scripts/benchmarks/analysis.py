@@ -87,10 +87,11 @@ def indexed_results(home):
             JOIN symbols s ON s.id=i.symbol_id JOIN symbols c ON c.id=i.canonical_id
             ORDER BY 1,2
         """)
-        lookups = digest(database, Path(__file__).with_name("lookups.sql").read_text())
-        return {"inputs_sha256": inputs, "symbols_sha256": symbols, "relationships_sha256": relations,
-                "scopes_sha256": scopes, "bindings_sha256": bindings,
-                "identities_sha256": identities, "lookups_sha256": lookups}
+        lookup_sql = Path(__file__).with_name("lookups.sql").read_text()
+        return {"inputs_sha256": inputs, "symbols_sha256": symbols,
+                "relationships_sha256": relations, "scopes_sha256": scopes,
+                "bindings_sha256": bindings, "identities_sha256": identities,
+                "lookups_sha256": digest(database, lookup_sql)}
 
 
 def measure(binary, project, home, arguments):
@@ -151,13 +152,14 @@ def main():
     parser.add_argument("--project", required=True, type=Path)
     parser.add_argument("--file", required=True)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--mutations", action="store_true", help="also compare a Go probe's notes, body, additions and deletions")
     args = parser.parse_args()
-    if platform.system() != "Darwin" or args.repeats < 1:
-        parser.error("macOS and a positive repeat count are required")
+    if platform.system() != "Darwin" or args.repeats < 1 or args.jobs < 1:
+        parser.error("macOS and positive repeat and worker counts are required")
     project = args.project.resolve(strict=True)
-    report = {"platform": platform.platform(), "machine": platform.machine(), "runs": [],
+    report = {"platform": platform.platform(), "machine": platform.machine(), "jobs": args.jobs, "runs": [],
               "binary_sha256": {"baseline": binary_digest(args.baseline),
                                 "candidate": binary_digest(args.candidate)}}
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -180,7 +182,7 @@ def main():
                     shutil.copytree(project, working, symlinks=True,
                                     ignore=shutil.ignore_patterns(".kodstar"))
                     fixture = prepare_mutations(working) if args.mutations else None
-                    common = ["--root", str(working), "--jobs", "1", "--memory-budget", "128MiB", "--format", "json"]
+                    common = ["--root", str(working), "--jobs", str(args.jobs), "--memory-budget", "128MiB", "--format", "json"]
                     run = {"label": label, "repeat": repeat}
                     run["init"] = measure(binary.resolve(strict=True), working, home, ["init", "--yes", *common])
                     for mode, extra in [("synchronize", []), ("readonly", ["--no-refresh"])]:

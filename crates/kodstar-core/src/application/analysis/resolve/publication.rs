@@ -18,9 +18,13 @@ pub(super) fn reset(c: &Connection) -> Result<()> {
 
 pub(super) fn flush(c: &Connection) -> Result<()> {
     crate::infrastructure::index::dependencies::publish(c)?;
+
     crate::infrastructure::index::relations::publish(c)?;
+
     crate::infrastructure::index::dictionary::retire(c)?;
-    c.execute_batch("DELETE FROM resolution_dependencies; DELETE FROM resolution_relationships;")?;
+    crate::infrastructure::index::dictionary::routing::collect(c)?;
+
+    c.execute_batch("DELETE FROM resolution_dependencies; DELETE FROM resolution_relationships; DELETE FROM relation_prior;")?;
     Ok(())
 }
 
@@ -45,7 +49,7 @@ impl Lookup<'_, '_> {
         if merged {
             identities::candidates(self.connection)?;
             source = self.connection.cached_row(
-                "SELECT canonical_id FROM symbol_identities WHERE symbol_id=?1",
+                "SELECT COALESCE(g.canonical_id,s.id) FROM symbols s LEFT JOIN symbol_aliases g ON g.symbol_id=s.id WHERE s.id=?1",
                 [source],
                 |r| r.get(0),
             )?;

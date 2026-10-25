@@ -114,7 +114,7 @@ pub(crate) fn detect(path: &Path, prefix: &[u8]) -> Option<Language> {
 
 pub(crate) fn capability(language: Language) -> LanguageCapability {
     let mut limitations = vec![
-        "static syntax and explicit bindings only; not full language or Graphify parity",
+        "static syntax and explicit bindings only; dynamic targets may remain unresolved",
         "no execution or macro evaluation; runtime dispatch and complete type inference are not proven",
     ];
     limitations.push(match language {

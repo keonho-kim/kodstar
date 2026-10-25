@@ -32,23 +32,23 @@ impl<'conn> Statements<'conn> {
         for sql in [
             "INSERT INTO scopes(file_id,local_id,parent,start_byte,end_byte)
             VALUES(?1,?2,?3,?4,?5)",
-            "INSERT INTO symbols(file_id,local_id,scope_id,logical_key,syntax_key,name,name_key,qualified_name,syntax_qualified_name,kind,syntax_kind,signature,condition,owner_id,exported,start_byte,end_byte,line,column_byte,end_line,end_column_byte,language)
-            VALUES(?1,?2,?3,?4,?4,?5,?6,?7,?7,?8,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
-            "INSERT INTO bindings(file_id,scope_id,name,name_key,target_local,module_name,imported_name,type_name,kind,start_byte,end_byte,namespace)
+            "INSERT INTO symbols_rows(file_id,local_id,scope_id,syntax_key,name,name_key,syntax_qualified_name,syntax_kind,signature,condition,owner_id,exported,start_byte,end_byte,line,column_byte,end_line,end_column_byte,language)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+            "INSERT INTO bindings_rows(file_id,scope_id,name,name_key,target_local,module_name,imported_name,type_name,kind,start_byte,end_byte,namespace)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-            "INSERT INTO facts(file_id,source_id,scope_id,expression,relation,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte,language)
+            "INSERT INTO facts_rows(file_id,source_id,scope_id,expression,relation,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte,language)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
-            "SELECT COUNT(*) FROM symbols
-            WHERE file_id=?1 AND qualified_name=?2 AND kind=?3 AND signature=?4 AND condition IS ?5",
-            "SELECT id FROM symbols
+            "SELECT COUNT(*) FROM symbols_rows
+            WHERE file_id=?1 AND qualified_id=?2 AND kind_value=?3 AND signature=?4 AND condition IS ?5",
+            "SELECT id FROM symbols_rows
             WHERE file_id=?1 AND local_id=?2",
-            "UPDATE files SET declared_module=?1
+            "UPDATE files_rows SET declared_module=?1
             WHERE id=?2",
-            "UPDATE files SET module=?1,declared_module=?1
+            "UPDATE files_rows SET module=?1,declared_module=?1
             WHERE id=?2",
             "UPDATE scopes SET start_byte=?1,end_byte=?2 WHERE file_id=?3 AND local_id=?4",
-            "UPDATE symbols SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND local_id=?8",
-            "UPDATE bindings SET end_byte=?1 WHERE file_id=?2 AND target_local=?3 AND kind IN ('function','go_signature')",
+            "UPDATE symbols_rows SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND local_id=?8",
+            "UPDATE bindings_rows SET end_byte=?1 WHERE file_id=?2 AND target_local=?3 AND kind IN (SELECT id FROM atoms WHERE value IN ('function','go_signature'))",
         ] {
             statements.push(connection.prepare(sql)?);
         }

@@ -31,6 +31,7 @@ pub(crate) fn run(
     transaction.execute_batch("CREATE TEMP TABLE IF NOT EXISTS observed AS SELECT * FROM working WHERE 0; DELETE FROM observed;")?;
     transaction
         .execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS temp.observed_path ON observed(path);")?;
+    let mut contents = blobs::Writer::new(&transaction)?;
     scan::walk(
         &repository.root,
         cache_home,
@@ -84,12 +85,7 @@ pub(crate) fn run(
                 let blob = if kind == "symlink" {
                     let target = fs::read_link(absolute)
                         .map_err(|e| Error::io("read history symlink", absolute, e))?;
-                    blobs::put(
-                        &transaction,
-                        std::io::Cursor::new(path_bytes(&target)),
-                        previous,
-                        cancel,
-                    )?
+                    contents.put(std::io::Cursor::new(path_bytes(&target)), previous, cancel)?
                 } else {
                     let file = File::open(absolute)
                         .map_err(|e| Error::io("open history input", absolute, e))?;
@@ -101,7 +97,7 @@ pub(crate) fn run(
                     {
                         return Err(Error::operation("history input changed before capture"));
                     }
-                    blobs::put(&transaction, file, previous, cancel)?
+                    contents.put(file, previous, cancel)?
                 };
                 let after = fs::symlink_metadata(absolute)
                     .map_err(|e| Error::io("recheck history input", absolute, e))?;
@@ -123,6 +119,7 @@ pub(crate) fn run(
             Ok(())
         },
     )?;
+    drop(contents);
     let parent = checkpoints::head(&transaction)?;
     let count: u64 = transaction.query_row("SELECT (SELECT count(*) FROM observed o LEFT JOIN working w ON w.path=o.path WHERE w.path IS NULL OR o.blob<>w.blob OR o.mode<>w.mode OR o.kind<>w.kind) + (SELECT count(*) FROM working w WHERE NOT EXISTS(SELECT 1 FROM observed o WHERE o.path=w.path))", [], |r| r.get(0))?;
     let created = count > 0 || parent.is_none();

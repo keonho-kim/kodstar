@@ -1,4 +1,4 @@
-// Purpose: 기존 설치 교체와 중단 후 재시도 가능한 설치 실행 흐름.
+// Purpose: CLI·데이터 홈의 사용자 설치와 중단 후 재시도 가능한 교체 흐름.
 // Pattern: Use Case.
 // Usage: install.sh의 내부 __install 요청을 실행.
 // Related: crates/kodstar-cli/src/installation/mod.rs, crates/kodstar-cli/src/installation/files.rs, crates/kodstar-cli/src/installation/shell.rs.
@@ -125,9 +125,10 @@ pub(crate) fn run() -> Result<ExitCode> {
     let mut stdout = std::io::stdout().lock();
     writeln!(
         stdout,
-        "Installed KodStar {}: {}",
+        "Installed kodstar {}\n  Executable: {}\n  Data home:  {}",
         env!("CARGO_PKG_VERSION"),
-        binary.display()
+        binary.display(),
+        home.join(".kodstar").display()
     )
     .map_err(|e| Error::caused_by("write installation result", e))?;
     let bin = shell::quote(
@@ -146,7 +147,7 @@ pub(crate) fn run() -> Result<ExitCode> {
     };
     writeln!(
         stdout,
-        "New terminals recognize kodstar automatically. For this terminal, run:\n{activate}"
+        "\nNew terminals recognize kodstar automatically. For this terminal, run:\n{activate}\n\nGet started: kodstar init /path/to/project"
     )
     .map_err(|e| Error::caused_by("write PATH activation", e))?;
     Ok(ExitCode::SUCCESS)

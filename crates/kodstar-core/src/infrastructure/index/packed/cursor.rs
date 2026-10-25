@@ -3,8 +3,12 @@
 // Usage: packed virtual table이 source·target·fact·key 조건을 전달.
 // Related: crates/kodstar-core/src/infrastructure/index/packed/mod.rs.
 
-use super::{Filter, Kind, Row, codec};
-use rusqlite::{Connection, Result, ffi, types::Value, vtab::*};
+use super::{Filter, Kind, Rows, codec};
+use rusqlite::{
+    Connection, Result, ffi,
+    types::{Value, ValueRef},
+    vtab::*,
+};
 use std::rc::Rc;
 
 #[repr(C)]
@@ -14,7 +18,7 @@ pub(super) struct Cursor {
     kind: Kind,
     filters: Vec<Filter>,
     block: i64,
-    rows: Vec<Row>,
+    rows: Rows,
     at: usize,
 }
 
@@ -26,31 +30,18 @@ impl Cursor {
             kind,
             filters: Vec::new(),
             block: 0,
-            rows: Vec::new(),
+            rows: Rows::Empty,
             at: 0,
         }
     }
 
     fn advance(&mut self) -> Result<()> {
         loop {
-            while self.at < self.rows.len() {
-                let row = &self.rows[self.at];
-                let matches =
-                    self.filters
-                        .iter()
-                        .all(|(column, value)| match (&row[*column], value) {
-                            (_, Value::Null) => false,
-                            (Value::Integer(a), Value::Integer(b)) => a == b,
-                            (Value::Text(a), Value::Text(b)) => a == b,
-                            // SQLite performs numeric affinity/coercion checks for other types.
-                            _ => true,
-                        });
-                if matches {
-                    return Ok(());
-                }
-                self.at += 1;
+            // Both decoders already select these rows; SQLite rechecks affinity/collation.
+            if self.at < self.rows.len() {
+                return Ok(());
             }
-            self.rows.clear();
+            self.rows = Rows::Empty;
             let next = match self.kind {
                 Kind::Dictionary => {
                     super::super::dictionary::scan(&self.connection, self.block, &self.filters)?
@@ -86,7 +77,7 @@ unsafe impl VTabCursor for Cursor {
             }
         }
         self.block = 0;
-        self.rows.clear();
+        self.rows = Rows::Empty;
         self.at = 0;
         self.advance()
     }
@@ -98,11 +89,13 @@ unsafe impl VTabCursor for Cursor {
         self.at >= self.rows.len()
     }
     fn column(&self, context: &mut Context, column: i32) -> Result<()> {
-        context.set_result(&self.rows[self.at][column as usize])
+        context.set_result(&rusqlite::types::ToSqlOutput::Borrowed(
+            self.rows.value(self.at, column as usize),
+        ))
     }
     fn rowid(&self) -> Result<i64> {
-        match self.rows[self.at][0] {
-            Value::Integer(id) => Ok(id),
+        match self.rows.value(self.at, 0) {
+            ValueRef::Integer(id) => Ok(id),
             _ => Err(codec::invalid()),
         }
     }

@@ -10,9 +10,9 @@ use crate::application::workspace::SelectedProject;
 use crate::domain::diagnostics::{Error, Result};
 use crate::infrastructure::index::{self, FileRecord};
 use crate::infrastructure::{formats, history::inputs};
+use crossbeam_channel as channel;
 use std::path::Path;
-use std::sync::{Arc, mpsc};
-use std::thread;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) struct Pipeline<'a> {
@@ -25,7 +25,7 @@ pub(super) struct Pipeline<'a> {
 }
 
 impl Pipeline<'_> {
-    pub(super) fn produce(&self, sender: mpsc::SyncSender<Work>) -> Result<()> {
+    pub(super) fn produce(&self, sender: channel::Sender<Work>) -> Result<()> {
         let reader = index::open(
             self.database,
             &self.selected.root,
@@ -186,13 +186,12 @@ impl Pipeline<'_> {
             };
             loop {
                 self.events.cancel.check()?;
-                match sender.try_send(work) {
+                match sender.send_timeout(work, Duration::from_millis(25)) {
                     Ok(()) => return Ok(()),
-                    Err(mpsc::TrySendError::Full(pending)) => {
+                    Err(channel::SendTimeoutError::Timeout(pending)) => {
                         work = pending;
-                        thread::sleep(Duration::from_millis(5));
                     }
-                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                    Err(channel::SendTimeoutError::Disconnected(_)) => {
                         return Err(Error::operation(
                             "analysis workers terminated before scan completed",
                         ));

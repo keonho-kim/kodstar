@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, Result};
 
 pub(crate) fn run(c: &Connection) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE dictionary_retired(id INTEGER PRIMARY KEY,block INTEGER);
-        INSERT INTO dictionary_retired SELECT i.id,i.block FROM dictionary_retirements d JOIN dictionary_ids i ON i.id=d.id WHERE NOT EXISTS(SELECT 1 FROM lookup_blocks b WHERE b.key_id=i.id);
+        INSERT INTO dictionary_retired SELECT d.id,kodstar_route_at(p.payload,(d.id-1)%128) FROM dictionary_retirements d JOIN dictionary_routes p ON p.id=(d.id-1)/128 WHERE NOT EXISTS(SELECT 1 FROM lookup_blocks b WHERE b.key_id=d.id);
         CREATE INDEX dictionary_retired_block ON dictionary_retired(block);")?;
     let mut after = 0;
     loop {
@@ -35,8 +35,13 @@ pub(crate) fn run(c: &Connection) -> Result<()> {
             }
         }
         drop(contains);
-        c.execute("DELETE FROM dictionary_ids WHERE id IN (SELECT id FROM dictionary_retired WHERE block=?1)",[block])?;
         if retained.is_empty() {
+            let mut old = Vec::new();
+            super::codec::select(&bytes, count, |id, _| {
+                old.push(id);
+                false
+            })?;
+            super::routing::update(c, block, &old, &[])?;
             c.execute("DELETE FROM dictionary_blocks WHERE id=?1", [block])?;
         } else {
             super::store(c, block, &kind, &retained)?;

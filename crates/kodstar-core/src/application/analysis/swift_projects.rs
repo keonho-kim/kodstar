@@ -187,7 +187,7 @@ pub(super) fn identities(c: &Connection, cancel: &Cancellation) -> Result<()> {
             hash.update(part.as_bytes());
         }
         c.execute(
-            "UPDATE symbols SET logical_key=?1 WHERE id=?2",
+            "UPDATE symbols SET resolved_key=NULLIF(?1,syntax_key) WHERE id=?2",
             params![hash.finalize().to_hex().to_string(), id],
         )?;
     }

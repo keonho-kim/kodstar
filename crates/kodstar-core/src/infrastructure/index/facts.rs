@@ -37,11 +37,13 @@ impl FileFacts {
 
 pub(crate) struct FactWriter<'conn> {
     statements: Statements<'conn>,
+    atoms: super::atoms::writer::Writer<'conn>,
 }
 impl<'conn> FactWriter<'conn> {
     pub(crate) fn new(connection: &'conn Connection) -> Result<Self> {
         Ok(Self {
             statements: Statements::new(connection)?,
+            atoms: super::atoms::writer::Writer::new(connection)?,
         })
     }
     fn local_symbol(&mut self, file: i64, local: u32) -> Result<i64> {
@@ -106,15 +108,16 @@ impl<'conn> FactWriter<'conn> {
                     .owner
                     .map(|owner| self.local_symbol(file, owner))
                     .transpose()?;
+                let name = self.atoms.intern(&definition.name)?;
+                let name_key = self.atoms.intern(&language.lookup_key(&definition.name))?;
+                let qualified = self.atoms.intern(&definition.qualified_name)?;
+                let kind = self.atoms.intern(definition.kind.as_str())?;
+                let signature = self.atoms.intern(&definition.signature)?;
+                let condition = self.atoms.optional(definition.condition.as_deref())?;
+                let language_id = self.atoms.intern(language.as_str())?;
                 let ordinal = self.statements.integer(
                     Write::Ordinal,
-                    params![
-                        file,
-                        definition.qualified_name,
-                        definition.kind.as_str(),
-                        definition.signature,
-                        definition.condition
-                    ],
+                    params![file, qualified, kind, signature, condition],
                 )?;
                 let mut hasher = blake3::Hasher::new();
                 for part in [
@@ -131,7 +134,7 @@ impl<'conn> FactWriter<'conn> {
                     hasher.update(&(part.len() as u64).to_le_bytes());
                     hasher.update(part);
                 }
-                let name_key = language.lookup_key(&definition.name);
+                let identity = hasher.finalize();
                 let span = definition.span;
                 self.statements.execute(
                     Write::Definition,
@@ -139,13 +142,13 @@ impl<'conn> FactWriter<'conn> {
                         file,
                         definition.local_id,
                         definition.scope,
-                        hasher.finalize().to_hex().to_string(),
-                        definition.name,
+                        identity.as_bytes().as_slice(),
+                        name,
                         name_key,
-                        definition.qualified_name,
-                        definition.kind.as_str(),
-                        definition.signature,
-                        definition.condition,
+                        qualified,
+                        kind,
+                        signature,
+                        condition,
                         owner,
                         definition.exported,
                         span.start_byte,
@@ -154,7 +157,7 @@ impl<'conn> FactWriter<'conn> {
                         span.column,
                         span.end_line,
                         span.end_column,
-                        language.as_str()
+                        language_id
                     ],
                 )?;
             }
@@ -174,19 +177,25 @@ impl<'conn> FactWriter<'conn> {
                     &binding.name,
                 )
                 .as_str();
-                let key = language.lookup_key(&binding.name);
+                let key = self.atoms.intern(&language.lookup_key(&binding.name))?;
+                let name = self.atoms.intern(&binding.name)?;
+                let module = self.atoms.optional(binding.module.as_deref())?;
+                let imported = self.atoms.optional(binding.imported_name.as_deref())?;
+                let type_name = self.atoms.optional(binding.type_name.as_deref())?;
+                let kind = self.atoms.intern(binding.kind)?;
+                let namespace = self.atoms.intern(namespace)?;
                 self.statements.execute(
                     Write::Binding,
                     params![
                         file,
                         binding.scope,
-                        binding.name,
+                        name,
                         key,
                         binding.target,
-                        binding.module,
-                        binding.imported_name,
-                        binding.type_name,
-                        binding.kind,
+                        module,
+                        imported,
+                        type_name,
+                        kind,
                         binding.span.start_byte,
                         binding.span.end_byte,
                         namespace
@@ -196,15 +205,19 @@ impl<'conn> FactWriter<'conn> {
             Fact::Use(usage) => {
                 let source = self.local_symbol(file, usage.source)?;
                 let span = usage.span;
+                let expression = self.atoms.intern(&usage.expression)?;
+                let relation = self.atoms.intern(usage.relation.as_str())?;
+                let condition = self.atoms.optional(usage.condition.as_deref())?;
+                let language_id = self.atoms.intern(language.as_str())?;
                 self.statements.execute(
                     Write::Usage,
                     params![
                         file,
                         source,
                         usage.scope,
-                        usage.expression,
-                        usage.relation.as_str(),
-                        usage.condition,
+                        expression,
+                        relation,
+                        condition,
                         usage.type_only,
                         span.start_byte,
                         span.end_byte,
@@ -212,7 +225,7 @@ impl<'conn> FactWriter<'conn> {
                         span.column,
                         span.end_line,
                         span.end_column,
-                        language.as_str()
+                        language_id
                     ],
                 )?;
             }
@@ -229,7 +242,7 @@ impl<'conn> FactWriter<'conn> {
                     } else {
                         Write::Module
                     },
-                    params![name, file],
+                    params![self.atoms.intern(&name)?, file],
                 )?;
                 if !declaration_only {
                     context.module = name;

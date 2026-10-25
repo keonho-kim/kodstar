@@ -9,7 +9,7 @@ use crate::infrastructure::index::cached::Sql as Connection;
 use rusqlite::params;
 
 pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
-    c.execute_batch("DELETE FROM symbol_identities; UPDATE symbols SET logical_key=syntax_key,qualified_name=syntax_qualified_name,kind=syntax_kind;")?;
+    c.execute_batch("DELETE FROM symbol_aliases; UPDATE symbols SET resolved_key=NULL,resolved_qualified_name=NULL,resolved_kind=NULL WHERE resolved_key IS NOT NULL OR resolved_qualified_name IS NOT NULL OR resolved_kind IS NOT NULL;")?;
     let mut statement=c.cached_prepare("SELECT s.id,s.syntax_key,f.package,s.qualified_name,s.kind,s.condition,
         (SELECT b.imported_name FROM bindings b JOIN dotnet_membership d ON d.file_id=b.file_id WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='csharp_partial' AND d.merge_allowed=1 LIMIT 1)
         FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language='csharp' ORDER BY s.id")?;
@@ -45,7 +45,7 @@ pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
             hash.update(part.as_bytes());
         }
         c.cached_execute(
-            "UPDATE symbols SET logical_key=?1 WHERE id=?2",
+            "UPDATE symbols SET resolved_key=NULLIF(?1,syntax_key) WHERE id=?2",
             params![hash.finalize().to_hex().to_string(), id],
         )?;
     }
@@ -62,13 +62,13 @@ pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
 pub(super) fn rebuild(c: &Connection) -> Result<()> {
     c.execute_batch(
         "DELETE
-        FROM symbol_identities; INSERT INTO symbol_identities
-        SELECT s.id,(SELECT candidate.id
+        FROM symbol_aliases; INSERT INTO symbol_aliases
+        SELECT symbol_id,canonical_id FROM (SELECT s.id AS symbol_id,(SELECT candidate.id
         FROM symbols candidate
         JOIN files f ON f.id=candidate.file_id
-        WHERE candidate.logical_key=s.logical_key
-        ORDER BY f.path,candidate.start_byte,candidate.id LIMIT 1)
-        FROM symbols s;",
+        WHERE candidate.key_blob=s.key_blob
+        ORDER BY f.path,candidate.start_byte,candidate.id LIMIT 1) AS canonical_id
+        FROM symbols s) WHERE symbol_id<>canonical_id;",
     )?;
     Ok(())
 }
@@ -91,7 +91,7 @@ fn erlang(c: &Connection, cancel: &Cancellation) -> Result<()> {
         hash.update(&(path.len() as u64).to_le_bytes());
         hash.update(&path);
         c.cached_execute(
-            "UPDATE symbols SET logical_key=?1 WHERE id=?2",
+            "UPDATE symbols SET resolved_key=NULLIF(?1,syntax_key) WHERE id=?2",
             params![hash.finalize().to_hex().to_string(), id],
         )?;
     }
@@ -122,7 +122,7 @@ fn elixir(c: &Connection, cancel: &Cancellation) -> Result<()> {
         hash.update(&(path.len() as u64).to_le_bytes());
         hash.update(&path);
         c.cached_execute(
-            "UPDATE symbols SET logical_key=?1 WHERE id=?2",
+            "UPDATE symbols SET resolved_key=NULLIF(?1,syntax_key) WHERE id=?2",
             params![hash.finalize().to_hex().to_string(), id],
         )?;
     }

@@ -17,10 +17,10 @@ fn small_edits_share_unchanged_chunks_without_losing_content() -> Result<()> {
     for value in 0..4 {
         bytes.extend(vec![value; CHUNK]);
     }
-    let first = put(&connection, Cursor::new(&bytes), None, &cancel)?;
+    let first = Writer::new(&connection)?.put(Cursor::new(&bytes), None, &cancel)?;
     let pages: u64 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
     bytes[CHUNK + 13] ^= 1;
-    let second = put(&connection, Cursor::new(&bytes), None, &cancel)?;
+    let second = Writer::new(&connection)?.put(Cursor::new(&bytes), None, &cancel)?;
     let after: u64 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
     let page_size: u64 = connection.query_row("PRAGMA page_size", [], |r| r.get(0))?;
     assert!(
@@ -41,11 +41,14 @@ fn duplicate_contents_do_not_write_or_allocate_database_pages() -> Result<()> {
     super::super::chunks::register(&connection)?;
     let cancel = Cancellation::default();
     let bytes = vec![7; CHUNK * 4 + 1];
-    let id = put(&connection, Cursor::new(&bytes), None, &cancel)?;
+    let id = Writer::new(&connection)?.put(Cursor::new(&bytes), None, &cancel)?;
     let pages: u64 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
     let writes = connection.total_changes();
     let transaction = connection.transaction()?;
-    assert_eq!(put(&transaction, Cursor::new(&bytes), None, &cancel)?, id);
+    assert_eq!(
+        Writer::new(&transaction)?.put(Cursor::new(&bytes), None, &cancel)?,
+        id
+    );
     transaction.commit()?;
     assert_eq!(
         connection.total_changes(),
@@ -102,8 +105,9 @@ fn changed_or_cancelled_reread_rolls_back_new_contents() -> Result<()> {
             },
         };
         let transaction = connection.transaction()?;
-        let error =
-            put(&transaction, input, None, &cancel).expect_err("unstable input was published");
+        let error = Writer::new(&transaction)?
+            .put(input, None, &cancel)
+            .expect_err("unstable input was published");
         if change {
             assert!(
                 error.to_string().contains("changed during capture"),
@@ -130,7 +134,7 @@ fn corrupted_length_never_writes_beyond_the_declared_size() -> Result<()> {
     connection.execute_batch(crate::infrastructure::history::content::chunks::SCHEMA)?;
     super::super::chunks::register(&connection)?;
     let cancel = Cancellation::default();
-    let id = put(&connection, Cursor::new(vec![7; CHUNK]), None, &cancel)?;
+    let id = Writer::new(&connection)?.put(Cursor::new(vec![7; CHUNK]), None, &cancel)?;
     connection.execute("UPDATE blobs SET size=1 WHERE id=?1", [id])?;
     let mut output = Vec::new();
     assert!(write(&connection, id, &mut output, &cancel).is_err());

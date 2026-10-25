@@ -40,8 +40,8 @@ pub(super) fn run(connection: &Connection, cancel: &Cancellation) -> Result<()> 
         cancel.check()?;
         let (origin, source, target) = record?;
         let fact:i64=connection.cached_row(
-            "INSERT INTO facts(file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
-             SELECT file_id,?2,scope_id,expression,'dispatch_candidate',language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM facts WHERE id=?1 RETURNING id",params![origin,source],|r|r.get(0))?;
+            "INSERT INTO facts(id,file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
+             SELECT (SELECT COALESCE(MAX(id),0)+1 FROM facts_rows),file_id,?2,scope_id,expression,'dispatch_candidate',language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM facts WHERE id=?1 RETURNING id",params![origin,source],|r|r.get(0))?;
         connection.cached_execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','explicit_interface_dispatch','matching member of an explicit implementor; signature and runtime dispatch are not proven')",params![fact,source,target])?;
     }
     Ok(())
@@ -62,8 +62,8 @@ fn overrides(connection: &Connection, cancel: &Cancellation) -> Result<()> {
         cancel.check()?;
         let (source, target) = record?;
         let fact:i64=connection.cached_row(
-            "INSERT INTO facts(file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
-             SELECT file_id,id,scope_id,name,'overrides',language,condition,0,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM symbols WHERE id=?1 RETURNING id",[source],|r|r.get(0))?;
+            "INSERT INTO facts(id,file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
+             SELECT (SELECT COALESCE(MAX(id),0)+1 FROM facts_rows),file_id,id,scope_id,name,'overrides',language,condition,0,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM symbols WHERE id=?1 RETURNING id",[source],|r|r.get(0))?;
         connection.cached_execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','explicit_base_member','matching member of an explicit base; signature, visibility and override rules are not proven')",params![fact,source,target])?;
     }
     Ok(())

@@ -16,6 +16,7 @@ mod extraction;
 mod incremental;
 mod module_identity;
 mod pipeline;
+mod replay;
 mod resolve;
 mod swift_projects;
 mod workers;
@@ -99,14 +100,15 @@ pub(crate) fn run(
         let outcome: Result<(bool, u64, u64, u64, u64)> = (|| {
             transaction.execute_batch("CREATE TEMP TABLE IF NOT EXISTS seen_files(path BLOB PRIMARY KEY); CREATE TEMP TABLE IF NOT EXISTS changed_files(id INTEGER PRIMARY KEY);
                 CREATE TEMP TABLE IF NOT EXISTS dependent_files(id INTEGER PRIMARY KEY);
-                DELETE FROM seen_files; DELETE FROM changed_files; DELETE FROM dependent_files;")?;
+                CREATE TEMP TABLE IF NOT EXISTS affected_facts(id INTEGER PRIMARY KEY);
+                DELETE FROM seen_files; DELETE FROM changed_files; DELETE FROM dependent_files; DELETE FROM affected_facts; DELETE FROM relation_prior;")?;
+            index::statistics::delta::reset(&transaction, !full && generation > 0)?;
             let (mut changed, mut parsed, reused, mut resolution) = pipeline::run(
                 pipeline::Input {
                     database,
                     selected,
                     full,
                     verify: options.verify,
-                    generation: next_generation,
                 },
                 &transaction,
                 cancel,
@@ -122,10 +124,13 @@ pub(crate) fn run(
             let scoped_deletions =
                 semantic_deletions && !full && index::invalidation::capture_deleted(&transaction)?;
             if scoped_deletions {
-                resolution = resolution.max(incremental::Resolution::ChangedFiles);
+                index::statistics::delta::remember_deleted(&transaction)?;
+                resolution = resolution.max(incremental::Resolution::Selected);
             }
             if deleted > 0 {
                 changed = true;
+                transaction.execute("DELETE FROM relation_blocks WHERE file_id IN (SELECT id FROM files WHERE path NOT IN (SELECT path FROM seen_files))", [])?;
+                index::relations::remove_targets(&transaction, None)?;
                 transaction.execute(
                     "DELETE FROM files WHERE path NOT IN (SELECT path FROM seen_files)",
                     [],
@@ -143,7 +148,7 @@ pub(crate) fn run(
             changed |= full || previous_checkpoint.as_deref() != checkpoint;
             index::limit_reads(&transaction, selected.settings.memory_budget)?;
             let (configuration_changed, configuration_parsed) =
-                configurations::run(selected, &transaction, next_generation, cancel, progress)?;
+                configurations::run(selected, &transaction, cancel, progress)?;
             changed |= configuration_changed;
             if full || (semantic_deletions && !scoped_deletions) || configuration_changed {
                 resolution = incremental::Resolution::All;
@@ -165,7 +170,13 @@ pub(crate) fn run(
                 if resolution != incremental::Resolution::None {
                     resolve::run(&transaction, cancel, resolution)?;
                 }
-                index::refresh_coverage(&transaction, next_generation)?;
+                let update = match resolution {
+                    incremental::Resolution::None => index::CoverageUpdate::Files,
+                    incremental::Resolution::Selected => index::CoverageUpdate::Selected,
+                    incremental::Resolution::All => index::CoverageUpdate::All,
+                };
+                index::atoms::collect(&transaction)?;
+                index::refresh_coverage(&transaction, next_generation, update)?;
                 let at = now_seconds()?;
                 transaction.execute("UPDATE metadata SET generation=?1,config_hash=?2,indexed_at=?3,last_update='complete',last_error=NULL,engine_version=?4,extraction_version=?5,relation_registry_version=?6 WHERE singleton=1",params![next_generation,fingerprint,at,crate::VERSION,index::EXTRACTION_VERSION,crate::domain::relations::RELATION_REGISTRY_VERSION])?;
                 at

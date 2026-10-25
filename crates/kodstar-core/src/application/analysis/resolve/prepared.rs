@@ -1,4 +1,4 @@
-// Purpose: 세대가 소유하는 고정 SQL 10개의 수명·메모리·매개변수 정리.
+// Purpose: 세대가 소유하는 고정 SQL 11개의 수명·메모리·매개변수 정리.
 // Pattern: Simple Module.
 // Usage: resolve가 생성하고 binding·후보·증거·관계 저장이 빌림.
 // Related: crates/kodstar-core/src/application/analysis/resolve/mod.rs, crates/kodstar-core/src/application/analysis/resolve/publication.rs.
@@ -17,6 +17,7 @@ pub(super) enum Publication {
 
 pub(super) struct Prepared<'conn> {
     binding: RefCell<Statement<'conn>>,
+    binding_exact: RefCell<Statement<'conn>>,
     candidates: RefCell<Statement<'conn>>,
     rust: RefCell<Statement<'conn>>,
     dependency: RefCell<Statement<'conn>>,
@@ -28,6 +29,11 @@ pub(super) struct Prepared<'conn> {
 impl<'conn> Prepared<'conn> {
     pub(super) fn new(c: &'conn Connection) -> Result<Self> {
         let binding = RefCell::new(c.prepare(include_str!("prepared/bindings.sql"))?);
+        let binding_exact =
+            RefCell::new(c.prepare(&include_str!("prepared/bindings.sql").replace(
+                "/* exact binding guard */",
+                "AND name_key_id=(SELECT id FROM atoms WHERE value=?3)",
+            ))?);
         let candidates = RefCell::new(c.prepare(include_str!("prepared/candidates.sql"))?);
         let rust = RefCell::new(c.prepare(include_str!("prepared/rust.sql"))?);
         let dependency=RefCell::new(c.prepare("INSERT OR REPLACE INTO resolution_dependencies(fact_id,kind,lookup_key,found) VALUES(?1,?2,?3,?4)")?);
@@ -43,7 +49,7 @@ impl<'conn> Prepared<'conn> {
                 ));
             }
         }
-        let bytes = [&binding, &candidates, &rust, &dependency]
+        let bytes = [&binding, &binding_exact, &candidates, &rust, &dependency]
             .into_iter()
             .chain(publications.iter())
             .map(|s| s.borrow().get_status(StatementStatus::MemUsed) as usize)
@@ -54,6 +60,7 @@ impl<'conn> Prepared<'conn> {
         }
         Ok(Self {
             binding,
+            binding_exact,
             candidates,
             rust,
             dependency,
@@ -65,9 +72,13 @@ impl<'conn> Prepared<'conn> {
         })
     }
 
-    pub(super) fn binding<P: Params>(&self, params: P) -> Result<Option<Binding>> {
-        let mut statement = self
-            .binding
+    pub(super) fn binding<P: Params>(&self, params: P, exact: bool) -> Result<Option<Binding>> {
+        let query = if exact {
+            &self.binding_exact
+        } else {
+            &self.binding
+        };
+        let mut statement = query
             .try_borrow_mut()
             .map_err(|_| Error::operation("binding query is already active"))?;
         let before = statement.get_status(StatementStatus::MemUsed) as usize;

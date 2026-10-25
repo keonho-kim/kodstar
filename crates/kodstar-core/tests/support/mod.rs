@@ -11,17 +11,15 @@ pub mod snapshot;
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use kodstar_core::*;
 
 pub type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
-static NEXT: AtomicU64 = AtomicU64::new(0);
 pub struct Project {
     pub directory: PathBuf,
     pub root: PathBuf,
     pub engine: Engine,
+    temporary: Option<tempfile::TempDir>,
 }
 impl Project {
     pub fn history(&self, request: HistoryRequest) -> Result<Collected> {
@@ -35,13 +33,10 @@ impl Project {
         Ok(sink)
     }
     pub fn new() -> std::result::Result<Self, Box<dyn std::error::Error>> {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "kodstar-test-{}-{nonce}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&directory)?;
+        let temporary = tempfile::Builder::new()
+            .prefix("kodstar-core-test-")
+            .tempdir()?;
+        let directory = temporary.path().to_path_buf();
         let root = directory.join("project");
         fs::create_dir(&root)?;
         let engine = Engine::new(directory.join("cache"))?;
@@ -49,6 +44,7 @@ impl Project {
             directory,
             root,
             engine,
+            temporary: Some(temporary),
         })
     }
     pub fn write(&self, path: &str, source: &str) -> std::io::Result<()> {
@@ -91,7 +87,15 @@ impl Project {
 }
 impl Drop for Project {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
+        if let Some(directory) = self.temporary.take()
+            && let Err(error) = directory.close()
+        {
+            if std::thread::panicking() {
+                eprintln!("test directory cleanup failed: {error}");
+            } else {
+                panic!("test directory cleanup failed: {error}");
+            }
+        }
     }
 }
 #[derive(Default, Debug)]

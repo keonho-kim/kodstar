@@ -89,7 +89,9 @@ impl Lookup<'_, '_> {
             [depth],
             |row| row.get(0),
         )?;
-        self.dependency("module", &format!("{}:{module}", context.package), found)?;
+        if context.language != Language::Go {
+            self.dependency("module", &format!("{}:{module}", context.package), found)?;
+        }
         if !found {
             if python_star {
                 self.candidate_only = true;

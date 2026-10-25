@@ -125,7 +125,7 @@ pub(in crate::application::analysis::resolve) fn merge(
             hash.update(part);
         }
         c.cached_execute(
-            "UPDATE symbols SET logical_key=?1 WHERE id IN (SELECT id FROM cxx_component)",
+            "UPDATE symbols SET resolved_key=NULLIF(?1,syntax_key) WHERE id IN (SELECT id FROM cxx_component)",
             [hash.finalize().to_hex().to_string()],
         )?;
     }

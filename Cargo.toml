@@ -15,12 +15,17 @@ clap = { version = "4.6.7", default-features = false, features = ["std", "help",
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 rusqlite = { version = "0.40.2", default-features = false, features = ["libsqlite3-sys", "bundled", "limits", "fallible_uint", "hooks", "functions", "vtab"] }
-blake3 = { version = "1.8", default-features = false, features = ["std", "pure"] }
+blake3 = { version = "1.8", default-features = false, features = ["std"] }
+zstd = { version = "=0.14.3", default-features = false }
+memchr = "=2.8.3"
+crossbeam-channel = "=0.5.17"
+fastcdc = { version = "=5.0.0", default-features = false }
+tempfile = "=3.27.0"
 ignore = "0.4.33"
 globset = "0.4"
 config = { version = "0.15.27", default-features = false, features = ["toml"] }
 notify = "=8.2.0"
-nix = { version = "=0.31.3", default-features = false, features = ["signal", "poll"] }
+nix = { version = "=0.31.3", default-features = false, features = ["signal", "poll", "fs"] }
 tree-sitter = "=0.27.1"
 tree-sitter-python = "=0.25.0"
 tree-sitter-javascript = "=0.25.0"

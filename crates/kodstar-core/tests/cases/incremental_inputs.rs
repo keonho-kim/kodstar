@@ -78,6 +78,7 @@ fn snapshot_normalization_preserves_lookup_meaning_across_file_id_allocation() -
     let before = normalized_index(&first)?;
     let database =
         rusqlite::Connection::open(std::path::Path::new(&first.cache).join("index.sqlite"))?;
+    postings::register(&database)?;
     database.execute_batch(
         "BEGIN; PRAGMA defer_foreign_keys=ON;
         UPDATE files SET id=id+1000;
@@ -113,6 +114,7 @@ fn doctor_checks_fact_ownership_inside_compressed_lookup_blocks() -> TestResult 
     let initial = p.build(false)?;
     let database =
         rusqlite::Connection::open(std::path::Path::new(&initial.cache).join("index.sqlite"))?;
+    postings::register(&database)?;
     // A valid integer block referring to an absent fact bypasses ordinary SQLite foreign keys.
     let payload = [254u8, 255, 255, 255, 255, 255, 255, 255, 255, 1];
     database.execute("UPDATE lookup_blocks SET count=1,payload=?1 WHERE (key_id,file_id,part)=(SELECT key_id,file_id,part FROM lookup_blocks LIMIT 1)",[payload.as_slice()])?;

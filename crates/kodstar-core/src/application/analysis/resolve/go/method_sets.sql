@@ -4,25 +4,25 @@
 -- Related: crates/kodstar-core/src/application/analysis/resolve/go/interfaces.rs.
 
 CREATE TEMP TABLE IF NOT EXISTS go_ancestors(root INTEGER,id INTEGER,depth INTEGER,PRIMARY KEY(root,id,depth));
-CREATE TEMP TABLE IF NOT EXISTS go_methods(root INTEGER,name TEXT,id INTEGER,arity TEXT,depth INTEGER,PRIMARY KEY(root,id));
-CREATE TEMP TABLE IF NOT EXISTS go_conflicts(root INTEGER,name TEXT,PRIMARY KEY(root,name));
+CREATE TEMP TABLE IF NOT EXISTS go_methods(root INTEGER,name INTEGER,id INTEGER,arity INTEGER,depth INTEGER,PRIMARY KEY(root,id));
+CREATE TEMP TABLE IF NOT EXISTS go_conflicts(root INTEGER,name INTEGER,PRIMARY KEY(root,name));
 DELETE FROM go_ancestors;
 DELETE FROM go_methods;
 DELETE FROM go_conflicts;
 
 WITH RECURSIVE ancestors(root,id,depth) AS (
- SELECT id,id,0 FROM symbols WHERE language='go' AND kind IN ('struct','interface','type')
+ SELECT id,id,0 FROM symbols WHERE language_id=(SELECT id FROM atoms WHERE value='go') AND kind_id IN (SELECT id FROM atoms WHERE value IN ('struct','interface','type'))
  UNION
  SELECT a.root,r.target_id,a.depth+1 FROM ancestors a
  JOIN relationships r ON r.source_id=a.id
  JOIN facts f ON f.id=r.fact_id
- WHERE r.resolution='resolved' AND f.relation='mixes_in' AND a.depth<32
+ WHERE r.resolution='resolved' AND f.relation_id=(SELECT id FROM atoms WHERE value='mixes_in') AND a.depth<32
 ) INSERT INTO go_ancestors SELECT * FROM ancestors;
 
 INSERT INTO go_methods
- SELECT a.root,m.name,m.id,b.module_name,MIN(a.depth) FROM go_ancestors a
- JOIN symbols m ON m.owner_id=a.id AND m.kind IN ('method','function')
- JOIN bindings b ON b.file_id=m.file_id AND b.target_local=m.local_id AND b.kind='go_signature'
+ SELECT a.root,m.name_id,m.id,b.module_name_id,MIN(a.depth) FROM go_ancestors a
+ JOIN symbols m ON m.owner_id=a.id AND m.kind_id IN (SELECT id FROM atoms WHERE value IN ('method','function'))
+ JOIN bindings b ON b.file_id=m.file_id AND b.target_local=m.local_id AND b.kind_id=(SELECT id FROM atoms WHERE value='go_signature')
  GROUP BY a.root,m.id;
 
 INSERT INTO go_conflicts

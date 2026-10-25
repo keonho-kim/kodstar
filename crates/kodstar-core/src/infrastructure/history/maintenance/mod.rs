@@ -9,7 +9,9 @@ use crate::domain::{
 };
 use rusqlite::Connection;
 
+mod compressed;
 mod legacy;
+mod prior_encoding;
 mod repack;
 #[cfg(test)]
 mod tests;
@@ -19,7 +21,11 @@ pub(super) fn run(connection: &Connection, cancel: &Cancellation) -> Result<()> 
     super::content::chunks::register(connection)?;
     crate::infrastructure::index::observe_cancellation(connection, cancel)?;
     let transaction = connection.unchecked_transaction()?;
-    let outcome = legacy::convert(&transaction, cancel);
+    let outcome = match known_schema(&transaction)? {
+        4 => compressed::convert(&transaction, cancel),
+        1..=3 => legacy::convert(&transaction, cancel),
+        _ => Err(Error::operation("history is already in the current format")),
+    };
     crate::infrastructure::index::stop_observing(&transaction)?;
     if let Err(error) = outcome {
         transaction.finish()?;
@@ -36,7 +42,10 @@ pub(super) fn repack(connection: &Connection, cancel: &Cancellation) -> Result<(
     repack::run(connection, cancel).map_err(|cause| {
         let kind = cause.kind;
         let mut error = Error::caused_by(
-            "history format is 4; repacking did not finish; retry kodstar history upgrade",
+            format!(
+                "history format is {}; repacking did not finish; retry kodstar history upgrade",
+                super::VERSION
+            ),
             cause,
         );
         error.kind = kind;
@@ -53,7 +62,10 @@ pub(super) fn compact(connection: &Connection, cancel: &Cancellation) -> Result<
         let cause = Error::from(e);
         let kind = cause.kind;
         let mut error = Error::caused_by(
-            "history format is 4; compaction did not finish; retry kodstar history upgrade",
+            format!(
+                "history format is {}; compaction did not finish; retry kodstar history upgrade",
+                super::VERSION
+            ),
             cause,
         );
         error.kind = kind;
@@ -64,7 +76,7 @@ pub(super) fn compact(connection: &Connection, cancel: &Cancellation) -> Result<
 
 fn known_schema(connection: &Connection) -> Result<u32> {
     let version: u32 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if !(1..=4).contains(&version) {
+    if !(1..=super::VERSION).contains(&version) {
         return Err(Error::operation("unsupported legacy history format"));
     }
     let mut statement =
@@ -98,7 +110,7 @@ fn known_schema(connection: &Connection) -> Result<u32> {
             ));
         }
     }
-    if version == 4 {
+    if version >= 4 {
         columns(
             connection,
             "chunk_data",

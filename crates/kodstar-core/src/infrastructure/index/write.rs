@@ -29,13 +29,12 @@ impl FileRecord {
             + self.package.capacity()
             + self.content_hash.capacity()
     }
-    pub(crate) fn refresh_metadata(&self, connection: &Connection, generation: i64) -> Result<()> {
+    pub(crate) fn refresh_metadata(&self, connection: &Connection) -> Result<()> {
         connection.execute(
-            "UPDATE files SET content_hash=?1,size=?2,seen_generation=?3 WHERE path=?4",
+            "UPDATE files_rows SET content_hash=?1,size=?2 WHERE path=?3",
             params![
                 &super::hash_bytes(&self.content_hash)?[..],
                 self.size,
-                generation,
                 path_bytes(&self.path)
             ],
         )?;
@@ -45,10 +44,9 @@ impl FileRecord {
     pub(crate) fn refresh_unchanged(
         &self,
         connection: &Connection,
-        generation: i64,
         span: SourceSpan,
     ) -> Result<()> {
-        self.refresh_metadata(connection, generation)?;
+        self.refresh_metadata(connection)?;
         let id: i64 = connection.query_row(
             "SELECT id FROM files WHERE path=?1",
             [path_bytes(&self.path)],
@@ -58,19 +56,14 @@ impl FileRecord {
             "UPDATE scopes SET start_byte=?1,end_byte=?2 WHERE file_id=?3 AND local_id=0",
             params![span.start_byte, span.end_byte, id],
         )?;
-        connection.execute("UPDATE symbols SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND local_id=0",
+        connection.execute("UPDATE symbols_rows SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND local_id=0",
             params![span.start_byte,span.end_byte,span.line,span.column,span.end_line,span.end_column,id])?;
         Ok(())
     }
 
-    pub(crate) fn persist(
-        &self,
-        connection: &super::cached::Sql<'_>,
-        generation: i64,
-    ) -> Result<i64> {
-        connection.cached_execute("INSERT INTO files(path,display_path,language,module,package,content_hash,size,seen_generation,status,path_module,path_package) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?4,?5) ON CONFLICT(path) DO UPDATE SET display_path=excluded.display_path,language=excluded.language,module=excluded.module,path_module=excluded.path_module,path_package=excluded.path_package,package=excluded.package,content_hash=excluded.content_hash,size=excluded.size,seen_generation=excluded.seen_generation,status=excluded.status",
-            params![path_bytes(&self.path), self.path.to_string_lossy(), self.language, self.module, self.package, &super::hash_bytes(&self.content_hash)?[..],
-                self.size, generation, self.status])?;
+    pub(crate) fn persist(&self, connection: &super::cached::Sql<'_>) -> Result<i64> {
+        connection.cached_execute("INSERT INTO files(path,language,module,package,content_hash,size,status,path_module,path_package) VALUES(?1,?2,?3,?4,?5,?6,?7,?3,?4)",
+            params![path_bytes(&self.path), self.language, self.module, self.package, &super::hash_bytes(&self.content_hash)?[..], self.size, self.status])?;
         Ok(connection.cached_row(
             "SELECT id FROM files WHERE path=?1",
             [path_bytes(&self.path)],
@@ -80,7 +73,7 @@ impl FileRecord {
 }
 
 pub(crate) fn clear_file(connection: &super::cached::Sql<'_>, id: i64) -> Result<()> {
-    connection.cached_execute("DELETE FROM lookup_blocks WHERE file_id=?1", [id])?;
+    connection.cached_execute("DELETE FROM lookup_rows WHERE file_id=?1", [id])?;
     connection.cached_execute("DELETE FROM relation_blocks WHERE file_id=?1", [id])?;
     connection.cached_execute(
         "UPDATE files SET module=path_module,declared_module='',facts_hash=X'',environment_hash=X'' WHERE id=?1",
@@ -97,6 +90,7 @@ pub(crate) fn clear_file(connection: &super::cached::Sql<'_>, id: i64) -> Result
     if !scoped {
         return Ok(());
     }
+    super::relations::remove_targets(connection, Some(id))?;
     connection.cached_execute("DELETE FROM facts WHERE file_id=?1", [id])?;
     connection.cached_execute("DELETE FROM bindings WHERE file_id=?1", [id])?;
     connection.cached_execute("DELETE FROM symbols WHERE file_id=?1", [id])?;

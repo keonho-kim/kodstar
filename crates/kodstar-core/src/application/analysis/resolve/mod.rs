@@ -11,6 +11,7 @@ mod cxx;
 mod dispatch;
 mod ejs;
 mod external_scopes;
+mod fact_batch;
 mod facts;
 mod field_types;
 mod go;
@@ -109,16 +110,20 @@ pub(crate) fn run(
         identities::rebuild(connection)?;
     }
     connection.execute_batch(include_str!("lisp/packages.sql"))?;
-    let merged: bool = connection.cached_row(
-        "SELECT EXISTS(SELECT 1 FROM symbol_identities WHERE symbol_id<>canonical_id)",
-        [],
-        |r| r.get(0),
-    )?;
+    let merged: bool =
+        connection.cached_row("SELECT EXISTS(SELECT 1 FROM symbol_aliases)", [], |r| {
+            r.get(0)
+        })?;
+
     facts::run(connection, cancel, &prepared, merged, !all)?;
+
     publication::flush(connection)?;
+
     if all {
         crate::application::analysis::resolve::go::interfaces::run(connection, cancel)?;
+
         dispatch::run(connection, cancel)?;
+
         crate::application::analysis::resolve::go::interfaces::dispatch(connection, cancel, false)?;
     } else {
         crate::application::analysis::resolve::go::interfaces::refresh_calls(connection, cancel)?;
@@ -127,6 +132,7 @@ pub(crate) fn run(
         identities::relationships(connection)?;
     }
     connection.execute_batch("DELETE FROM relation_texts WHERE NOT EXISTS(SELECT 1 FROM relation_routes r WHERE r.kind=6 AND r.entity=relation_texts.id);")?;
+
     Ok(())
 }
 

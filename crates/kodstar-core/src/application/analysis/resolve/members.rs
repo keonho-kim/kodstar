@@ -69,10 +69,10 @@ impl Lookup<'_, '_> {
         self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_members
             SELECT m.id FROM resolution_candidates c CROSS JOIN symbols t ON t.id=c.id
-            CROSS JOIN symbols m ON m.qualified_name=t.qualified_name||'::'||?1
+            CROSS JOIN symbols m ON m.qualified_name_id=(SELECT id FROM atoms WHERE value=t.qualified_name||'::'||?1)
             JOIN files mf ON mf.id=m.file_id JOIN files tf ON tf.id=t.file_id
-            WHERE mf.language=tf.language AND mf.module=tf.module
-            AND mf.package=tf.package AND t.kind<>'file' AND t.language<>'scala'",
+            WHERE mf.language_id=tf.language_id AND mf.module_id=tf.module_id
+            AND mf.package_id=tf.package_id AND t.kind<>'file' AND t.language<>'scala'",
             [member],
         )?;
         self.connection.execute_batch("DELETE FROM resolution_candidates; INSERT INTO resolution_candidates SELECT id FROM resolution_members;")?;

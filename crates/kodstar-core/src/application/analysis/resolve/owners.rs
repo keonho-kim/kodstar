@@ -17,7 +17,7 @@ pub(super) fn run<'conn>(
 ) -> Result<()> {
     // Owners are derived state: remove stale cross-file owners before resolving changed imports.
     connection.cached_execute("UPDATE symbols SET owner_id=(SELECT id FROM symbols f WHERE f.file_id=symbols.file_id AND f.local_id=0) WHERE EXISTS(SELECT 1 FROM bindings b WHERE b.kind='owner_hint' AND b.file_id=symbols.file_id AND b.target_local=symbols.local_id)", [])?;
-    connection.cached_execute("UPDATE symbols SET kind='function' WHERE language='cpp' AND EXISTS(SELECT 1 FROM bindings b WHERE b.kind='owner_hint' AND b.file_id=symbols.file_id AND b.target_local=symbols.local_id)",[])?;
+    connection.cached_execute("UPDATE symbols SET resolved_kind=NULLIF('function',syntax_kind) WHERE language='cpp' AND EXISTS(SELECT 1 FROM bindings b WHERE b.kind='owner_hint' AND b.file_id=symbols.file_id AND b.target_local=symbols.local_id)",[])?;
     let mut hints = connection.cached_prepare(
         "SELECT b.file_id,b.scope_id,b.imported_name,m.id,b.start_byte
          FROM bindings b JOIN symbols m ON m.file_id=b.file_id AND m.local_id=b.target_local
@@ -73,16 +73,16 @@ pub(super) fn run<'conn>(
             params![owner, method],
         )?;
         if context.language == crate::domain::languages::Language::Cpp {
-            connection.cached_execute("UPDATE symbols SET kind=CASE WHEN (SELECT kind FROM symbols WHERE id=?1) IN ('class','struct','enum','type') THEN 'method' ELSE 'function' END WHERE id=?2",params![owner,method])?;
+            connection.cached_execute("UPDATE symbols SET resolved_kind=NULLIF(CASE WHEN (SELECT kind FROM symbols WHERE id=?1) IN ('class','struct','enum','type') THEN 'method' ELSE 'function' END,syntax_kind) WHERE id=?2",params![owner,method])?;
             if let Some(owner) = owner {
-                connection.cached_execute("UPDATE symbols SET qualified_name=(SELECT qualified_name FROM symbols WHERE id=?1)||'::'||name WHERE id=?2",params![owner,method])?;
+                connection.cached_execute("UPDATE symbols SET resolved_qualified_name=NULLIF((SELECT qualified_name FROM symbols WHERE id=?1)||'::'||name,syntax_qualified_name) WHERE id=?2",params![owner,method])?;
                 connection.cached_execute("UPDATE bindings SET type_name=(SELECT qualified_name FROM symbols WHERE id=?1) WHERE file_id=?2 AND scope_id=(SELECT local_id FROM symbols WHERE id=?3) AND name='this' AND kind='parameter'",params![owner,file,method])?;
             }
         }
         if matches!(context.language, Language::Ruby | Language::Pascal)
             && let Some(owner) = owner
         {
-            connection.cached_execute("UPDATE symbols SET kind=CASE WHEN syntax_kind='constructor' THEN 'constructor' ELSE 'method' END,qualified_name=(SELECT qualified_name FROM symbols WHERE id=?1)||'::'||name WHERE id=?2",params![owner,method])?;
+            connection.cached_execute("UPDATE symbols SET resolved_kind=NULLIF(CASE WHEN syntax_kind='constructor' THEN 'constructor' ELSE 'method' END,syntax_kind),resolved_qualified_name=NULLIF((SELECT qualified_name FROM symbols WHERE id=?1)||'::'||name,syntax_qualified_name) WHERE id=?2",params![owner,method])?;
             connection.cached_execute("UPDATE bindings SET type_name=(SELECT qualified_name FROM symbols WHERE id=?1) WHERE file_id=?2 AND scope_id=(SELECT local_id FROM symbols WHERE id=?3) AND lower(name)='self' AND kind='parameter'",params![owner,file,method])?;
         }
     }

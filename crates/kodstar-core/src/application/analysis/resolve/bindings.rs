@@ -51,16 +51,19 @@ impl Lookup<'_, '_> {
                 };
                 scope = target;
             }
-            let binding = self.prepared.binding(params![
-                context.id,
-                scope,
-                key,
-                position,
-                context.language.as_str(),
-                self.namespace.as_str(),
-                key.trim_end_matches('!'),
-                ruby_method
-            ])?;
+            let binding = self.prepared.binding(
+                params![
+                    context.id,
+                    scope,
+                    key,
+                    position,
+                    context.language.as_str(),
+                    self.namespace.as_str(),
+                    key.trim_end_matches('!'),
+                    ruby_method
+                ],
+                context.language != Language::Php && self.namespace.as_str() != "macro",
+            )?;
             self.dependency(
                 &format!("scope:{}", self.namespace.as_str()),
                 &format!("{}:{scope}:{key}", context.id),

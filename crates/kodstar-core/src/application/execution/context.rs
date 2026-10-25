@@ -9,6 +9,7 @@ use super::super::{
     maintenance,
     workspace::{self, ProjectOptions, SelectedProject, Selection},
 };
+use super::state::{InputState, Intent};
 use crate::application::history::capture;
 use crate::domain::{
     cancellation::Cancellation,
@@ -20,7 +21,6 @@ use crate::infrastructure::{
     cache::{CacheStore, ProjectCache, now_seconds},
     history::{Repository, checkpoints},
     index,
-    watch::Changes,
 };
 use rusqlite::Connection;
 use std::time::Instant;
@@ -40,25 +40,21 @@ pub(crate) struct ProjectContext {
     // Connections and observers close before the project lease is released.
     pub connection: Connection,
     pub database: std::path::PathBuf,
-    pub changes: Option<Changes>,
+    pub(super) input: InputState,
     pub repository: Repository,
     pub cache: ProjectCache,
     pub selected: SelectedProject,
     pub report: Option<InitReport>,
     pub maintenance: Option<MaintenanceReport>,
     pub refresh: Refresh,
-    pub revision: bool,
-    pub watching: bool,
 }
 
 pub(crate) struct Context<'a> {
     pub store: &'a CacheStore,
     pub options: &'a ProjectOptions,
     pub project: Option<ProjectContext>,
-    full: bool,
-    initialize: bool,
+    intent: Intent,
     started: Instant,
-    diagnostic: bool,
     // The process lease outlives project observers, connections and repository locks.
     _installation: Option<crate::infrastructure::cache::locks::FileLock>,
 }
@@ -96,10 +92,14 @@ impl<'a> Context<'a> {
             store,
             options,
             project: None,
-            full,
-            initialize,
+            intent: if initialize {
+                Intent::Initialize { full }
+            } else if matches!(plan, Plan::Diagnostics(_)) {
+                Intent::Diagnostics
+            } else {
+                Intent::Regular
+            },
             started,
-            diagnostic: matches!(plan, Plan::Diagnostics(_)),
         };
         if matches!(plan, Plan::Detached) {
             return Ok(context);
@@ -132,7 +132,7 @@ impl<'a> Context<'a> {
     ) -> Result<()> {
         let result = self.synchronize_inner(cancel, progress);
         if let Some(project) = &mut self.project
-            && project.watching
+            && project.input.watching()
         {
             project.repository.release();
         }
@@ -148,8 +148,8 @@ impl<'a> Context<'a> {
             return Ok(());
         };
         project.repository.acquire(cancel)?;
-        if self.initialize || project.refresh != Refresh::None {
-            if !project.revision {
+        if self.intent.initializes() || project.refresh != Refresh::None {
+            if !project.input.historical() {
                 let mut state = capture::run(
                     &mut project.repository,
                     &self.store.home,
@@ -176,7 +176,7 @@ impl<'a> Context<'a> {
                 &mut project.connection,
                 InitOptions {
                     path: None,
-                    full: self.full,
+                    full: self.intent.full(),
                     verify: project.refresh == Refresh::Verify,
                 },
                 cancel,
@@ -184,7 +184,7 @@ impl<'a> Context<'a> {
             );
             let report = match outcome {
                 Ok(report) => report,
-                Err(error) if self.diagnostic => {
+                Err(error) if self.intent.diagnostic() => {
                     if let Some(state) = &mut project.selected.history {
                         state.analysis_error = Some(error.to_string());
                         state.analysis_checkpoint = project.connection.query_row(
@@ -201,7 +201,7 @@ impl<'a> Context<'a> {
             project.maintenance = report.maintenance.clone();
             project.report = Some(report);
         } else {
-            let mut state = if project.revision {
+            let mut state = if project.input.historical() {
                 project
                     .selected
                     .history
@@ -222,8 +222,7 @@ impl<'a> Context<'a> {
                 maintenance::run(self.store, &project.selected, now_seconds()?, cancel)?;
         }
         project.cache.touch()?;
-        self.initialize = false;
-        self.full = false;
+        self.intent.synchronized();
         self.started = Instant::now();
         Ok(())
     }

@@ -7,6 +7,7 @@
 
 mod kotlin;
 pub(crate) mod lisp;
+pub(crate) mod lookup_keys;
 pub(crate) mod namespaces;
 pub(crate) mod path_patterns;
 

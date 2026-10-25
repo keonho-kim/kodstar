@@ -66,11 +66,27 @@ def edges(payload, count, owner):
     return json.dumps(rows, ensure_ascii=False)
 
 
+def routes(payload):
+    source, at, rows = Input(payload), 0, []
+    while at < 128:
+        count, block = source.number(), source.number()
+        if count < 1 or at + count > 128 or block > 2**63 - 1:
+            raise ValueError("invalid dictionary route run")
+        if block:
+            rows.extend([slot, block] for slot in range(at, at + count))
+        at += count
+    source.finish()
+    return rows
+
+
 def register(database):
     if not database.execute("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='dictionary_blocks')").fetchone()[0]:
         return
     database.create_function("reference_keys", 2, keys, deterministic=True)
     database.create_function("reference_edges", 3, edges, deterministic=True)
+    database.create_function("kodstar_routes", 1, lambda payload: json.dumps(routes(payload)), deterministic=True)
+    database.create_function("kodstar_route_at", 2,
+                             lambda payload, slot: dict(routes(payload)).get(slot, 0), deterministic=True)
     # These are benchmark-only disk tables: avoid a quadratic logical-view join.
     database.execute("PRAGMA temp_store=FILE")
     database.executescript("""

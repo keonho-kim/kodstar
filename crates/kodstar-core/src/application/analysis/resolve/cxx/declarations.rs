@@ -40,6 +40,6 @@ pub(in crate::application::analysis::resolve) fn run(
             params![id, hash.finalize().to_hex().to_string(), definition],
         )?;
     }
-    c.cached_execute("UPDATE symbols SET logical_key=(SELECT identity FROM cxx_identities WHERE id=symbols.id) WHERE id IN (SELECT id FROM cxx_identities WHERE identity IN (SELECT identity FROM cxx_identities GROUP BY identity HAVING SUM(definition)<2))",[])?;
+    c.cached_execute("UPDATE symbols SET resolved_key=NULLIF((SELECT identity FROM cxx_identities WHERE id=symbols.id),syntax_key) WHERE id IN (SELECT id FROM cxx_identities WHERE identity IN (SELECT identity FROM cxx_identities GROUP BY identity HAVING SUM(definition)<2))",[])?;
     Ok(())
 }

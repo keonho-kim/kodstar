@@ -110,3 +110,132 @@ fn go_definition_changes_revisit_successful_and_failed_lookup_consumers() -> Tes
     }
     Ok(())
 }
+
+#[test]
+fn changed_import_targets_preserve_unrelated_facts_in_the_same_consumer_file() -> TestResult {
+    let p = Project::new()?;
+    p.write("go.mod", "module example.test/root\ngo 1.23\n")?;
+    p.write("api/defs.go", "package api\nfunc First() {}\n")?;
+    p.write("caller.go", "package main\nimport \"example.test/root/api\"\nfunc local() {}\nfunc caller() { local(); api.First(); api.Missing() }\n")?;
+    let initial = p.build(false)?;
+    let db = Connection::open(std::path::Path::new(&initial.cache).join("index.sqlite"))?;
+    packed_mutations::mark(&db, "caller.go")?;
+    postings::register(&db)?;
+    let stable = |db: &Connection| -> rusqlite::Result<i64> {
+        db.query_row(
+            "SELECT r.id FROM relationships r JOIN facts f ON f.id=r.fact_id
+            JOIN files source ON source.id=f.file_id WHERE source.path=CAST('caller.go' AS BLOB)
+            AND f.relation='calls' AND f.expression='local'",
+            [],
+            |r| r.get(0),
+        )
+    };
+    let before = stable(&db)?;
+    drop(db);
+    p.write("api/new.go", "package api\nfunc Missing() {}\n")?;
+    let changed = p.build(false)?;
+    let db = Connection::open(std::path::Path::new(&changed.cache).join("index.sqlite"))?;
+    postings::register(&db)?;
+    assert_eq!(stable(&db)?, before);
+    drop(db);
+    let partial = normalized_index(&changed)?;
+    assert_eq!(partial, normalized_index(&p.build(true)?)?);
+    std::fs::remove_file(p.root.join("api/new.go"))?;
+    let changed = p.build(false)?;
+    assert_eq!(
+        normalized_index(&changed)?,
+        normalized_index(&p.build(true)?)?
+    );
+    Ok(())
+}
+
+#[test]
+fn empty_provider_packages_are_invalidated_through_modules_workspaces_and_replacements()
+-> TestResult {
+    for mapping in ["module", "workspace", "replacement"] {
+        let p = Project::new()?;
+        let (caller, definition) = match mapping {
+            "workspace" => {
+                p.write("go.work", "go 1.23\nuse (\n./app\n./lib\n)\n")?;
+                p.write("app/go.mod", "module example.test/app\ngo 1.23\n")?;
+                p.write("lib/go.mod", "module example.test/lib\ngo 1.23\n")?;
+                ("app/caller.go", "lib/api/defs.go")
+            }
+            "replacement" => {
+                p.write("go.mod", "module example.test/app\ngo 1.23\nrequire example.test/lib v1.0.0\nreplace example.test/lib => ./local\n")?;
+                p.write("local/go.mod", "module example.test/lib\ngo 1.23\n")?;
+                ("caller.go", "local/api/defs.go")
+            }
+            _ => {
+                p.write("go.mod", "module example.test/lib\ngo 1.23\n")?;
+                ("caller.go", "api/defs.go")
+            }
+        };
+        p.write(
+            caller,
+            "package main\nimport \"example.test/lib/api\"\nfunc caller() { api.Future() }\n",
+        )?;
+        let initial = p.build(false)?;
+        let db = Connection::open(std::path::Path::new(&initial.cache).join("index.sqlite"))?;
+        postings::register(&db)?;
+        let missing: usize = db.query_row(
+            "SELECT count(*) FROM lookup_dependencies WHERE kind='go_package' AND found=0",
+            [],
+            |r| r.get(0),
+        )?;
+        assert!(missing > 0, "missing provider was not recorded: {mapping}");
+        drop(db);
+        p.write(definition, "package api\nfunc Future() {}\n")?;
+        let changed = p.build(false)?;
+        assert_eq!(
+            normalized_index(&changed)?,
+            normalized_index(&p.build(true)?)?,
+            "{mapping}: added"
+        );
+        let rows = p.query(Query::Deps {
+            selector: selector(caller, "caller"),
+        })?;
+        assert!(
+            relationships(&rows)
+                .iter()
+                .any(|r| r.target.as_ref().is_some_and(|s| s.name == "Future")),
+            "{mapping}: unresolved new target"
+        );
+        std::fs::remove_file(p.root.join(definition))?;
+        let changed = p.build(false)?;
+        assert_eq!(
+            normalized_index(&changed)?,
+            normalized_index(&p.build(true)?)?,
+            "{mapping}: deleted"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn large_changed_files_fall_back_without_losing_or_duplicating_facts() -> TestResult {
+    let p = Project::new()?;
+    p.write("go.mod", "module example.test/api\ngo 1.23\n")?;
+    let source = format!(
+        "package api\nfunc Alpha() {{}}\nfunc Beta() {{}}\nfunc caller() {{ {} }}\n",
+        "Alpha();".repeat(300)
+    );
+    p.write("api.go", &source)?;
+    p.build(false)?;
+    p.write("api.go", &source.replace("Alpha();", "Beta();"))?;
+    let changed = p.build(false)?;
+    assert_eq!(
+        normalized_index(&changed)?,
+        normalized_index(&p.build(true)?)?
+    );
+    let rows = p.query(Query::Deps {
+        selector: selector("api.go", "caller"),
+    })?;
+    let count: u64 = relationships(&rows)
+        .iter()
+        .filter(|r| r.target.as_ref().is_some_and(|s| s.name == "Beta"))
+        .map(|r| r.count)
+        .sum();
+    assert_eq!(count, 300);
+    Ok(())
+}

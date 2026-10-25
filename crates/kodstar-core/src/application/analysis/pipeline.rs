@@ -13,10 +13,11 @@ use crate::domain::diagnostics::{Error, Result};
 use crate::domain::results::Progress;
 use crate::infrastructure::cache::paths::path_bytes;
 use crate::infrastructure::index::{self};
+use crossbeam_channel as channel;
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -25,7 +26,6 @@ pub(super) struct Input<'a> {
     pub(super) selected: &'a SelectedProject,
     pub(super) full: bool,
     pub(super) verify: bool,
-    pub(super) generation: i64,
 }
 
 pub(super) fn run(
@@ -39,13 +39,12 @@ pub(super) fn run(
         selected,
         full,
         verify,
-        generation,
     } = input;
     let connection = &index::cached::Sql::new(connection)?;
+    let mut reuse = super::incremental::ReusePolicy::default();
     let internal = Cancellation::default();
-    let (events_tx, events_rx) = mpsc::sync_channel(selected.settings.jobs * 4);
-    let (work_tx, work_rx) = mpsc::sync_channel::<Work>(selected.settings.jobs);
-    let receiver = Arc::new(Mutex::new(work_rx));
+    let (events_tx, events_rx) = channel::bounded(selected.settings.jobs * 4);
+    let (work_tx, work_rx) = channel::bounded::<Work>(selected.settings.jobs);
     let inputs = ByteBudget::new(
         selected
             .settings
@@ -85,13 +84,14 @@ pub(super) fn run(
             }
         });
         for _ in 0..selected.settings.jobs {
-            let receiver = Arc::clone(&receiver);
+            let receiver = work_rx.clone();
             let events = events.clone();
             let fact_limit = selected.settings.fact_batch_bytes;
             scope.spawn(move || {
                 super::workers::run(receiver, events, fact_limit);
             });
         }
+        drop(work_rx);
         drop(events);
         let mut writer = None;
         let mut files = HashMap::new();
@@ -110,8 +110,8 @@ pub(super) fn run(
             }
             let message = match messages.receiver.recv_timeout(Duration::from_millis(25)) {
                 Ok(message) => message,
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(channel::RecvTimeoutError::Timeout) => continue,
+                Err(channel::RecvTimeoutError::Disconnected) => break,
             };
             let result: Result<()> = (|| {
                 if failure.is_some() {
@@ -121,7 +121,7 @@ pub(super) fn run(
                     Event::Begin { record, preserve } => {
                         let preserve = preserve
                             && resolution != Resolution::All
-                            && super::incremental::reusable_bodies(connection, &record)?;
+                            && reuse.bodies(connection, &record.language)?;
                         connection.execute(
                             "INSERT OR IGNORE INTO seen_files VALUES(?1)",
                             [path_bytes(&record.path)],
@@ -129,24 +129,30 @@ pub(super) fn run(
                         let scoped = !full
                             && !preserve
                             && resolution != Resolution::All
+                            && reuse.declarations(connection, &record.language)?
                             && super::incremental::scoped_declarations(connection, &record)?;
                         let id = if preserve {
-                            record.refresh_metadata(connection, generation)?;
+                            record.refresh_metadata(connection)?;
                             let id: i64 = connection.query_row(
                                 "SELECT id FROM files WHERE path=?1",
                                 [path_bytes(&record.path)],
                                 |r| r.get(0),
                             )?;
+                            index::statistics::delta::remember_file(connection, id)?;
+                            index::relations::clear_bodies(connection, id)?;
                             connection.execute("DELETE FROM facts WHERE file_id=?1
                                 AND NOT (language='go' AND relation='implements' AND expression LIKE '@go-interface:%')", [id])?;
                             id
                         } else {
-                            let id = record.persist(connection, generation)?;
+                            let id = record.persist(connection)?;
+                            if scoped {
+                                index::statistics::delta::remember_file(connection, id)?;
+                            }
                             index::clear_file(connection, id)?;
                             id
                         };
                         resolution = resolution.max(if preserve || scoped {
-                            Resolution::ChangedFiles
+                            Resolution::Selected
                         } else {
                             Resolution::All
                         });
@@ -173,7 +179,7 @@ pub(super) fn run(
                         let context = files.remove(path.as_ref()).ok_or_else(|| {
                             Error::operation("file completion has no matching extraction")
                         })?;
-                        if resolution == Resolution::ChangedFiles
+                        if resolution == Resolution::Selected
                             && !context.preserves_definitions()
                             && !index::invalidation::package_functions(connection, context.id)?
                         {
@@ -199,7 +205,7 @@ pub(super) fn run(
                             "INSERT OR IGNORE INTO seen_files VALUES(?1)",
                             [path_bytes(&record.path)],
                         )?;
-                        record.refresh_unchanged(connection, generation, span)?;
+                        record.refresh_unchanged(connection, span)?;
                         changed = true;
                         parsed += 1;
                         progress(&Progress {
@@ -214,7 +220,7 @@ pub(super) fn run(
                             [path_bytes(&record.path)],
                         )?;
                         if update {
-                            record.refresh_metadata(connection, generation)?;
+                            record.refresh_metadata(connection)?;
                         }
                         reused += 1;
                     }
@@ -224,11 +230,11 @@ pub(super) fn run(
                             [path_bytes(&record.path)],
                         )?;
                         if index::inert_inputs::unchanged_kind(connection, &record)? {
-                            record.refresh_metadata(connection, generation)?;
+                            record.refresh_metadata(connection)?;
                             changed = true;
                             return Ok(());
                         }
-                        let id = record.persist(connection, generation)?;
+                        let id = record.persist(connection)?;
                         index::clear_file(connection, id)?;
                         connection.execute(
                             "INSERT INTO diagnostics(file_id,code,message) VALUES(?1,?2,?3)",

@@ -11,7 +11,6 @@
   <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/Rust-1.99.1-D6AA33?style=flat-square&amp;logo=rust&amp;logoColor=white&amp;labelColor=161B18" alt="Rust toolchain 1.99.1" /></a>
   <a href="#supported-languages"><img src="https://img.shields.io/badge/platform-macOS%20%2B%20Linux-D6AA33?style=flat-square&amp;labelColor=161B18" alt="macOS and Linux" /></a>
   <a href="#features"><img src="https://img.shields.io/badge/analysis-local-D6AA33?style=flat-square&amp;labelColor=161B18" alt="Local analysis" /></a>
-  <a href="#supported-languages"><img src="https://img.shields.io/badge/status-early%20development-D6AA33?style=flat-square&amp;labelColor=161B18" alt="Early development" /></a>
 </p>
 
 <p align="center">
@@ -50,7 +49,11 @@ cd kodstar
 ./install.sh
 ```
 
-The installer places a dist build at `$HOME/.local/bin/kodstar` and configures your shell's PATH.
+The installer builds the CLI in a temporary directory, installs the executable at `$HOME/.local/bin/kodstar`,
+and prepares `$HOME/.kodstar` with installation metadata. It removes temporary build output when it exits.
+Project history and analysis databases are created when you run `kodstar init`.
+
+The installer also configures your shell's PATH.
 Open a new terminal, or run the PATH command printed by the installer, to use `kodstar` from any directory.
 To update an existing installation, get the latest source and run `./install.sh` again.
 
@@ -59,7 +62,8 @@ To update an existing installation, get the latest source and run `./install.sh`
 
 PATH setup covers sh, Bash, and Zsh. Fish is configured when it is your shell or its configuration file exists.
 Installation is separate from project initialization. To install an existing executable, use
-`./install.sh --binary /absolute/path/to/kodstar`.
+`./install.sh --binary /path/to/kodstar`; relative paths are resolved from your current directory.
+The source checkout, Rust toolchain, and Cargo's shared dependency download cache are managed separately from the installed CLI.
 
 </details>
 
@@ -152,7 +156,7 @@ A `<revision>` is a checkpoint ID or a saved checkpoint name.
 | `kodstar serve --stdio` | Serve structured requests over stdin/stdout for external tools. |
 | `kodstar uninstall` | Remove the installation, managed settings, caches, and all registered project histories after confirmation. |
 | `kodstar --help` | Show the command list and general help. |
-| `kodstar <command> --help` | Show a command's arguments and available options. |
+| `kodstar <command> --help` | Show detailed behavior, arguments, options, and examples; `-h` gives a summary. |
 | `kodstar --version` | Show CLI and engine versions. |
 
 Query commands support `--format text|json|jsonl|tsv`, `--rev <revision>` for saved analysis,
@@ -235,9 +239,9 @@ kod<sup>☆</sup> provides selected static analysis rules for **19 languages** a
 | BEAM·Lisp | Elixir, Erlang, Common Lisp |
 | Components and templates | Vue, Svelte, Astro, EJS, Blade, Razor |
 
-**Full implementation of the specification and porting of Graphify's language and framework rules are still in progress.**
-Run `kodstar languages --format json` for capabilities and limitations by language.
-See [porting verification](docs/development.md#포팅-검증) for evidence and remaining gaps.
+Analysis uses static syntax, explicit bindings, and language-specific resolution rules.
+Run `kodstar languages --format json` for each language's capabilities and limitations,
+and see the [language reference](kodstar-spec.md#3-지원-언어) for supported inputs.
 
 Supported platforms are **macOS and Linux**. **Windows is not supported.**
 
@@ -259,8 +263,9 @@ kodstar doctor
 <details>
 <summary>Upgrade existing history and rebuild the cache</summary>
 
-`kodstar history upgrade` explicitly converts history formats 1, 2, and 3 to format 4.
-For format 4, it repacks stored content and reclaims free pages while preserving checkpoints, source content, names, and branches.
+`kodstar history upgrade` explicitly converts history formats 1–4 to format 5.
+For format 5, it repacks stored content and reclaims free pages while preserving checkpoints, source content, names, and branches.
+History uses Zstd level 1 compression, bounded previous-content dictionaries, and FastCDC chunking for large files.
 If the analysis cache format is incompatible, explicitly clean it and initialize again.
 
 ```bash
@@ -270,7 +275,7 @@ kodstar init .
 ```
 
 See [storage consistency](kodstar-spec.md#16-저장-일관성과-장애-시-동작) for storage formats and recovery behavior,
-and the [development guide](docs/development.md) for measurements and performance tradeoffs.
+and the [development guide](docs/development.md) for build and verification procedures.
 
 </details>
 
@@ -292,13 +297,13 @@ cause uninstall to stop with a diagnostic. If a project has moved, use kod<sup>�
 
 ## Documentation and development
 
-Detailed documentation is currently in Korean.
+Detailed documentation is in Korean.
 
 | Document | Contents |
 |---|---|
 | [Specification](kodstar-spec.md) | Product scope, commands, output, freshness, and stdio contracts |
 | [Architecture](docs/architecture.md) | Layers, source layout, execution flow, and state and resource ownership |
-| [Development guide](docs/development.md) | Setup, builds, configuration, verification, dependencies, and porting evidence |
+| [Development guide](docs/development.md) | Setup, builds, configuration, verification, and dependency management |
 | [Development principles](AGENTS.md) | Design review, code, comments, and change procedures |
 
 The engine lives in [`kodstar-core`](crates/kodstar-core), and the CLI in [`kodstar-cli`](crates/kodstar-cli).
