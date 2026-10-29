@@ -65,6 +65,7 @@ crates/kodstar-core/src/
 │   │   └── history.rs                      # 분석 독립 이력 명령
 │   ├── history/
 │   │   ├── capture.rs                      # 추적 상태 수집·체크포인트 공개
+│   │   ├── capture/catalog.rs              # 수집 수명의 이전 상태·관찰 행 SQL
 │   │   ├── listing.rs                      # 이력·브랜치 순회
 │   │   ├── compare.rs                      # 두 저장 상태 비교
 │   │   ├── text.rs                         # 제한된 텍스트 차이 표시
@@ -80,17 +81,21 @@ crates/kodstar-core/src/
 │   │   ├── batches.rs                      # 바이트 예산 내 fact 전달
 │   │   ├── replay.rs                       # 작은 변경 파일의 제한된 사실 재사용
 │   │   ├── incremental.rs                  # 필요 시 한 번 읽는 환경과 재사용 조건
+│   │   ├── incremental/body_environment.rs # 본문 변경의 전역 파생 상태 안전 조건
 │   │   ├── configurations.rs               # 참조된 설정 분석
 │   │   ├── configuration_input.rs          # 공유 snapshot reader의 설정 사실 추출
 │   │   ├── module_identity.rs              # 보존 manifest의 package·module 식별
 │   │   └── resolve/                        # 언어별 이름·모듈·타입·관계 해석
-│   │       └── fact_batch.rs               # cursor 종료 후 해석하는 제한된 사실 배치
+│   │       ├── fact_batch.rs               # cursor 종료 후 해석하는 제한된 사실 배치
+│   │       ├── preparation.rs              # 존재하는 언어·owner hint의 준비 단계 선택
+│   │       └── modules/candidates.sql      # export 후보의 이름·가시성·소유 범위 선택
 │   ├── query/                              # 선택·관계 조회·디스크 탐색
 │   ├── cache.rs                            # 명시적 캐시 정책
 │   ├── maintenance.rs                      # 자동 GC 정책
 │   └── installation.rs                     # 초기화 대상·설치 lease·데이터 제거 API
 └── infrastructure/
     ├── scan/mod.rs                         # 이력 수집용 디스크 파일·symlink 순회
+    ├── scan/policy.rs                      # 순회·감시의 기본 제외와 명시 패턴
     ├── history/
     │   ├── mod.rs                          # 영구 DB·형식·잠금
     │   ├── schema.sql                      # 내용·이력·작업 catalog·복원 journal
@@ -107,11 +112,14 @@ crates/kodstar-core/src/
     │   │   ├── mod.rs                      # 알려진 schema·전환·VACUUM 경계
     │   │   ├── legacy.rs                   # 형식 1·2·3의 스트리밍 변환
     │   │   ├── compressed.rs               # 형식 4 원문·주소를 보존하는 Zstd 전환
+    │   │   ├── metadata/                   # 경로·해시·이전 상태의 명시적 형식 전환
     │   │   ├── prior_encoding.rs           # 명시적 전환에서만 사용하는 형식 4 decoder
     │   │   ├── repack.rs                   # 제한 후보·독립 기준 재선택·rollback
     │   │   └── verification.rs             # 저장 참조·보존 바이트 확인
     │   ├── inputs/                         # 체크포인트 순회·제한된 분석 입력
     │   ├── checkpoints.rs                  # 시점 선택·파일 구성·이름
+    │   ├── checkpoints/materialize.rs      # 가까운 시점 양방향 적용·먼 시점 재구성
+    │   ├── metadata.sql                    # 공유 경로·정수 속성·이전 파일 상태
     │   ├── checkout/                       # 복원 journal·충돌·파일 공개
     │   │   ├── mod.rs                      # 복원 계획·재개·참조 공개
     │   │   ├── checks.rs                   # 충돌·완료 파일·장치 검사
@@ -132,6 +140,7 @@ crates/kodstar-core/src/
     │   ├── dependencies/                   # 의존성 블록·선택 fact 교체·논리 view·검증
     │   ├── relations/                      # 관계 행·검증·선택 복원·블록 갱신
     │   │   ├── prior.rs                    # 동일한 부분 해석 결과의 ID 재사용·예약
+    │   │   ├── addresses.rs                # 연속 관계 ID 구간의 검색·차이 공개
     │   │   └── merge.rs                    # 기존 source 블록의 빈 자리 병합
     │   ├── packed/                         # SQLite 조건 전달·빌린 값·한 블록 cursor
     │   ├── inert_inputs.rs                 # 이력 전용 입력 변경 판정
@@ -166,7 +175,17 @@ CLI 도움말은 `args.rs`와 `args`의 소유 명령에 정의한다. `-h`는 �
 제약·예시를 표시한다. 공통 옵션은 엔진의 공개 기본값과 관계 목록을 사용하며 설정 파일을 읽지 않는다.
 도움말·버전 파싱은 `Invocation`과 엔진 생성 전에 끝나므로 프로젝트 초기화·동기화를 실행하지 않는다.
 
+검색은 언어별 이름 규칙을 적용하기 전에 정수 이름 ID로 후보를 제한한다. 대표 객체 대응이
+없는 snapshot은 중복 제거 window를 생략하고, SQL 결과 한도는 잘림 판정에 필요한 한 행을
+포함한다. 관계 탐색은 작업이 소유하는 기존 제한 SQL 풀에서 statement를 재사용하며 허용 관계를 다시 연결하지
+않고 방문 순서·경로 선택·한도를 보존한다. SQLite 내부의 반복 JSON 처리는 내장 JSONB를
+사용하고 외부 결과는 기존 JSON 계약을 따른다. 큰 stdio 프레임은 고정 크기 파일 버퍼를 거쳐
+익명 spool에 기록하고 전송 전에 flush·rewind한다.
+
 `parse`의 언어 모듈은 구문 사실을, `analysis/resolve`의 언어 모듈은 이름·모듈·멤버 선택을 담당한다.
+반복 모듈 조회는 공유 문자열의 정수 ID로 언어·package·module 후보를 먼저 제한한다.
+Rust export 이름도 정규화한 이름 ID로 좁힌 뒤 기존 namespace·가시성·소유 범위 조건을 적용한다.
+추가 영구 인덱스나 전체 후보를 보유하는 메모리 cache 없이 기존 검색 경로를 사용한다.
 공통 AST 순회·parser 수명·사실 예산은 `parse`가 관리한다. 혼합 입력의 masking과 원본 위치 환산은
 `formats/components`, 행 기반 보조 입력의 위치 계산은 `formats/auxiliary/lines.rs`가 담당한다.
 언어별 제공 기능과 한계는 `kodstar languages`와 [지원 언어](../kodstar-spec.md#3-지원-언어)에서 확인한다.
@@ -197,6 +216,9 @@ CLI가 text·JSON·JSONL·TSV를 표시하며 엔진은 터미널·전송 형식
 ### 체크포인트 수집
 
 `history/capture`가 디스크를 순회하고 임시 `observed` 목록과 `working` catalog를 대조한다.
+이전 상태 조회와 관찰 행 기록은 수집 작업이 소유한 statement를 재사용한다. 순회·감시는 같은
+기본 제외와 명시 패턴을 사용한다. 감시는 확실히 제외된 경로의 이벤트를 버리며 경로가 없는
+이벤트·overflow·오류에서는 재스캔한다. 일반 명령과 주기적 전체 확인은 그대로 수행한다.
 원문은 고정 버퍼로 해시하고 같은 내용의 blob이 있으면 재사용한다. 새 내용만 되감아 청크로
 저장하며 두 번 읽은 크기·해시가 다르면 수집 transaction을 취소한다. 불완전 스캔을 삭제로
 처리하지 않고 변경 없는 catalog 행도 다시 쓰지 않는다.
@@ -232,6 +254,10 @@ repository·checkpoint·설정·추출·관계 버전이 정상 분석과 같으
 | Go package 함수 추가·삭제·rename | Go 사실만 있는 프로젝트의 안전 조건을 만족하면 lookup·대상 참조의 소비 사실 재해석 |
 | 타입·method set·manifest·설정·확인하지 못한 경계 | 전체 해석 |
 
+언어 공통 본문 재사용은 추출 환경 fingerprint가 같고, 상속·구현·mixin·dispatch·override,
+대표 객체 병합과 재해석이 필요한 소유자 hint가 없는 프로젝트에 적용한다. 해당 조건을 벗어나면
+기존 언어별 안전 조건 또는 전체 해석을 사용한다. 선언 변경의 부분 무효화 조건과 구분한다.
+
 선언 삭제 전에 `index/invalidation`이 대상 참조와 성공·실패 lookup 소비 fact를 보존한다.
 Go import는 workspace·replace가 선택한 provider의 package/module key를 `go_package`
 의존성으로 기록한다. 파일이 없는 조회도 기록해 새 정의와 동명 후보를 반영한다. 새 정의 저장
@@ -245,6 +271,11 @@ cursor를 닫은 뒤 중첩 lookup·공개를 수행한다. 허용된 큰 사실
 `analysis/replay`는 작은 변경 파일의 사실을 최대 128개·64KiB와 설정 한도 안에서 재사용한다.
 초과하면 해제하고 파일 범위 AST 재사용 경로로 처리한다. 각 worker는 parser 하나를 지연
 초기화한다. 파일 종료·오류에서 원문·트리 참조를 해제한다.
+
+해석 배치는 관계·언어를 기존 enum으로 파싱해 행마다 같은 문자열을 소유하지 않는다. 전역 준비는
+실제 C/C++ 정의·owner hint·Pascal 서명이 있을 때 해당 단계를 실행한다. 대표 객체 계산은
+같은 정체성이 둘 이상인 그룹만 정렬한다. 논리 record 갱신은 바뀐 문자열만 등록하고 모든 필드는
+같은 물리 행 UPDATE에서 공개한다.
 
 부분 공개는 같은 lookup 블록의 나머지 소비자를 보존하고 디스크 staging에서 병합한다.
 `relation_prior`는 삭제할 관계를 보존해 같은 fact·source·target·외부 key·해석 상태·rule·reason에
@@ -299,7 +330,8 @@ run-length 페이지로 보관한다. 추가는 실제 대응과 블록 존재�
 `index/relations`는 파일·source별 최대 128행·64KiB 목표의 블록을 저장한다. ID·fact 차이와
 nullable 정수·해석 상태를 인코딩하며 source는 블록마다 한 번 보관한다. 큰 외부 key 하나는
 값 한도 안에서 별도 처리한다. source·target·fact·설명 텍스트의 검색 경로가 조회·cascade를
-지원한다. `index/packed`의 virtual table은 SQLite 조건을 검색 경로로 전달한다. decoder는 블록
+지원한다. 관계 ID와 블록의 대응은 연속 ID 구간으로 공유하며 구간 중첩을 거절한다. 논리
+`relation_ids`는 개별 ID를 복원하고 실제 정확 조회는 구간의 시작 인덱스를 사용한다. `index/packed`의 virtual table은 SQLite 조건을 검색 경로로 전달한다. decoder는 블록
 전체를 검증하고 선택한 행만 복원한다. 일반 SQLite 도구에서 논리 행을 읽으려면 등록된 SQL
 함수가 필요하며 측정 스크립트는 독립 decoder를 사용한다.
 
@@ -315,6 +347,13 @@ capture의 blob writer·읽기 작업이 context를 재사용하며 32바이트�
 blob·청크는 rowid 테이블에, 순서·시작 offset·정수 청크 참조는 복합 키 테이블에 저장한다.
 reader는 시작 offset을 검색하고 마지막 복원 청크 하나만 보유한다. 원문 주소·크기·개행을
 검증하며 기준과 대상 청크는 각각 최대 64KiB다. 체크포인트 파일 구성은 변경 목록으로 저장한다.
+
+이력 형식 6은 blob 해시를 32바이트로, 반복 경로를 하나의 경로 ID로 보관한다. 변경 행은 권한·
+파일 종류를 정수로 묶고 변경 전 blob·속성을 함께 기록한다. 논리 `entries` view의 경로·권한·
+종류 계약은 유지한다. 현재 구성에서 최대 64개 체크포인트의 변경을 되돌리거나 적용해 가까운
+시점을 재구성하고, 범위를 넘으면 조상 변경의 전체 재구성을 사용한다. 전체 파일 구성의 영구
+복사본을 추가하지 않는다. 명시적 전환은 원래 계보의 조상 여부를 디스크 임시 인덱스로 확인한다.
+해시·경로·이전 상태와 복원 journal을 검증하고 형식·ID를 함께 commit한다.
 
 `history upgrade`는 저장소 잠금 아래 지원 형식의 내용·참조를 검증하고 전환·재압축한다.
 같은 경로·비슷한 크기의 앞선 독립 청크를 최대 8개 비교하며 이미 기준인 청크를 델타로 바꾸지

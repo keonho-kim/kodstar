@@ -121,19 +121,6 @@ pub(crate) fn prepare_partial(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn rust_function_environment(connection: &Connection) -> Result<bool> {
-    Ok(connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM files WHERE language='rust' AND status='analyzed')
-         AND NOT EXISTS(SELECT 1 FROM files WHERE status='analyzed' AND language<>'rust')
-         AND NOT EXISTS(SELECT 1 FROM symbols WHERE kind<>'file'
-             AND (language<>'rust' OR kind NOT IN ('function','module')))
-         AND NOT EXISTS(SELECT 1 FROM bindings b JOIN files f ON f.id=b.file_id
-             WHERE f.language='rust' AND b.kind NOT IN ('function','parameter','import','local','module'))
-         AND NOT EXISTS(SELECT 1 FROM facts WHERE relation IN
-             ('inherits','implements','mixes_in','overrides','dispatch_candidate'))", [], |r| r.get(0),
-    )?)
-}
-
 pub(crate) fn include_dispatch(connection: &Connection) -> Result<()> {
     connection.execute_batch(
         "INSERT OR IGNORE INTO affected_facts

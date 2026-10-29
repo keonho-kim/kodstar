@@ -13,7 +13,7 @@ pub(in crate::infrastructure::index) const SCHEMA: &str =
     CREATE INDEX IF NOT EXISTS temp.relation_prior_fact ON relation_prior(fact_id,source_id);";
 
 pub(super) const INSERT: &str = "INSERT INTO relation_prior VALUES(?1,?2,?3,?4,?5,?6,?7,?8)";
-pub(super) const MAX_ID: &str = "SELECT max(coalesce((SELECT max(id) FROM relation_ids),0),coalesce((SELECT max(id) FROM relation_prior),0))";
+pub(super) const MAX_ID: &str = "SELECT max(coalesce((SELECT last FROM relation_id_ranges ORDER BY first DESC LIMIT 1),0),coalesce((SELECT max(id) FROM relation_prior),0))";
 
 pub(super) struct Prior<'a> {
     consume: Statement<'a>,

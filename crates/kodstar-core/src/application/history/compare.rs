@@ -46,7 +46,7 @@ pub(super) fn run(
     }
     connection.execute_batch("DROP TABLE IF EXISTS temp.diff_before; CREATE TEMP TABLE diff_before AS SELECT * FROM snapshot_files; CREATE UNIQUE INDEX temp.diff_before_path ON diff_before(path);")?;
     checkpoints::materialize(connection, to)?;
-    let mut statement=connection.prepare("SELECT a.path,a.blob,b.blob,x.hash,y.hash,a.kind,b.kind,a.mode,b.mode FROM diff_before a LEFT JOIN snapshot_files b ON a.path=b.path LEFT JOIN blobs x ON x.id=a.blob LEFT JOIN blobs y ON y.id=b.blob WHERE b.path IS NULL OR a.blob<>b.blob OR a.mode<>b.mode OR a.kind<>b.kind UNION ALL SELECT b.path,NULL,b.blob,NULL,y.hash,NULL,b.kind,NULL,b.mode FROM snapshot_files b JOIN blobs y ON y.id=b.blob WHERE NOT EXISTS(SELECT 1 FROM diff_before a WHERE a.path=b.path) ORDER BY 1")?;
+    let mut statement=connection.prepare("SELECT a.path,a.blob,b.blob,CASE WHEN x.hash IS NULL THEN NULL ELSE lower(hex(x.hash)) END,CASE WHEN y.hash IS NULL THEN NULL ELSE lower(hex(y.hash)) END,a.kind,b.kind,a.mode,b.mode FROM diff_before a LEFT JOIN snapshot_files b ON a.path=b.path LEFT JOIN blobs x ON x.id=a.blob LEFT JOIN blobs y ON y.id=b.blob WHERE b.path IS NULL OR a.blob<>b.blob OR a.mode<>b.mode OR a.kind<>b.kind UNION ALL SELECT b.path,NULL,b.blob,NULL,lower(hex(y.hash)),NULL,b.kind,NULL,b.mode FROM snapshot_files b JOIN blobs y ON y.id=b.blob WHERE NOT EXISTS(SELECT 1 FROM diff_before a WHERE a.path=b.path) ORDER BY 1")?;
     let mut rows = statement.query([])?;
     let mut count = 0;
     while let Some(row) = rows.next()? {

@@ -4,6 +4,7 @@
 // Related: crates/kodstar-core/src/application/execution/watch.rs.
 
 use crate::domain::diagnostics::{Error, Result};
+use crate::infrastructure::scan::policy::Policy;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::{
@@ -18,7 +19,7 @@ pub(crate) struct Changes {
 }
 
 impl Changes {
-    pub(crate) fn start(root: &Path, cache_home: &Path) -> Result<Self> {
+    pub(crate) fn start(root: &Path, cache_home: &Path, excludes: &[String]) -> Result<Self> {
         let dirty = Arc::new(AtomicBool::new(false));
         let error = Arc::new(Mutex::new(None));
         // FSEvents requires UTF-8 paths. Metadata polling preserves non-UTF-8 root support.
@@ -32,19 +33,13 @@ impl Changes {
         let cache_home = cache_home
             .canonicalize()
             .map_err(|error| Error::caused_by("resolve watched cache exclusion", error))?;
-        let history_home = root.join(".kodstar");
+        let policy = Policy::new(root, &cache_home, excludes)?;
         let signal = Arc::clone(&dirty);
         let failure = Arc::clone(&error);
         let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
             match result {
                 Ok(event) => {
-                    if !event.need_rescan()
-                        && (matches!(event.kind, EventKind::Access(_))
-                            || !event.paths.is_empty()
-                                && event.paths.iter().all(|path| {
-                                    path.starts_with(&cache_home) || path.starts_with(&history_home)
-                                }))
-                    {
+                    if !relevant(&event, &policy) {
                         return;
                     }
                     if event.need_rescan()
@@ -97,3 +92,25 @@ impl Changes {
             .map_err(|_| Error::operation("watch error state lock poisoned"))
     }
 }
+
+fn relevant(event: &Event, policy: &Policy) -> bool {
+    if event.need_rescan() {
+        return true;
+    }
+    if matches!(event.kind, EventKind::Access(_)) {
+        return false;
+    }
+    let directory = matches!(
+        event.kind,
+        EventKind::Create(notify::event::CreateKind::Folder)
+            | EventKind::Remove(notify::event::RemoveKind::Folder)
+    );
+    event.paths.is_empty()
+        || event
+            .paths
+            .iter()
+            .any(|path| policy.accepts(path, directory))
+}
+
+#[cfg(test)]
+mod tests;

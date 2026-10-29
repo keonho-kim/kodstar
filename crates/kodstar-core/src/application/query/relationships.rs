@@ -68,14 +68,14 @@ pub(super) fn files(
     };
     let mut statement = connection.prepare(
         "SELECT other.display_path,other.path,f.relation,'out' AS direction,COUNT(DISTINCT r.id)
-         FROM q_allowed a JOIN relationships r ON r.id=a.id
+         FROM q_allowed r
          JOIN facts f ON f.id=r.fact_id JOIN symbol_identities g ON g.canonical_id=r.target_id JOIN symbols t ON t.id=g.symbol_id
          JOIN files other ON other.id=t.file_id
          WHERE f.file_id=?1 AND t.file_id<>?1 AND ?2 IN ('out','both')
          GROUP BY other.id,f.relation
          UNION ALL
          SELECT other.display_path,other.path,f.relation,'in' AS direction,COUNT(DISTINCT r.id)
-         FROM q_allowed a JOIN relationships r ON r.id=a.id
+         FROM q_allowed r
          JOIN facts f ON f.id=r.fact_id JOIN symbol_identities g ON g.canonical_id=r.target_id JOIN symbols t ON t.id=g.symbol_id
          JOIN files other ON other.id=f.file_id
          WHERE t.file_id=?1 AND f.file_id<>?1 AND ?2 IN ('in','both')

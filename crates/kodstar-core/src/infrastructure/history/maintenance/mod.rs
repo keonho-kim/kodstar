@@ -11,6 +11,7 @@ use rusqlite::Connection;
 
 mod compressed;
 mod legacy;
+mod metadata;
 mod prior_encoding;
 mod repack;
 #[cfg(test)]
@@ -20,21 +21,56 @@ pub(super) mod verification;
 pub(super) fn run(connection: &Connection, cancel: &Cancellation) -> Result<()> {
     super::content::chunks::register(connection)?;
     crate::infrastructure::index::observe_cancellation(connection, cancel)?;
-    let transaction = connection.unchecked_transaction()?;
-    let outcome = match known_schema(&transaction)? {
-        4 => compressed::convert(&transaction, cancel),
-        1..=3 => legacy::convert(&transaction, cancel),
-        _ => Err(Error::operation("history is already in the current format")),
-    };
-    crate::infrastructure::index::stop_observing(&transaction)?;
+    let version = known_schema(connection)?;
+    if version == super::VERSION {
+        return Err(Error::operation("history is already in the current format"));
+    }
+    // The owning transaction rebuilds referenced tables without firing delete cascades.
+    // Foreign keys are checked before commit and restored on both success and failure.
+    connection.pragma_update(None, "foreign_keys", false)?;
+    let outcome = (|| -> Result<()> {
+        let transaction = connection.unchecked_transaction()?;
+        let conversion = (|| -> Result<()> {
+            match version {
+                4 => compressed::convert(&transaction, cancel)?,
+                1..=3 => legacy::convert(&transaction, cancel)?,
+                5 => {}
+                _ => return Err(Error::operation("unsupported legacy history format")),
+            }
+            metadata::convert(&transaction, cancel)?;
+            verification::verify(&transaction, cancel)?;
+            cancel.check()?;
+            Ok(())
+        })();
+        crate::infrastructure::index::stop_observing(&transaction)?;
+        if let Err(error) = conversion {
+            transaction.finish().map_err(|rollback| {
+                Error::caused_by(
+                    format!("history conversion failed ({error}); rollback failed"),
+                    rollback,
+                )
+            })?;
+            return Err(error);
+        }
+        transaction.pragma_update(None, "user_version", super::VERSION)?;
+        transaction.commit()?;
+        Ok(())
+    })();
+    let stop = crate::infrastructure::index::stop_observing(connection);
+    let restore = connection
+        .pragma_update(None, "foreign_keys", true)
+        .map_err(Error::from);
     if let Err(error) = outcome {
-        transaction.finish()?;
+        stop.and(restore).map_err(|cleanup| {
+            Error::caused_by(
+                format!("history conversion failed ({error}); cleanup failed"),
+                cleanup,
+            )
+        })?;
         return Err(error);
     }
-    cancel.check()?;
-    transaction.pragma_update(None, "user_version", super::VERSION)?;
-    transaction.commit()?;
-    Ok(())
+    stop?;
+    restore
 }
 
 pub(super) fn repack(connection: &Connection, cancel: &Cancellation) -> Result<()> {
@@ -95,6 +131,8 @@ fn known_schema(connection: &Connection) -> Result<u32> {
                     | "blobs"
                     | "entries"
                     | "working"
+                    | "paths"
+                    | "entry_rows"
                     | "checkout"
                     | "checkout_files"
             )
@@ -103,12 +141,36 @@ fn known_schema(connection: &Connection) -> Result<u32> {
                 && version >= 2
                 && matches!(name.as_str(), "chunk_data" | "chunk_refs")
             || kind == "view" && version >= 2 && name == "chunks"
-            || kind == "index" && name == "entries_path";
+            || kind == "index" && matches!(name.as_str(), "entries_path" | "entry_rows_path")
+            || version == 6 && kind == "view" && name == "entries"
+            || version == 6 && kind == "trigger" && name == "entries_insert";
         if !known {
             return Err(Error::operation(
                 "unknown history schema was preserved; upgrade refused",
             ));
         }
+    }
+    columns(
+        connection,
+        "blobs",
+        &[
+            ("id", "INTEGER"),
+            ("hash", if version >= 6 { "BLOB" } else { "TEXT" }),
+            ("size", "INTEGER"),
+        ],
+    )?;
+    if version < 6 {
+        columns(
+            connection,
+            "entries",
+            &[
+                ("checkpoint", "INTEGER"),
+                ("path", "BLOB"),
+                ("blob", "INTEGER"),
+                ("mode", "INTEGER"),
+                ("kind", "TEXT"),
+            ],
+        )?;
     }
     if version >= 4 {
         columns(

@@ -101,10 +101,23 @@ pub(super) fn stream_symbols(
     sink: &mut dyn QuerySink,
     summary: &mut QuerySummary,
 ) -> Result<()> {
-    let mut statement=connection.prepare(&format!("SELECT {SYMBOL_COLUMNS} FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.id IN (
+    let aliased: bool =
+        connection.query_row("SELECT EXISTS(SELECT 1 FROM symbol_aliases)", [], |r| {
+            r.get(0)
+        })?;
+    let predicate = if aliased {
+        format!("s.id IN (
         SELECT id FROM (SELECT s.id,ROW_NUMBER() OVER(PARTITION BY COALESCE(g.canonical_id,s.id) ORDER BY f.path,s.start_byte,s.syntax_blob) AS rank
           FROM symbols s JOIN files f ON f.id=s.file_id LEFT JOIN symbol_aliases g ON g.symbol_id=s.id WHERE ({predicate})) WHERE rank=1
-      ) ORDER BY f.path,s.line,s.column_byte,s.qualified_name,s.kind"))?;
+        )")
+    } else {
+        predicate.to_owned()
+    };
+    let mut statement = connection.prepare(&format!(
+        "SELECT {SYMBOL_COLUMNS} FROM symbols s JOIN files f ON f.id=s.file_id WHERE ({predicate})
+        ORDER BY f.path,s.line,s.column_byte,s.qualified_name,s.kind LIMIT {}",
+        super::sql_limit(limit)
+    ))?;
     let mut rows = statement.query(parameters)?;
     while let Some(row) = rows.next()? {
         cancel.check()?;

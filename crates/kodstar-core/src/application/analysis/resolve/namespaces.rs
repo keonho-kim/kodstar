@@ -80,8 +80,11 @@ impl Lookup<'_, '_> {
         self.connection.cached_execute(
             "INSERT OR IGNORE INTO resolution_module_owners
             SELECT ?4,s.file_id,s.id FROM symbols s JOIN files f ON f.id=s.file_id
-            WHERE s.kind='module' AND s.language=?1 AND f.package=?2 AND f.status='analyzed'
-              AND (CASE WHEN s.language='rust' THEN f.module||'::'||replace(s.qualified_name,'r#','')
+            WHERE s.kind_id=(SELECT id FROM atoms WHERE value='module')
+              AND s.language_id=(SELECT id FROM atoms WHERE value=?1)
+              AND f.package_id=(SELECT id FROM atoms WHERE value=?2)
+              AND f.status_id=(SELECT id FROM atoms WHERE value='analyzed')
+              AND (CASE WHEN ?1='rust' THEN f.module||'::'||replace(s.qualified_name,'r#','')
                         ELSE replace(replace(s.qualified_name,'.','::'),char(92),'::') END)=?3",
             params![
                 context.language.as_str(),

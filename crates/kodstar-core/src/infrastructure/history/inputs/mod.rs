@@ -32,7 +32,7 @@ pub(crate) fn walk(
         .map(|s| globset::Glob::new(s).map(|g| g.compile_matcher()))
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| Error::caused_by("compile snapshot exclusions", e))?;
-    let mut statement = connection.prepare("SELECT f.path,f.blob,b.size,b.hash FROM snapshot_files f JOIN blobs b ON b.id=f.blob WHERE f.kind='file' ORDER BY f.path")?;
+    let mut statement = connection.prepare("SELECT f.path,f.blob,b.size,lower(hex(b.hash)) FROM snapshot_files f JOIN blobs b ON b.id=f.blob WHERE f.kind='file' ORDER BY f.path")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         cancel.check()?;
@@ -75,7 +75,7 @@ pub(crate) struct Reader<'conn> {
 
 impl<'conn> Reader<'conn> {
     pub(crate) fn new(connection: &'conn Rc<rusqlite::Connection>) -> Result<Self> {
-        Ok(Self { connection, statement: connection.prepare("SELECT f.blob,b.size,b.hash FROM snapshot_files f JOIN blobs b ON b.id=f.blob WHERE f.path=?1 AND f.kind='file'")? })
+        Ok(Self { connection, statement: connection.prepare("SELECT f.blob,b.size,lower(hex(b.hash)) FROM snapshot_files f JOIN blobs b ON b.id=f.blob WHERE f.path=?1 AND f.kind='file'")? })
     }
 
     pub(crate) fn get(&mut self, path: &Path) -> Result<Entry> {

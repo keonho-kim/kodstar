@@ -24,8 +24,10 @@ impl Frame {
         };
         serde_json::to_writer(&mut frame, value).map_err(io::Error::other)?;
         frame.write_all(b"\n")?;
+        frame.flush()?;
         if let Some(spool) = &mut frame.spool {
             spool.rewind()?;
+            frame.memory = Vec::new();
         }
         Ok(frame)
     }
@@ -34,7 +36,7 @@ impl Frame {
         // The unnamed file has no directory entry, including after process termination.
         let mut spool = tempfile::tempfile()?;
         spool.write_all(&self.memory)?;
-        self.memory = Vec::new();
+        self.memory.clear();
         self.spool = Some(spool);
         Ok(())
     }
@@ -45,8 +47,18 @@ impl Write for Frame {
         if self.spool.is_none() && self.memory.len().saturating_add(bytes.len()) > MEMORY {
             self.spill()?;
         }
-        if let Some(spool) = &mut self.spool {
-            spool.write_all(bytes)?;
+        if self.spool.is_some() {
+            if self.memory.len().saturating_add(bytes.len()) > MEMORY {
+                self.flush()?;
+            }
+            if bytes.len() >= MEMORY {
+                self.spool
+                    .as_mut()
+                    .ok_or_else(|| io::Error::other("missing frame spool"))?
+                    .write_all(bytes)?;
+            } else {
+                self.memory.extend_from_slice(bytes);
+            }
         } else {
             let needed = self.memory.len() + bytes.len();
             if needed > self.memory.capacity() {
@@ -58,6 +70,10 @@ impl Write for Frame {
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
+        if let Some(spool) = &mut self.spool {
+            spool.write_all(&self.memory)?;
+            self.memory.clear();
+        }
         Ok(())
     }
 }
@@ -93,6 +109,18 @@ mod tests {
         frame.read_to_string(&mut encoded)?;
         assert_eq!(serde_json::from_str::<String>(&encoded)?, value);
         drop(frame);
+        Ok(())
+    }
+
+    #[test]
+    fn escaped_fragments_cross_buffer_boundaries_without_retained_memory() -> io::Result<()> {
+        let value = vec!["\"한글\n\\"; 20_000];
+        let mut frame = Frame::encode(&value)?;
+        assert_eq!(frame.memory.capacity(), 0);
+        let mut output = Vec::new();
+        frame.read_to_end(&mut output)?;
+        assert_eq!(output.last(), Some(&b'\n'));
+        assert_eq!(serde_json::from_slice::<Vec<String>>(&output)?, value);
         Ok(())
     }
 }

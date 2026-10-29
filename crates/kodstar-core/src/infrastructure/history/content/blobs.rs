@@ -40,7 +40,7 @@ impl<'conn> Writer<'conn> {
         let previous: Option<(i64, u64)> = connection
             .query_row(
                 "SELECT id,size FROM blobs WHERE hash=?1",
-                [&expected],
+                [expected.as_bytes().as_slice()],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
@@ -58,7 +58,7 @@ impl<'conn> Writer<'conn> {
         // The capture transaction owns these writes and rolls back an unstable reread.
         connection.execute(
             "INSERT INTO blobs(hash,size) VALUES(?1,?2)",
-            params![expected, expected_size],
+            params![expected.as_bytes().as_slice(), expected_size],
         )?;
         let id = connection.last_insert_rowid();
         let mut hash = blake3::Hasher::new();
@@ -97,7 +97,7 @@ impl<'conn> Writer<'conn> {
         } else {
             super::chunking::visit(input, cancel, store)?;
         }
-        if hash.finalize().to_hex().as_str() != expected || size != expected_size {
+        if hash.finalize() != expected || size != expected_size {
             return Err(Error::operation("history input changed during capture"));
         }
         cancel.check()?;
@@ -109,7 +109,7 @@ fn fingerprint(
     input: &mut impl Read,
     buffer: &mut [u8; CHUNK],
     cancel: &Cancellation,
-) -> Result<(String, u64)> {
+) -> Result<(blake3::Hash, u64)> {
     let mut hash = blake3::Hasher::new();
     let mut size = 0u64;
     loop {
@@ -125,7 +125,7 @@ fn fingerprint(
             .checked_add(read as u64)
             .ok_or_else(|| Error::operation("history input size overflow"))?;
     }
-    Ok((hash.finalize().to_hex().to_string(), size))
+    Ok((hash.finalize(), size))
 }
 
 pub(crate) fn write(
@@ -134,7 +134,7 @@ pub(crate) fn write(
     mut output: impl Write,
     cancel: &Cancellation,
 ) -> Result<()> {
-    let (expected, expected_size): (String, u64) =
+    let (expected, expected_size): (Vec<u8>, u64) =
         connection.query_row("SELECT hash,size FROM blobs WHERE id=?1", [id], |r| {
             Ok((r.get(0)?, r.get(1)?))
         })?;
@@ -171,7 +171,7 @@ pub(crate) fn write(
             .map_err(|e| Error::caused_by("write history content", e))?;
         part += 1;
     }
-    if hash.finalize().to_hex().as_str() != expected || size != expected_size {
+    if hash.finalize().as_bytes().as_slice() != expected || size != expected_size {
         return Err(Error::operation("history content checksum mismatch"));
     }
     Ok(())

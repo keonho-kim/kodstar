@@ -12,6 +12,7 @@ use rusqlite::{
 fn legacy_shared(version: u32) -> Result<Connection> {
     let connection = super::super::tests::legacy()?;
     super::super::run(&connection, &Cancellation::default())?;
+    connection.execute_batch(include_str!("../fixtures/restore_v5.sql"))?;
     let key = if version == 2 {
         "hash BLOB PRIMARY KEY"
     } else {
@@ -111,7 +112,7 @@ fn shared_versions_preserve_all_original_content_on_success() -> Result<()> {
         super::super::run(&connection, &Cancellation::default())?;
         assert_eq!(
             connection.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-            5
+            6
         );
         for (index, bytes) in expected.into_iter().enumerate() {
             assert_eq!(

@@ -24,7 +24,7 @@ pub fn mark(c: &Connection, file: &str) -> Result<()> {
         integer(&mut output, first + 1_000_000);
         output.extend_from_slice(rest);
         tx.execute(
-            "UPDATE relation_ids SET id=id+1000000 WHERE block=?1",
+            "UPDATE relation_id_ranges SET first=first+1000000,last=last+1000000 WHERE block=?1",
             [block],
         )?;
         tx.execute(

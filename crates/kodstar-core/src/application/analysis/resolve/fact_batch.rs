@@ -3,6 +3,7 @@
 // Usage: facts resolver가 ID 순서와 두 해석 단계를 보존해 호출.
 // Related: crates/kodstar-core/src/application/analysis/resolve/facts.rs, crates/kodstar-core/src/infrastructure/index/runtime.rs.
 
+use crate::domain::{languages::Language, relations::RelationKind};
 use rusqlite::{Result, Statement};
 
 pub(super) struct Input {
@@ -10,10 +11,10 @@ pub(super) struct Input {
     pub file: i64,
     pub scope: u32,
     pub expression: String,
-    pub relation: String,
+    pub relation: RelationKind,
     pub position: usize,
     pub source: i64,
-    pub language: String,
+    pub language: Language,
 }
 
 pub(super) fn read(statement: &mut Statement<'_>, after: i64, budget: usize) -> Result<Vec<Input>> {
@@ -22,10 +23,7 @@ pub(super) fn read(statement: &mut Statement<'_>, after: i64, budget: usize) -> 
     let mut bytes = batch.capacity() * std::mem::size_of::<Input>();
     let mut rows = statement.query(rusqlite::params![after, capacity])?;
     while let Some(row) = rows.next()? {
-        let payload = [3, 4, 7]
-            .into_iter()
-            .map(|i| -> Result<usize> { Ok(row.get_ref(i)?.as_str()?.len()) })
-            .sum::<Result<usize>>()?;
+        let payload = row.get_ref(3)?.as_str()?.len();
         // Preserve one accepted large fact; never retain a second row beyond the batch budget.
         if !batch.is_empty() && bytes.saturating_add(payload) > budget {
             break;
@@ -35,15 +33,22 @@ pub(super) fn read(statement: &mut Statement<'_>, after: i64, budget: usize) -> 
             file: row.get(1)?,
             scope: row.get(2)?,
             expression: row.get(3)?,
-            relation: row.get(4)?,
+            relation: parse(row, 4)?,
             position: row.get(5)?,
             source: row.get(6)?,
-            language: row.get(7)?,
+            language: parse(row, 7)?,
         };
-        bytes = bytes.saturating_add(
-            item.expression.capacity() + item.relation.capacity() + item.language.capacity(),
-        );
+        bytes = bytes.saturating_add(item.expression.capacity());
         batch.push(item);
     }
     Ok(batch)
+}
+
+fn parse<T: std::str::FromStr<Err = crate::domain::diagnostics::Error>>(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> Result<T> {
+    row.get_ref(column)?.as_str()?.parse().map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(column, rusqlite::types::Type::Text, Box::new(e))
+    })
 }

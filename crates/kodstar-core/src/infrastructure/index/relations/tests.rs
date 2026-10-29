@@ -180,3 +180,32 @@ fn parents(c: &Connection) -> Result<()> {
         CREATE VIEW facts AS SELECT * FROM facts_rows;",
     )
 }
+
+#[test]
+fn malformed_interval_ends_cannot_create_unbounded_logical_rows() -> Result<()> {
+    let c = Connection::open_in_memory()?;
+    parents(&c)?;
+    c.execute_batch("INSERT INTO files_rows VALUES(1);INSERT INTO symbols_rows VALUES(1),(2);INSERT INTO facts_rows VALUES(1,1);")?;
+    super::super::packed::register(&c)?;
+    c.execute_batch(SCHEMA)?;
+    c.execute_batch(
+        "INSERT INTO relationships VALUES(1,1,1,2,NULL,'resolved','fixture',NULL);
+        UPDATE relation_id_ranges SET last='unbounded';",
+    )?;
+    let mut calls = 0;
+    c.progress_handler(
+        1000,
+        Some(move || {
+            calls += 1;
+            calls > 20
+        }),
+    )?;
+    let error = super::verify(&c).expect_err("malformed interval accepted");
+    assert!(error.to_string().contains("routing interval"), "{error}");
+    assert_eq!(
+        c.query_row("SELECT count(*) FROM relation_ids", [], |r| r
+            .get::<_, u64>(0))?,
+        0
+    );
+    Ok(())
+}

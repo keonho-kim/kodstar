@@ -43,7 +43,7 @@ pub(crate) use runtime::{limit_reads, observe_cancellation, stop_observing};
 pub(crate) use statistics::Update as CoverageUpdate;
 pub(crate) use write::{FileRecord, clear_file};
 
-pub(crate) const STORAGE_VERSION: u32 = 14;
+pub(crate) const STORAGE_VERSION: u32 = 15;
 pub(crate) const EXTRACTION_VERSION: u32 = 45;
 pub(crate) fn require_history(
     connection: &Connection,

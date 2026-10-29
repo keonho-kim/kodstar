@@ -29,6 +29,7 @@ mod namespaces;
 mod owners;
 mod pascal_declarations;
 mod php;
+mod preparation;
 mod prepared;
 mod publication;
 mod python;
@@ -93,22 +94,8 @@ pub(crate) fn run(
     publication::reset(connection)?;
     crate::application::analysis::resolve::python::mro::reset(connection)?;
     crate::application::analysis::resolve::php::members::reset(connection)?;
-    if all {
-        identities::run(connection, cancel)?;
-    }
-    crate::application::analysis::resolve::cxx::reset(connection, cancel)?;
-    if all {
-        crate::application::analysis::resolve::cxx::types::run(connection, cancel)?;
-        identities::rebuild(connection)?;
-    }
     let prepared = prepared::Prepared::new(connection.connection())?;
-    if all {
-        owners::run(connection, cancel, &prepared)?;
-        crate::application::analysis::resolve::cxx::declarations::run(connection, cancel)?;
-        crate::application::analysis::resolve::cxx::functions::run(connection, cancel)?;
-        pascal_declarations::run(connection, cancel)?;
-        identities::rebuild(connection)?;
-    }
+    preparation::run(connection, cancel, &prepared, all)?;
     connection.execute_batch(include_str!("lisp/packages.sql"))?;
     let merged: bool =
         connection.cached_row("SELECT EXISTS(SELECT 1 FROM symbol_aliases)", [], |r| {

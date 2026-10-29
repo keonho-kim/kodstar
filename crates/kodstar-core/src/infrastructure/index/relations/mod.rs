@@ -3,6 +3,7 @@
 // Usage: resolver publication과 SQLite virtual table의 쓰기 callback이 호출.
 // Related: crates/kodstar-core/src/infrastructure/index/relations/schema.sql, crates/kodstar-core/src/infrastructure/index/relations/codec.rs.
 
+mod addresses;
 mod codec;
 mod decode;
 mod merge;
@@ -31,12 +32,7 @@ pub(crate) const SCHEMA: &str = include_str!("schema.sql");
 pub(super) fn scan(c: &Connection, after: i64, filters: &[Filter]) -> Result<Option<(i64, Rows)>> {
     let find = |col| filters.iter().find(|(k, _)| *k == col).map(|(_, v)| v);
     let block = if let Some(id) = find(0) {
-        c.query_row(
-            "SELECT block FROM relation_ids WHERE id=?1 AND block>?2",
-            params![id, after],
-            |r| r.get(0),
-        )
-        .optional()?
+        addresses::find(c, id, after)?
     } else if let Some(value) = find(1) {
         route(c, 1, value, after)?
     } else if let Some(source) = find(2) {
@@ -87,11 +83,7 @@ fn store(c: &Connection, block: i64, file: i64, source: i64, rows: &[Relation]) 
 }
 
 pub(super) fn remove(c: &Connection, id: i64) -> Result<()> {
-    let block: Option<i64> = c
-        .query_row("SELECT block FROM relation_ids WHERE id=?1", [id], |r| {
-            r.get(0)
-        })
-        .optional()?;
+    let block = addresses::find(c, &Value::Integer(id), 0)?;
     if let Some(block) = block {
         let (file, source, mut rows) = load(c, block)?;
         rows.retain(|r| r.id != id);

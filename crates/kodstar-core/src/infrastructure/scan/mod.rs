@@ -9,6 +9,8 @@ use std::fs::{self, Metadata};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+pub(crate) mod policy;
+
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::{Error, Result};
 
@@ -39,13 +41,7 @@ pub(crate) fn walk(
     cancel: &Cancellation,
     emit: &mut dyn FnMut(Entry) -> Result<()>,
 ) -> Result<()> {
-    let excluded: Vec<_> = excludes
-        .iter()
-        .map(|pattern| globset::Glob::new(pattern).map(|glob| glob.compile_matcher()))
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|error| Error::caused_by("compile excluded paths", error))?;
-    let skip_cache = cache_home.to_path_buf();
-    let root_filter = root.to_path_buf();
+    let policy = policy::Policy::new(root, cache_home, excludes)?;
     let mut builder = ignore::WalkBuilder::new(root);
     builder
         .hidden(false)
@@ -55,39 +51,12 @@ pub(crate) fn walk(
         .git_global(true)
         .git_exclude(true)
         .filter_entry(move |entry| {
-            if entry.depth() == 0 {
-                return true;
-            }
-            if entry.path().starts_with(&skip_cache) {
-                return false;
-            }
-            let name = entry.file_name().to_str().unwrap_or("");
-            if matches!(name, ".git" | ".kodstar") {
-                return false;
-            }
-            if entry.file_type().is_some_and(|kind| kind.is_dir())
-                && matches!(
-                    name,
-                    ".git"
-                        | ".kodstar"
-                        | "target"
-                        | "node_modules"
-                        | ".venv"
-                        | "venv"
-                        | "__pycache__"
-                        | "dist"
-                        | "build"
-                        | "vendor"
-                )
-            {
-                return false;
-            }
-            let relative = entry
-                .path()
-                .strip_prefix(&root_filter)
-                .unwrap_or(entry.path());
-            !excluded.iter().any(|pattern| pattern.is_match(relative))
+            policy.accepts_entry(
+                entry.path(),
+                entry.file_type().is_some_and(|kind| kind.is_dir()),
+            )
         });
+
     for entry in builder.build() {
         cancel.check()?;
         let entry = entry.map_err(|error| {

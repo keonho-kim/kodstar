@@ -7,6 +7,15 @@ use crate::domain::diagnostics::{Error, Result};
 use rusqlite::{Connection, params};
 
 pub(crate) fn verify(c: &Connection) -> Result<()> {
+    let malformed: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM relation_id_ranges
+        WHERE first<=0 OR typeof(last)<>'integer' OR last<first OR last-first>=128)",
+        [],
+        |r| r.get(0),
+    )?;
+    if malformed {
+        return Err(Error::operation("invalid relationship routing interval"));
+    }
     c.execute_batch("CREATE TEMP TABLE relation_expected_ids(id INTEGER PRIMARY KEY,block INTEGER);
         CREATE TEMP TABLE relation_expected_routes(kind INTEGER,entity INTEGER,block INTEGER,PRIMARY KEY(kind,entity,block)) WITHOUT ROWID;")?;
     let mut select = c.prepare("SELECT id FROM relation_blocks ORDER BY id")?;

@@ -3,6 +3,7 @@
 // Usage: 조회 조정자가 선택한 방향과 한도 전달.
 // Related: crates/kodstar-core/src/application/query/mod.rs.
 
+use crate::infrastructure::index::cached::Sql;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::domain::cancellation::Cancellation;
@@ -31,7 +32,7 @@ pub(super) fn setup(connection: &Connection, options: &QueryOptions, explain: bo
     } else {
         "r.target_id IS NOT NULL"
     };
-    connection.execute_batch(&format!("CREATE TEMP VIEW q_allowed AS SELECT r.id,r.source_id,r.target_id FROM relationships r JOIN facts f ON f.id=r.fact_id WHERE {states} AND {external} AND ((NOT EXISTS(SELECT 1 FROM q_relations) AND f.relation NOT IN ('defines','contains')) OR f.relation IN (SELECT name FROM q_relations));"))?;
+    connection.execute_batch(&format!("CREATE TEMP VIEW q_allowed AS SELECT r.id,r.fact_id,r.source_id,r.target_id,r.external_key FROM relationships r JOIN facts f ON f.id=r.fact_id WHERE {states} AND {external} AND ((NOT EXISTS(SELECT 1 FROM q_relations) AND f.relation NOT IN ('defines','contains')) OR f.relation IN (SELECT name FROM q_relations));"))?;
     Ok(())
 }
 
@@ -62,8 +63,10 @@ pub(super) fn traverse(
     summary: &mut QuerySummary,
     target: Option<i64>,
 ) -> Result<()> {
+    let sql = Sql::new(connection)?;
+    let connection = &sql;
     canonical_seeds(connection)?;
-    let mut seeds=connection.prepare("SELECT s.id FROM q_seeds q JOIN symbols s ON s.id=q.id JOIN files f ON f.id=s.file_id ORDER BY f.path,s.line,s.column_byte,s.qualified_name")?;
+    let mut seeds=connection.cached_prepare("SELECT s.id FROM q_seeds q JOIN symbols s ON s.id=q.id JOIN files f ON f.id=s.file_id ORDER BY f.path,s.line,s.column_byte,s.qualified_name")?;
     for seed in seeds.query_map([], |row| row.get::<_, i64>(0))? {
         let seed = seed?;
         if !admit(connection, Some(seed), None, max_nodes, summary)? {
@@ -75,12 +78,12 @@ pub(super) fn traverse(
             {
                 continue;
             }
-            connection.execute("INSERT OR IGNORE INTO q_frontier SELECT s.id,?1,0,NULL,NULL,f.path,s.line,s.column_byte,s.qualified_name FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.id=?2",params![current,seed])?;
+            connection.cached_execute("INSERT OR IGNORE INTO q_frontier SELECT s.id,?1,0,NULL,NULL,f.path,s.line,s.column_byte,s.qualified_name FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.id=?2",params![current,seed])?;
         }
     }
     'search: loop {
         cancel.check()?;
-        let next = connection.query_row(
+        let next = connection.cached_row(
             "SELECT id,direction,depth,parent,via FROM q_frontier ORDER BY depth,file_path,line,column_byte,name,direction LIMIT 1",
             [],
             |row| Ok(FrontierEntry {
@@ -98,11 +101,11 @@ pub(super) fn traverse(
         else {
             break;
         };
-        connection.execute(
+        connection.cached_execute(
             "DELETE FROM q_frontier WHERE id=?1 AND direction=?2",
             params![id, current],
         )?;
-        connection.execute(
+        connection.cached_execute(
             "INSERT OR IGNORE INTO q_seen VALUES(?1,?2,?3,?4,?5)",
             params![id, current, distance, parent, via],
         )?;
@@ -117,7 +120,7 @@ pub(super) fn traverse(
         } else {
             ("target_id", "source_id")
         };
-        let mut statement=connection.prepare(&format!("SELECT a.id,a.{neighbor},r.external_key FROM q_allowed a JOIN relationships r ON r.id=a.id JOIN facts fact ON fact.id=r.fact_id LEFT JOIN symbols s ON s.id=a.{neighbor} LEFT JOIN files f ON f.id=s.file_id WHERE a.{source}=?1 ORDER BY fact.relation,f.path,s.line,s.column_byte,s.qualified_name,fact.start_byte,a.id"))?;
+        let mut statement=connection.cached_prepare(&format!("SELECT a.id,a.{neighbor},a.external_key FROM q_allowed a JOIN facts fact ON fact.id=a.fact_id LEFT JOIN symbols s ON s.id=a.{neighbor} LEFT JOIN files f ON f.id=s.file_id WHERE a.{source}=?1 ORDER BY fact.relation,f.path,s.line,s.column_byte,s.qualified_name,fact.start_byte,a.id"))?;
         let mut neighbors = statement.query([id])?;
         while let Some(row) = neighbors.next()? {
             cancel.check()?;
@@ -127,12 +130,12 @@ pub(super) fn traverse(
             if !admit(connection, next, external.as_deref(), max_nodes, summary)? {
                 break 'search;
             }
-            connection.execute(
+            connection.cached_execute(
                 "INSERT OR IGNORE INTO q_edges VALUES(?1,?2,?3)",
                 params![edge, current, distance + 1],
             )?;
             if let Some(next) = next {
-                connection.execute("INSERT OR IGNORE INTO q_frontier SELECT s.id,?1,?2,?3,?4,f.path,s.line,s.column_byte,s.qualified_name FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.id=?5 AND NOT EXISTS(SELECT 1 FROM q_seen v WHERE v.id=?5 AND v.direction=?1)",params![current,distance+1,id,edge,next])?;
+                connection.cached_execute("INSERT OR IGNORE INTO q_frontier SELECT s.id,?1,?2,?3,?4,f.path,s.line,s.column_byte,s.qualified_name FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.id=?5 AND NOT EXISTS(SELECT 1 FROM q_seen v WHERE v.id=?5 AND v.direction=?1)",params![current,distance+1,id,edge,next])?;
             }
         }
     }
@@ -145,20 +148,20 @@ fn canonical_seeds(connection: &Connection) -> Result<()> {
 }
 
 fn admit(
-    connection: &Connection,
+    connection: &Sql<'_>,
     id: Option<i64>,
     external: Option<&str>,
     maximum: Option<usize>,
     summary: &mut QuerySummary,
 ) -> Result<bool> {
     let exists = if let Some(id) = id {
-        connection.query_row(
+        connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM q_nodes WHERE id=?1)",
             [id],
             |row| row.get::<_, bool>(0),
         )?
     } else if let Some(name) = external {
-        connection.query_row(
+        connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM q_externals WHERE name=?1)",
             [name],
             |row| row.get::<_, bool>(0),
@@ -178,9 +181,9 @@ fn admit(
         return Ok(false);
     }
     if let Some(id) = id {
-        connection.execute("INSERT INTO q_nodes VALUES(?1)", [id])?;
+        connection.cached_execute("INSERT INTO q_nodes VALUES(?1)", [id])?;
     } else if let Some(name) = external {
-        connection.execute("INSERT INTO q_externals VALUES(?1)", [name])?;
+        connection.cached_execute("INSERT INTO q_externals VALUES(?1)", [name])?;
     }
     summary.visited_count += 1;
     Ok(true)

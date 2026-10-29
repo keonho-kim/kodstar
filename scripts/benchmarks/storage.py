@@ -74,7 +74,7 @@ def source_results(project):
         register(database)
         database.execute("PRAGMA cache_size=-1024")
         database.execute("PRAGMA temp_store=FILE")
-        for row in database.execute("SELECT hex(w.path),b.hash,b.size,w.mode,w.kind FROM working w JOIN blobs b ON b.id=w.blob ORDER BY w.path"):
+        for row in database.execute("SELECT hex(w.path),CASE WHEN typeof(b.hash)='blob' THEN lower(hex(b.hash)) ELSE b.hash END,b.size,w.mode,w.kind FROM working w JOIN blobs b ON b.id=w.blob ORDER BY w.path"):
             manifest.update(json.dumps(row, ensure_ascii=False).encode("utf-8") + b"\n")
         previous, expected, received = None, 0, 0
         for name, size, chunk in database.execute("SELECT w.path,b.size,c.content FROM working w JOIN blobs b ON b.id=w.blob LEFT JOIN chunks c ON c.blob=b.id ORDER BY w.path,c.part"):

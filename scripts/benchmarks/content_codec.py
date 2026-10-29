@@ -65,7 +65,7 @@ def register(database):
     application = database.execute("PRAGMA application_id").fetchone()[0]
     if application != 0x4b534852:
         return
-    if version not in (1, 2, 3, 4, 5):
+    if version not in (1, 2, 3, 4, 5, 6):
         raise ValueError("unsupported benchmark history format")
     decoder = decode
     if version <= 4:

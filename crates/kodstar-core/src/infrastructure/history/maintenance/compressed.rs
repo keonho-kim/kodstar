@@ -73,7 +73,7 @@ pub(super) fn convert(connection: &Connection, cancel: &Cancellation) -> Result<
         )?;
         previous = Some(id);
     }
-    verification::verify(connection, cancel)
+    verification::references(connection)
 }
 
 fn decode(row: &Row<'_>, base: &[u8]) -> Result<Vec<u8>> {

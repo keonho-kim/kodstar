@@ -194,6 +194,9 @@ SQLite page·freelist·table 크기와 보존 payload를 포함한다. `dbstat` 
 | Kotlin grammar 수정 규칙 | [patch.json](../vendor/tree-sitter-kotlin-ng/patch.json) |
 
 의존성 변경은 manifest·lockfile·라이선스/NOTICE·native 번들·grammar ABI를 함께 확인한다.
+SQLite 내부 JSON 처리는 번들 SQLite의 JSONB를 사용하며 로드 가능한 외부 확장은 요구하지 않는다.
+분석 인덱스 형식 15는 기존 캐시를 명시적으로 정리한 뒤 재생성한다. 영구 이력 형식 1~5는
+`history upgrade`로 형식 6에 전환하며 소스 이력의 자동 삭제·재생성은 하지 않는다.
 Swift grammar의 배포 원본처럼 revision만으로 배포물을 재구성할 수 없는 경우에는 crate checksum을 기준으로 한다.
 
 ```bash

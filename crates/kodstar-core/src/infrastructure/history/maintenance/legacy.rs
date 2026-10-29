@@ -112,7 +112,7 @@ pub(super) fn convert(connection: &Connection, cancel: &Cancellation) -> Result<
     } else {
         "DROP TABLE legacy_chunk_refs; DROP TABLE legacy_chunk_data;"
     })?;
-    crate::infrastructure::history::maintenance::verification::verify(connection, cancel)
+    crate::infrastructure::history::maintenance::verification::references(connection)
 }
 
 fn invalid() -> Error {

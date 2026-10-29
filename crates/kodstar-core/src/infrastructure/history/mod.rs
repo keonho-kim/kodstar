@@ -22,10 +22,10 @@ use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const VERSION: u32 = 5;
+const VERSION: u32 = 6;
 const APPLICATION: u32 = 0x4b534852;
 pub(crate) fn recognized_format(application: u32, version: u32) -> bool {
-    application == APPLICATION && (matches!(version, 1..=4) || version == VERSION)
+    application == APPLICATION && (matches!(version, 1..=5) || version == VERSION)
 }
 pub(crate) const CACHE_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const SNAPSHOT_CACHE_BYTES: usize = 2 * 1024 * 1024;
@@ -133,6 +133,7 @@ impl Repository {
         if fresh && version == 0 {
             connection.execute_batch("BEGIN IMMEDIATE")?;
             connection.execute_batch(include_str!("schema.sql"))?;
+            connection.execute_batch(include_str!("metadata.sql"))?;
             connection.execute_batch(content::chunks::SCHEMA)?;
             let identity = blake3::hash(
                 format!(
@@ -153,7 +154,7 @@ impl Repository {
             maintenance::run(&connection, cancel)?;
         } else if version != VERSION || application != APPLICATION {
             return Err(Error::operation(
-                "unsupported history format; source history was preserved; formats 1 through 4 require kodstar history upgrade",
+                "unsupported history format; source history was preserved; formats 1 through 5 require kodstar history upgrade",
             ));
         }
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;

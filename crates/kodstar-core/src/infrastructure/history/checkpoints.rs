@@ -6,6 +6,9 @@
 use crate::domain::diagnostics::{Error, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 
+mod materialize;
+pub(crate) use materialize::run as materialize;
+
 pub(crate) fn display(id: i64) -> String {
     format!("c{id}")
 }
@@ -37,17 +40,6 @@ pub(crate) fn resolve(connection: &Connection, revision: &str) -> Result<i64> {
             .optional()?
     };
     id.ok_or_else(|| Error::not_found(format!("checkpoint not found: {revision}")))
-}
-
-pub(crate) fn materialize(connection: &Connection, id: i64) -> Result<()> {
-    connection.execute_batch("DROP TABLE IF EXISTS temp.snapshot_files; CREATE TEMP TABLE snapshot_files(path BLOB PRIMARY KEY,blob INTEGER,mode INTEGER,kind TEXT) WITHOUT ROWID;")?;
-    if head(connection)? == Some(id) {
-        connection
-            .execute_batch("INSERT INTO snapshot_files SELECT path,blob,mode,kind FROM working;")?;
-        return Ok(());
-    }
-    connection.execute("WITH RECURSIVE ancestry(id) AS (SELECT ?1 UNION SELECT c.parent FROM checkpoints c JOIN ancestry a ON c.id=a.id WHERE c.parent IS NOT NULL), latest AS (SELECT e.path,max(e.checkpoint) checkpoint FROM entries e JOIN ancestry a ON a.id=e.checkpoint GROUP BY e.path) INSERT INTO snapshot_files SELECT e.path,e.blob,e.mode,e.kind FROM entries e JOIN latest l ON l.path=e.path AND l.checkpoint=e.checkpoint WHERE e.blob IS NOT NULL", [id])?;
-    Ok(())
 }
 
 pub(crate) fn label(connection: &Connection, id: i64, label: &str) -> Result<()> {

@@ -12,7 +12,7 @@ pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
     c.execute_batch("DELETE FROM symbol_aliases; UPDATE symbols SET resolved_key=NULL,resolved_qualified_name=NULL,resolved_kind=NULL WHERE resolved_key IS NOT NULL OR resolved_qualified_name IS NOT NULL OR resolved_kind IS NOT NULL;")?;
     let mut statement=c.cached_prepare("SELECT s.id,s.syntax_key,f.package,s.qualified_name,s.kind,s.condition,
         (SELECT b.imported_name FROM bindings b JOIN dotnet_membership d ON d.file_id=b.file_id WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='csharp_partial' AND d.merge_allowed=1 LIMIT 1)
-        FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language='csharp' ORDER BY s.id")?;
+        FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language_id=(SELECT id FROM atoms WHERE value='csharp') ORDER BY s.id")?;
     let records = statement.query_map([], |r| {
         Ok((
             r.get::<_, i64>(0)?,
@@ -61,14 +61,12 @@ pub(super) fn run(c: &Connection, cancel: &Cancellation) -> Result<()> {
 
 pub(super) fn rebuild(c: &Connection) -> Result<()> {
     c.execute_batch(
-        "DELETE
-        FROM symbol_aliases; INSERT INTO symbol_aliases
-        SELECT symbol_id,canonical_id FROM (SELECT s.id AS symbol_id,(SELECT candidate.id
-        FROM symbols candidate
-        JOIN files f ON f.id=candidate.file_id
-        WHERE candidate.key_blob=s.key_blob
-        ORDER BY f.path,candidate.start_byte,candidate.id LIMIT 1) AS canonical_id
-        FROM symbols s) WHERE symbol_id<>canonical_id;",
+        "DELETE FROM symbol_aliases;
+        WITH duplicates(key) AS (SELECT identity FROM symbols_rows GROUP BY identity HAVING count(*)>1),
+        representatives AS (
+          SELECT s.id,first_value(s.id) OVER(PARTITION BY s.key_blob ORDER BY f.path,s.start_byte,s.id) AS canonical_id
+          FROM duplicates d JOIN symbols s ON s.key_blob=d.key JOIN files f ON f.id=s.file_id)
+        INSERT INTO symbol_aliases SELECT id,canonical_id FROM representatives WHERE id<>canonical_id;",
     )?;
     Ok(())
 }
@@ -76,7 +74,7 @@ pub(super) fn rebuild(c: &Connection) -> Result<()> {
 fn erlang(c: &Connection, cancel: &Cancellation) -> Result<()> {
     c.cached_execute("UPDATE symbols SET exported=EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=symbols.file_id AND b.kind='erlang_export' AND b.name IN (symbols.name,'*')) WHERE language='erlang' AND kind='function'",[])?;
     c.cached_execute("UPDATE symbols SET exported=EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=symbols.file_id AND b.kind='erlang_type_export' AND b.name=symbols.name) WHERE language='erlang' AND kind='type'",[])?;
-    let mut statement=c.cached_prepare("SELECT s.id,f.package,f.module,f.path,s.qualified_name,s.kind,COALESCE(s.condition,'') FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language='erlang' AND s.kind='function' ORDER BY s.id")?;
+    let mut statement=c.cached_prepare("SELECT s.id,f.package,f.module,f.path,s.qualified_name,s.kind,COALESCE(s.condition,'') FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language_id=(SELECT id FROM atoms WHERE value='erlang') AND s.kind='function' ORDER BY s.id")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         cancel.check()?;
@@ -104,7 +102,7 @@ fn elixir(c: &Connection, cancel: &Cancellation) -> Result<()> {
         JOIN files f ON f.id=s.file_id
         JOIN bindings b ON b.file_id=s.file_id
         AND b.target_local=s.local_id
-        WHERE s.language='elixir'
+        WHERE s.language_id=(SELECT id FROM atoms WHERE value='elixir')
         AND b.kind='elixir_function'
         ORDER BY s.id")?;
     let mut rows = statement.query([])?;

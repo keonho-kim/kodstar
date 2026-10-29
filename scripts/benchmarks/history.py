@@ -52,6 +52,7 @@ def all_contents(project):
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
         register(db)
         for identity, size, hash_value in db.execute("SELECT id,size,hash FROM blobs ORDER BY id"):
+            hash_value = hash_value.hex() if isinstance(hash_value, bytes) else hash_value
             result.update(json.dumps([identity, size, hash_value]).encode())
             received = 0
             for part, content in db.execute("SELECT part,content FROM chunks WHERE blob=? ORDER BY part", (identity,)):

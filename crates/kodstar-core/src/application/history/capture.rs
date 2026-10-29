@@ -14,9 +14,11 @@ use crate::infrastructure::{
     cache::{now_seconds, paths::path_bytes},
     scan,
 };
-use rusqlite::{OptionalExtension, params};
+use rusqlite::params;
 use std::fs::{self, File};
 use std::path::Path;
+
+mod catalog;
 
 pub(crate) fn run(
     repository: &mut Repository,
@@ -32,6 +34,7 @@ pub(crate) fn run(
     transaction
         .execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS temp.observed_path ON observed(path);")?;
     let mut contents = blobs::Writer::new(&transaction)?;
+    let mut catalog = catalog::Catalog::new(&transaction)?;
     scan::walk(
         &repository.root,
         cache_home,
@@ -49,13 +52,7 @@ pub(crate) fn run(
                 "file"
             };
             let mode = file_mode(metadata);
-            let old: Option<(i64, u64, String, String, u32)> = transaction
-                .query_row(
-                    "SELECT blob,size,modified,changed,mode FROM working WHERE path=?1 AND kind=?2",
-                    params![path, kind],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-                )
-                .optional()?;
+            let old = catalog.previous(&path, kind)?;
             let previous = old.as_ref().map(|v| v.0);
             let blob = if !verify
                 && old.as_ref().is_some_and(|(_, size, m, c, permissions)| {
@@ -112,14 +109,20 @@ pub(crate) fn run(
                 }
                 blob
             };
-            transaction.execute(
-                "INSERT INTO observed VALUES(?1,?2,?3,?4,?5,?6,?7)",
-                params![path, blob, mode, kind, metadata.len(), modified, changed],
-            )?;
+            catalog.observe(params![
+                path,
+                blob,
+                mode,
+                kind,
+                metadata.len(),
+                modified,
+                changed
+            ])?;
             Ok(())
         },
     )?;
     drop(contents);
+    drop(catalog);
     let parent = checkpoints::head(&transaction)?;
     let count: u64 = transaction.query_row("SELECT (SELECT count(*) FROM observed o LEFT JOIN working w ON w.path=o.path WHERE w.path IS NULL OR o.blob<>w.blob OR o.mode<>w.mode OR o.kind<>w.kind) + (SELECT count(*) FROM working w WHERE NOT EXISTS(SELECT 1 FROM observed o WHERE o.path=w.path))", [], |r| r.get(0))?;
     let created = count > 0 || parent.is_none();

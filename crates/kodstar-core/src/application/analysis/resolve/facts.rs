@@ -49,7 +49,8 @@ pub(super) fn run<'conn>(
                     language,
                 } = item;
                 after = fact;
-                let language = language.parse().ok();
+                let language = Some(language);
+                let relation = relation.as_str();
                 if current_context
                     .as_ref()
                     .is_none_or(|c| c.id != file || Some(c.language) != language)
@@ -64,7 +65,7 @@ pub(super) fn run<'conn>(
                 let mut lookup = Lookup {
                     connection,
                     fact: Some(fact),
-                    relation: &relation,
+                    relation,
                     external_scope_id: 0,
                     scope_sequence: 0,
                     external_present: false,
@@ -76,7 +77,7 @@ pub(super) fn run<'conn>(
                     language: context.language,
                     namespace: crate::domain::resolve::namespaces::Namespace::usage(
                         context.language,
-                        &relation,
+                        relation,
                         &expression,
                     ),
                     receiver: false,

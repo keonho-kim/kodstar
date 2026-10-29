@@ -43,8 +43,13 @@ impl Lookup<'_, '_> {
         let Some(file) = file else {
             return Ok(None);
         };
-        let mut statement=self.connection.cached_prepare("SELECT file_id,scope_id,module_name,imported_name,start_byte,kind,name,type_name FROM bindings
-            WHERE file_id=?1 AND kind IN ('export','export_type','commonjs_export_module','commonjs_export_exports') AND (name=?2 OR name_key=?3) ORDER BY id LIMIT 2")?;
+        let name_filter = if rust_key.is_some() {
+            "name_key_id IN (SELECT id FROM atoms WHERE value IN (?2,?3)) AND"
+        } else {
+            ""
+        };
+        let mut statement=self.connection.cached_prepare(&format!("SELECT file_id,scope_id,module_name,imported_name,start_byte,kind,name,type_name FROM bindings
+            WHERE {name_filter} file_id=?1 AND kind_id IN (SELECT id FROM atoms WHERE value IN ('export','export_type','commonjs_export_module','commonjs_export_exports')) AND (name=?2 OR name_key=?3) ORDER BY id LIMIT 2"))?;
         let mut records = statement.query_map(params![file, head, rust_key], Export::read)?;
         let first = records.next().transpose()?;
         if records.next().transpose()?.is_some() {

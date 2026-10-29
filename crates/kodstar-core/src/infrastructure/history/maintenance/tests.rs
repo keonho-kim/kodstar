@@ -11,7 +11,7 @@ use rusqlite::{
 
 pub(super) fn legacy() -> Result<Connection> {
     let connection = Connection::open_in_memory()?;
-    connection.execute_batch(include_str!("../schema.sql"))?;
+    connection.execute_batch(include_str!("fixtures/schema_v5.sql"))?;
     connection.execute_batch("CREATE TABLE chunks(blob INTEGER REFERENCES blobs(id),part INTEGER,content BLOB,PRIMARY KEY(blob,part)) WITHOUT ROWID; PRAGMA user_version=1; PRAGMA foreign_keys=ON;
         INSERT INTO checkpoints VALUES(1,NULL,123,1,1); UPDATE branches SET checkpoint=1;
         INSERT INTO names VALUES('saved',1); INSERT INTO checkout VALUES(1,1,NULL,NULL);
@@ -44,7 +44,7 @@ fn upgrade_preserves_identifiers_labels_journal_and_all_bytes() -> Result<()> {
     run(&connection, &cancel)?;
     assert_eq!(
         connection.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        5
+        6
     );
     assert_eq!(
         connection.query_row("SELECT target FROM checkout", [], |r| r.get::<_, i64>(0))?,
@@ -133,12 +133,17 @@ fn failed_compaction_preserves_the_completed_format_and_can_be_retried() -> Resu
     run(&connection, &cancel)?;
     connection.execute_batch("PRAGMA query_only=ON;")?;
     let error = compact(&connection, &cancel).expect_err("read-only compaction succeeded");
-    assert!(error.to_string().contains("format is 5"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains(&format!("format is {}", super::super::VERSION)),
+        "{error}"
+    );
     connection.execute_batch("PRAGMA query_only=OFF;")?;
     compact(&connection, &cancel)?;
     assert_eq!(
         connection.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        5
+        6
     );
     assert_eq!(
         connection.query_row("SELECT target FROM checkout", [], |r| r.get::<_, i64>(0))?,

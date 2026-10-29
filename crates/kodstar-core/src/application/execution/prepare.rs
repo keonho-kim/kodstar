@@ -40,7 +40,11 @@ pub(super) fn project(
         index::require_history(&connection, &repository.identity()?, None)?;
     }
     let changes = if watch {
-        Some(Changes::start(&selected.root, &store.home)?)
+        Some(Changes::start(
+            &selected.root,
+            &store.home,
+            &selected.settings.exclude,
+        )?)
     } else {
         None
     };

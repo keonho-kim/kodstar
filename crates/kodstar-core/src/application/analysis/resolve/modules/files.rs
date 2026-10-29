@@ -11,6 +11,9 @@ use crate::domain::languages::Language;
 use rusqlite::params;
 use std::path::Path;
 
+#[cfg(test)]
+mod tests;
+
 impl Lookup<'_, '_> {
     pub(in crate::application::analysis::resolve) fn module_files(
         &mut self,
@@ -94,7 +97,21 @@ impl Lookup<'_, '_> {
                 | Language::Swift
                 | Language::CommonLisp
         ) {
-            self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT ?4,id FROM files WHERE language=?1 AND package=?2 AND (module=?3 OR ?1='pascal' AND lower(module)=lower(?3)) AND status='analyzed'",params![context.language.as_str(),context.package,module,depth])?;
+            let module_filter = if context.language == Language::Pascal {
+                "lower(module)=lower(?3)"
+            } else {
+                "module_id=(SELECT id FROM atoms WHERE value=?3)"
+            };
+            self.connection.cached_execute(
+                &format!(
+                    "INSERT OR IGNORE INTO resolution_modules
+                SELECT ?4,id FROM files
+                WHERE language_id=(SELECT id FROM atoms WHERE value=?1)
+                  AND package_id=(SELECT id FROM atoms WHERE value=?2)
+                  AND {module_filter} AND status_id=(SELECT id FROM atoms WHERE value='analyzed')"
+                ),
+                params![context.language.as_str(), context.package, module, depth],
+            )?;
         }
         if javascript
             || context.language == Language::Ruby && raw.starts_with('.')

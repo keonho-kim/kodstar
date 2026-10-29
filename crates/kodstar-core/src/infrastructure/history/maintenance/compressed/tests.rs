@@ -8,7 +8,7 @@ use crate::infrastructure::history::content::{blobs, chunk_read, chunks};
 
 fn fixture() -> Result<(Connection, Vec<u8>, Vec<u8>)> {
     let connection = Connection::open_in_memory()?;
-    connection.execute_batch(include_str!("../../schema.sql"))?;
+    connection.execute_batch(include_str!("../fixtures/schema_v5.sql"))?;
     connection.execute_batch(chunks::SCHEMA)?;
     connection.execute_batch(
         "PRAGMA foreign_keys=ON; PRAGMA user_version=4;
@@ -72,7 +72,7 @@ fn upgrade_preserves_content_addresses_ids_and_orphans() -> Result<()> {
     super::super::run(&connection, &Cancellation::default())?;
     assert_eq!(
         connection.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        5
+        6
     );
     for (id, expected) in [(11, base), (22, changed)] {
         assert_eq!(

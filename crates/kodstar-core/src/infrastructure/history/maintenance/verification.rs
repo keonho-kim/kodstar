@@ -17,6 +17,7 @@ impl Repository {
 
 pub(super) fn verify(connection: &rusqlite::Connection, cancel: &Cancellation) -> Result<()> {
     references(connection)?;
+    super::metadata::verify(connection, cancel)?;
     let mut reader = super::super::content::chunk_read::Reader::new(connection);
     let mut chunks = connection.prepare("SELECT id FROM chunk_data")?;
     let mut chunks = chunks.query([])?;

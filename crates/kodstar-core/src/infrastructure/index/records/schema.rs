@@ -79,7 +79,11 @@ pub(super) fn create(c: &Connection, l: &Layout) -> Result<()> {
                 let col = columns.iter().find(|c| c.name == *k).ok_or_else(|| {
                     rusqlite::Error::ModuleError("unknown atom column in analysis layout".into())
                 })?;
-                Ok(value(col, default))
+                Ok(if default {
+                    value(col, true)
+                } else {
+                    format!("CASE WHEN NEW.{k} IS OLD.{k} THEN NULL ELSE NEW.{k} END")
+                })
             })
             .collect::<Result<Vec<_>>>()?
             .join(","))
@@ -146,10 +150,10 @@ pub(super) fn create(c: &Connection, l: &Layout) -> Result<()> {
     c.execute_batch(&format!("
       CREATE TRIGGER {name}_insert INSTEAD OF INSERT ON {name} BEGIN
         {insert_guard}
-        INSERT OR IGNORE INTO atoms(value) SELECT value FROM json_each(json_array({insert_atoms})) WHERE value IS NOT NULL;
+        INSERT OR IGNORE INTO atoms(value) SELECT value FROM json_each(jsonb_array({insert_atoms})) WHERE value IS NOT NULL;
         INSERT INTO {table}({names}) VALUES({insert}) {conflict}; END;
       CREATE TRIGGER {name}_update INSTEAD OF UPDATE ON {name} BEGIN
-        INSERT OR IGNORE INTO atoms(value) SELECT value FROM json_each(json_array({update_atoms})) WHERE value IS NOT NULL;
+        INSERT OR IGNORE INTO atoms(value) SELECT value FROM json_each(jsonb_array({update_atoms})) WHERE value IS NOT NULL;
         UPDATE {table} SET {update} WHERE id=OLD.id; END;
       CREATE TRIGGER {name}_delete INSTEAD OF DELETE ON {name} BEGIN DELETE FROM {table} WHERE id=OLD.id; END;
     ",name=l.name,insert_atoms=atom_values(true)?,update_atoms=atom_values(false)?,conflict=l.conflict))?;

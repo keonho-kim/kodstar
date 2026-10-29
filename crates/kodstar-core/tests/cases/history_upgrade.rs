@@ -24,6 +24,9 @@ fn v4_history_is_preserved_until_explicit_upgrade() -> TestResult {
         0
     );
     let identity: String = db.query_row("SELECT identity FROM repository", [], |r| r.get(0))?;
+    db.execute_batch(include_str!(
+        "../../src/infrastructure/history/maintenance/fixtures/restore_v5.sql"
+    ))?;
     db.execute_batch("PRAGMA user_version=4;")?;
     let error = p.build(false).expect_err("format 4 was silently accepted");
     assert!(error.to_string().contains("history upgrade"), "{error}");
@@ -34,7 +37,7 @@ fn v4_history_is_preserved_until_explicit_upgrade() -> TestResult {
     p.history(HistoryRequest::Upgrade)?;
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        5
+        6
     );
     assert_eq!(
         db.query_row("SELECT identity FROM repository", [], |r| r
@@ -63,7 +66,7 @@ fn current_format_repack_preserves_checkpoint_identity_and_actual_restore() -> T
     let db = rusqlite::Connection::open(p.root.join(".kodstar/repository.sqlite"))?;
     encoding::register(&db)?;
     let identities = |db: &rusqlite::Connection| -> rusqlite::Result<Vec<(i64, String, u64)>> {
-        db.prepare("SELECT id,hash,size FROM blobs ORDER BY id")?
+        db.prepare("SELECT id,lower(hex(hash)),size FROM blobs ORDER BY id")?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect()
     };
@@ -94,6 +97,9 @@ fn shared_v2_history_requires_explicit_upgrade_and_keeps_all_content() -> TestRe
     p.build(false)?;
     let db = rusqlite::Connection::open(p.root.join(".kodstar/repository.sqlite"))?;
     encoding::register(&db)?;
+    db.execute_batch(include_str!(
+        "../../src/infrastructure/history/maintenance/fixtures/restore_v5.sql"
+    ))?;
     db.execute_batch("CREATE TABLE old_data(hash BLOB PRIMARY KEY,lines INTEGER,first_newline INTEGER,last_newline INTEGER,content BLOB) WITHOUT ROWID;
       INSERT INTO old_data SELECT d.hash,d.lines,d.first_newline,d.last_newline,kodstar_content(d.content,d.codec,d.size,b.content,b.codec,b.size) FROM chunk_data d LEFT JOIN chunk_data b ON b.id=d.base;
       CREATE TABLE old_refs(blob INTEGER,part INTEGER,hash BLOB,PRIMARY KEY(blob,part)) WITHOUT ROWID;
@@ -114,7 +120,7 @@ fn shared_v2_history_requires_explicit_upgrade_and_keeps_all_content() -> TestRe
     encoding::register(&db)?;
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        5
+        6
     );
     let saved: Vec<u8> = db.query_row("SELECT content FROM chunks", [], |r| r.get(0))?;
     assert_eq!(saved, content.as_bytes());
@@ -144,6 +150,9 @@ fn legacy_history_requires_explicit_upgrade_and_preserves_its_checkpoint() -> Te
     encoding::register(&connection)?;
     let identity: String =
         connection.query_row("SELECT identity FROM repository", [], |r| r.get(0))?;
+    connection.execute_batch(include_str!(
+        "../../src/infrastructure/history/maintenance/fixtures/restore_v5.sql"
+    ))?;
     connection.execute_batch("CREATE TABLE legacy_chunks(blob INTEGER,part INTEGER,content BLOB,PRIMARY KEY(blob,part)) WITHOUT ROWID;
         INSERT INTO legacy_chunks SELECT * FROM chunks; DROP VIEW chunks; DROP TABLE chunk_refs; DROP TABLE chunk_data;
         ALTER TABLE legacy_chunks RENAME TO chunks; PRAGMA user_version=1;")?;
@@ -164,7 +173,7 @@ fn legacy_history_requires_explicit_upgrade_and_preserves_its_checkpoint() -> Te
     encoding::register(&connection)?;
     assert_eq!(
         connection.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-        5
+        6
     );
     assert_eq!(
         connection.query_row("SELECT identity FROM repository", [], |r| r

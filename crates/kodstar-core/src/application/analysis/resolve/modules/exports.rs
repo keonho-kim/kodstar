@@ -53,20 +53,21 @@ impl Lookup<'_, '_> {
         } else {
             (head, None)
         };
+        let name_filter = if context.language == crate::domain::languages::Language::Rust {
+            "s.name_key_id IN (SELECT id FROM atoms WHERE value IN (?1,?4)) AND"
+        } else {
+            ""
+        };
         self.connection.cached_execute(
-            "INSERT OR IGNORE INTO resolution_candidates
-             SELECT s.id FROM symbols s JOIN resolution_modules m ON m.id=s.file_id
-             JOIN symbols o ON o.id=s.owner_id
-             WHERE m.depth=?2 AND (s.name=?1 OR s.language IN ('rust','pascal','kotlin') AND s.name_key=?4) AND o.kind IN ('file','module')
-               AND (s.language NOT IN ('javascript','typescript','erlang','elixir','go') OR s.exported=1)
-               AND (s.language<>'rust' OR s.kind<>'macro')
-               AND (s.language<>'erlang' OR EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.namespace IN ('any',?6)))
-               AND (s.language<>'zig' OR s.exported=1 OR s.file_id=?5)
-               AND (s.language<>'pascal' OR s.exported=1 OR s.file_id=?5)
-               AND (s.language<>'swift' OR s.exported=1 OR EXISTS(SELECT 1 FROM files caller JOIN files target ON target.id=s.file_id WHERE caller.id=?5 AND caller.module=target.module AND caller.package=target.package))
-               AND (?3 IS NULL OR EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='elixir_function' AND CAST(b.imported_name AS INTEGER)<=?3 AND CAST(b.module_name AS INTEGER)>=?3))
-               AND ((o.kind='file' AND NOT EXISTS(SELECT 1 FROM resolution_module_owners n WHERE n.depth=m.depth AND n.file_id=s.file_id)) OR o.id IN (SELECT owner_id FROM resolution_module_owners WHERE depth=m.depth AND file_id=s.file_id))",
-            params![head, depth,arity,context.language.lookup_key(head),context.id,self.namespace.as_str()],
+            &include_str!("candidates.sql").replace("/* indexed name guard */", name_filter),
+            params![
+                head,
+                depth,
+                arity,
+                context.language.lookup_key(head),
+                context.id,
+                self.namespace.as_str()
+            ],
         )?;
         self.scala_targets()?;
         self.cxx_targets()?;
@@ -94,16 +95,26 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         let snapshot = self.snapshot_modules(depth)?;
+        let name_filter = if self.language == crate::domain::languages::Language::Rust {
+            "b.name_key_id IN (SELECT id FROM atoms WHERE value IN (?1,?3)) AND"
+        } else {
+            ""
+        };
         let named: bool = self.connection.cached_row(
             &format!("SELECT EXISTS(SELECT 1 FROM bindings b JOIN resolution_module_snapshots m ON m.id=b.file_id
-             WHERE m.lookup_scope=?2 AND b.kind IN ('export','export_type','commonjs_export_module','commonjs_export_exports') AND (b.name=?1 OR b.name_key=?3) AND {EXPORT_SCOPE})"),
+             WHERE {name_filter} m.lookup_scope=?2 AND b.kind_id IN (SELECT id FROM atoms WHERE value IN ('export','export_type','commonjs_export_module','commonjs_export_exports')) AND (b.name=?1 OR b.name_key=?3) AND {EXPORT_SCOPE})"),
             params![head, snapshot,rust_key],
             |r| r.get(0),
         )?;
+        let name_filter = if self.language == crate::domain::languages::Language::Rust {
+            "b.name_key_id IN (SELECT id FROM atoms WHERE value IN (?1,?4,'*')) AND"
+        } else {
+            ""
+        };
         let mut exports = self.connection.cached_prepare(&format!(
             "SELECT b.file_id,b.scope_id,b.module_name,b.imported_name,b.start_byte,b.kind,b.name,b.type_name
              FROM bindings b JOIN resolution_module_snapshots m ON m.id=b.file_id
-             WHERE m.lookup_scope=?2 AND b.kind IN ('export','export_type','commonjs_export_module','commonjs_export_exports')
+             WHERE {name_filter} m.lookup_scope=?2 AND b.kind_id IN (SELECT id FROM atoms WHERE value IN ('export','export_type','commonjs_export_module','commonjs_export_exports'))
                AND (b.name=?1 OR b.name_key=?4 OR (?3=0 AND ?1<>'default' AND b.name='*')) AND {EXPORT_SCOPE} ORDER BY b.id"
         ))?;
         let records = exports.query_map(params![head, snapshot, named, rust_key], Export::read)?;

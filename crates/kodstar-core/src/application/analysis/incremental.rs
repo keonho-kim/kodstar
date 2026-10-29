@@ -8,6 +8,8 @@ use crate::infrastructure::index::FileRecord;
 use crate::infrastructure::index::invalidation;
 use rusqlite::Connection;
 
+mod body_environment;
+
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub(super) enum Resolution {
     #[default]
@@ -18,7 +20,7 @@ pub(super) enum Resolution {
 
 #[derive(Default)]
 pub(super) struct ReusePolicy {
-    rust_functions: Option<bool>,
+    bodies: Option<bool>,
     go_only: Option<bool>,
 }
 
@@ -27,14 +29,11 @@ impl ReusePolicy {
         if language == "go" {
             return Ok(true);
         }
-        if language != "rust" {
-            return Ok(false);
-        }
-        let eligible = match self.rust_functions {
+        let eligible = match self.bodies {
             Some(eligible) => eligible,
             None => {
-                let eligible = invalidation::rust_function_environment(connection)?;
-                self.rust_functions = Some(eligible);
+                let eligible = body_environment::reusable(connection)?;
+                self.bodies = Some(eligible);
                 eligible
             }
         };

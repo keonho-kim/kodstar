@@ -63,6 +63,8 @@ mod go_interfaces;
 mod go_paths;
 #[path = "cases/history_impact.rs"]
 mod history_impact;
+#[path = "cases/history_metadata.rs"]
+mod history_metadata;
 #[path = "cases/history_operations.rs"]
 mod history_operations;
 #[path = "cases/history_paths.rs"]
@@ -77,6 +79,8 @@ mod history_upgrade;
 mod history_watch;
 #[path = "cases/identities.rs"]
 mod identities;
+#[path = "cases/incremental_bodies.rs"]
+mod incremental_bodies;
 #[path = "cases/incremental_inputs.rs"]
 mod incremental_inputs;
 #[path = "cases/incremental_statistics.rs"]

@@ -177,7 +177,7 @@ pub(super) fn matches(
     let Some(blob) = blob else {
         return Ok(metadata.is_dir() && !metadata.file_type().is_symlink());
     };
-    let expected: Option<String> = repository
+    let expected: Option<Vec<u8>> = repository
         .connection
         .query_row("SELECT hash FROM blobs WHERE id=?1", [blob], |r| r.get(0))
         .optional()?;
@@ -211,5 +211,5 @@ pub(super) fn matches(
     } else {
         return Ok(false);
     }
-    Ok(hash.finalize().to_hex().as_str() == expected)
+    Ok(hash.finalize().as_bytes().as_slice() == expected)
 }

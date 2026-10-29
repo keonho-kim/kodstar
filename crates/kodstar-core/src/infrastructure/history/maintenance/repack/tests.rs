@@ -10,6 +10,7 @@ use std::io::Cursor;
 fn fixture() -> Result<(Connection, Vec<Vec<u8>>)> {
     let c = Connection::open_in_memory()?;
     c.execute_batch(include_str!("../../schema.sql"))?;
+    c.execute_batch(include_str!("../../metadata.sql"))?;
     c.execute_batch(chunks::SCHEMA)?;
     chunks::register(&c)?;
     c.execute_batch("PRAGMA foreign_keys=ON;")?;
