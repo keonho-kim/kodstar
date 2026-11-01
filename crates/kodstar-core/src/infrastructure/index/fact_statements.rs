@@ -68,6 +68,10 @@ impl<'conn> Statements<'conn> {
             limit,
         })
     }
+    pub(super) fn memory_bytes(&self) -> usize {
+        self.bytes
+    }
+
     pub(super) fn execute<P: Params>(&mut self, kind: Write, parameters: P) -> Result<()> {
         let index = kind as usize;
         let statement = &mut self.statements[index];

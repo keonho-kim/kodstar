@@ -43,9 +43,8 @@ pub(crate) fn unchanged_kind(connection: &Connection, record: &FileRecord) -> Re
 }
 
 pub(crate) fn semantic_deletions(connection: &Connection) -> Result<bool> {
-    let mut statement = connection.prepare(
-        "SELECT id,path,status FROM files WHERE path NOT IN (SELECT path FROM seen_files)",
-    )?;
+    let mut statement = connection
+        .prepare("SELECT id,path,status FROM files WHERE id IN (SELECT id FROM deleted_files)")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         let status: String = row.get(2)?;

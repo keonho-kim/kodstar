@@ -1,4 +1,4 @@
-// Purpose: 세대가 소유하는 고정 SQL 11개의 수명·메모리·매개변수 정리.
+// Purpose: 해석 작업의 고정 SQL과 불변 표식 판정의 수명·메모리 관리.
 // Pattern: Simple Module.
 // Usage: resolve가 생성하고 binding·후보·증거·관계 저장이 빌림.
 // Related: crates/kodstar-core/src/application/analysis/resolve/mod.rs, crates/kodstar-core/src/application/analysis/resolve/publication.rs.
@@ -16,6 +16,7 @@ pub(super) enum Publication {
 }
 
 pub(super) struct Prepared<'conn> {
+    pub(super) ruby_barriers: Cell<Option<super::ruby::Barriers>>,
     binding: RefCell<Statement<'conn>>,
     binding_exact: RefCell<Statement<'conn>>,
     candidates: RefCell<Statement<'conn>>,
@@ -59,6 +60,7 @@ impl<'conn> Prepared<'conn> {
             return Err(limit_error());
         }
         Ok(Self {
+            ruby_barriers: Cell::new(None),
             binding,
             binding_exact,
             candidates,

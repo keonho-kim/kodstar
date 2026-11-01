@@ -45,6 +45,7 @@ impl FileRecord {
         &self,
         connection: &Connection,
         span: SourceSpan,
+        scope_ends: &[(u32, usize)],
     ) -> Result<()> {
         self.refresh_metadata(connection)?;
         let id: i64 = connection.query_row(
@@ -58,6 +59,15 @@ impl FileRecord {
         )?;
         connection.execute("UPDATE symbols_rows SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND local_id=0",
             params![span.start_byte,span.end_byte,span.line,span.column,span.end_line,span.end_column,id])?;
+        let mut update =
+            connection.prepare("UPDATE scopes SET end_byte=?1 WHERE file_id=?2 AND local_id=?3")?;
+        for (local, end) in scope_ends {
+            if update.execute(params![end, id, local])? != 1 {
+                return Err(crate::domain::diagnostics::Error::operation(
+                    "reused scope is missing",
+                ));
+            }
+        }
         Ok(())
     }
 

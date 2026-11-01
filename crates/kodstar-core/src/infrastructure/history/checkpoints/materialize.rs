@@ -4,13 +4,25 @@
 // Related: crates/kodstar-core/src/infrastructure/history/checkpoints.rs, crates/kodstar-core/src/infrastructure/history/metadata.sql.
 
 use crate::domain::diagnostics::{Error, Result};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) fn run(c: &Connection, id: i64) -> Result<()> {
-    c.execute_batch("DROP TABLE IF EXISTS temp.snapshot_files; CREATE TEMP TABLE snapshot_files(path BLOB PRIMARY KEY,blob INTEGER,mode INTEGER,kind TEXT) WITHOUT ROWID;")?;
+    let kind: Option<String> = c
+        .query_row(
+            "SELECT type FROM sqlite_temp_schema WHERE name='snapshot_files'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if kind.as_deref() == Some("view") {
+        c.execute_batch("DROP VIEW temp.snapshot_files;")?;
+    } else {
+        c.execute_batch("DROP TABLE IF EXISTS temp.snapshot_files;")?;
+    }
+    c.execute_batch("CREATE TEMP TABLE snapshot_files(path BLOB PRIMARY KEY,blob INTEGER,mode INTEGER,kind TEXT) WITHOUT ROWID;")?;
     let head = super::head(c)?;
     if head == Some(id) {
         c.execute_batch("INSERT INTO snapshot_files SELECT path,blob,mode,kind FROM working;")?;

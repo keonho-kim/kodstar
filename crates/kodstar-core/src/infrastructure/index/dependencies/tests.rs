@@ -56,6 +56,16 @@ fn bounded_publication_preserves_both_lookup_outcomes_and_deletion() -> Result<(
     );
     let sql = "SELECT sum(json_array_length(kodstar_postings(payload,count))) FROM lookup_blocks";
     assert_eq!(connection.query_row(sql, [], |r| r.get::<_, i64>(0))?, 300);
+    connection.execute_batch("CREATE TEMP TABLE writes(value INTEGER);
+        CREATE TEMP TRIGGER observe_insert AFTER INSERT ON main.lookup_rows BEGIN INSERT INTO writes VALUES(1); END;
+        CREATE TEMP TRIGGER observe_update AFTER UPDATE ON main.lookup_rows BEGIN INSERT INTO writes VALUES(1); END;
+        CREATE TEMP TRIGGER observe_delete AFTER DELETE ON main.lookup_rows BEGIN INSERT INTO writes VALUES(1); END;")?;
+    publish(&connection)?;
+    assert_eq!(
+        connection.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_, i64>(0))?,
+        0,
+        "identical lookup publication rewrote persistent blocks"
+    );
     connection.execute("DELETE FROM lookup_rows WHERE file_id=1", [])?;
     assert_eq!(connection.query_row(sql, [], |r| r.get::<_, i64>(0))?, 11);
     Ok(())
@@ -83,11 +93,11 @@ fn selected_fact_replacement_preserves_other_consumers_of_each_key() -> Result<(
         "INSERT INTO dependent_files VALUES(1); INSERT INTO affected_facts VALUES(1);
         DELETE FROM resolution_dependencies;",
     )?;
-    remove_selected(&c)?;
+    prepare_selected(&c)?;
     assert_eq!(
         c.query_row("SELECT sum(count) FROM lookup_blocks", [], |r| r
             .get::<_, usize>(0))?,
-        2
+        4
     );
     c.execute_batch(
         "INSERT INTO resolution_dependencies VALUES(1,'name','target',0),(1,'name','other',1);",

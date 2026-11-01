@@ -6,17 +6,21 @@
 mod addresses;
 mod codec;
 mod decode;
+mod groups;
 mod merge;
 mod prior;
 pub(super) use prior::SCHEMA as PRIOR_SCHEMA;
+pub(in crate::infrastructure::index) mod routing;
 mod row;
+mod sets;
 mod writer;
 pub(crate) use row::Relation;
 use writer::Writer;
 mod mutation;
 mod publication;
+mod reconcile;
 mod removal;
-pub(crate) use mutation::{clear_bodies, remove_targets};
+pub(crate) use mutation::{clear_all, clear_bodies, remove_targets};
 mod verification;
 pub(crate) use removal::partial;
 pub(crate) use verification::verify;
@@ -27,14 +31,28 @@ pub(crate) use publication::publish;
 use super::packed::{Filter, Rows, codec::invalid};
 use rusqlite::{Connection, OptionalExtension, Result, params, types::Value};
 
-pub(crate) const SCHEMA: &str = include_str!("schema.sql");
+pub(crate) const SCHEMA: &str = concat!(
+    include_str!("schema.sql"),
+    include_str!("sets/schema.sql"),
+    include_str!("routing/schema.sql")
+);
 
-pub(super) fn scan(c: &Connection, after: i64, filters: &[Filter]) -> Result<Option<(i64, Rows)>> {
+pub(super) fn register(c: &Connection) -> Result<()> {
+    sets::register(c)?;
+    routing::register(c)
+}
+
+pub(super) fn scan(
+    c: &Connection,
+    after: i64,
+    filters: &[Filter],
+    routes: &mut routing::Cursor,
+) -> Result<Option<(i64, Rows)>> {
     let find = |col| filters.iter().find(|(k, _)| *k == col).map(|(_, v)| v);
     let block = if let Some(id) = find(0) {
         addresses::find(c, id, after)?
     } else if let Some(value) = find(1) {
-        route(c, 1, value, after)?
+        routes.next(c, 1, value, after)?
     } else if let Some(source) = find(2) {
         c.query_row(
             "SELECT id FROM relation_blocks WHERE source_id=?1 AND id>?2 ORDER BY id LIMIT 1",
@@ -43,9 +61,9 @@ pub(super) fn scan(c: &Connection, after: i64, filters: &[Filter]) -> Result<Opt
         )
         .optional()?
     } else if let Some(value) = find(3) {
-        route(c, 3, value, after)?
+        routes.next(c, 3, value, after)?
     } else if let Some(value) = find(6) {
-        route(c, 6, value, after)?
+        routes.next(c, 6, value, after)?
     } else {
         c.query_row(
             "SELECT id FROM relation_blocks WHERE id>?1 ORDER BY id LIMIT 1",
@@ -59,7 +77,7 @@ pub(super) fn scan(c: &Connection, after: i64, filters: &[Filter]) -> Result<Opt
             let (_, source, count, bytes) = block_data(c, id)?;
             Ok((
                 id,
-                Rows::Relations(codec::select(&bytes, count, source, filters)?),
+                Rows::Relations(codec::select(c, &bytes, count, source, filters)?),
             ))
         })
         .transpose()
@@ -75,7 +93,7 @@ fn block_data(c: &Connection, id: i64) -> Result<(i64, i64, usize, Vec<u8>)> {
 
 fn load(c: &Connection, id: i64) -> Result<(i64, i64, Vec<Relation>)> {
     let (file, source, count, bytes) = block_data(c, id)?;
-    Ok((file, source, codec::decode(&bytes, count, source)?))
+    Ok((file, source, codec::decode(c, &bytes, count, source)?))
 }
 
 fn store(c: &Connection, block: i64, file: i64, source: i64, rows: &[Relation]) -> Result<i64> {
@@ -140,9 +158,4 @@ pub(super) fn insert(c: &Connection, mut values: Vec<Value>) -> Result<i64> {
     rows.sort_by_key(|r| r.id);
     store(c, block, file, source, &rows)?;
     Ok(id)
-}
-
-fn route(c: &Connection, kind: usize, value: &Value, after: i64) -> Result<Option<i64>> {
-    c.query_row("SELECT block FROM relation_routes WHERE kind=?1 AND entity=?2 AND block>?3 ORDER BY block LIMIT 1",
-        params![kind, value, after], |r| r.get(0)).optional()
 }

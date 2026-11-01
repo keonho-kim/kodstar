@@ -6,6 +6,7 @@
 //! SQLite resource ownership. Writers publish facts and relationships in one transaction.
 
 pub(crate) mod atoms;
+pub(crate) mod body_reuse;
 pub(crate) mod cached;
 mod definitions;
 pub(crate) mod dependencies;
@@ -43,8 +44,8 @@ pub(crate) use runtime::{limit_reads, observe_cancellation, stop_observing};
 pub(crate) use statistics::Update as CoverageUpdate;
 pub(crate) use write::{FileRecord, clear_file};
 
-pub(crate) const STORAGE_VERSION: u32 = 15;
-pub(crate) const EXTRACTION_VERSION: u32 = 45;
+pub(crate) const STORAGE_VERSION: u32 = 16;
+pub(crate) const EXTRACTION_VERSION: u32 = 47;
 pub(crate) fn require_history(
     connection: &Connection,
     repository: &str,

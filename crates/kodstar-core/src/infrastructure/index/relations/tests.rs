@@ -7,6 +7,11 @@ use super::*;
 
 #[test]
 fn multiple_use_sites_external_and_unresolved_are_lossless() -> Result<()> {
+    let c = Connection::open_in_memory()?;
+    parents(&c)?;
+    super::super::packed::register(&c)?;
+    c.execute_batch(SCHEMA)?;
+    let mut sets = super::sets::Writer::new(&c)?;
     let rows = vec![
         vec![
             1.into(),
@@ -43,10 +48,10 @@ fn multiple_use_sites_external_and_unresolved_are_lossless() -> Result<()> {
         .into_iter()
         .map(Relation::from_values)
         .collect::<Result<Vec<_>>>()?;
-    let bytes = codec::encode(&rows)?;
-    assert_eq!(codec::decode(&bytes, 3, 2)?, rows);
+    let bytes = codec::encode(&rows, &mut sets)?;
+    assert_eq!(codec::decode(&c, &bytes, 3, 2)?, rows);
     assert_eq!(
-        codec::select(&bytes, 3, 2, &[(0, Value::Integer(2))])?,
+        codec::select(&c, &bytes, 3, 2, &[(0, Value::Integer(2))])?,
         vec![Relation::from_values(vec![
             2.into(),
             9.into(),
@@ -58,9 +63,18 @@ fn multiple_use_sites_external_and_unresolved_are_lossless() -> Result<()> {
             5.into()
         ])?]
     );
-    assert!(codec::select(&bytes[..bytes.len() - 1], 3, 2, &[(0, Value::Integer(1))]).is_err());
-    assert!(codec::decode(&bytes[..bytes.len() - 1], 3, 2).is_err());
-    assert!(codec::decode(&bytes, 129, 2).is_err());
+    assert!(
+        codec::select(
+            &c,
+            &bytes[..bytes.len() - 1],
+            3,
+            2,
+            &[(0, Value::Integer(1))]
+        )
+        .is_err()
+    );
+    assert!(codec::decode(&c, &bytes[..bytes.len() - 1], 3, 2).is_err());
+    assert!(codec::decode(&c, &bytes, 129, 2).is_err());
     Ok(())
 }
 
@@ -170,7 +184,7 @@ fn repeated_partial_publication_reuses_space_and_preserves_unrelated_ids() -> Re
     Ok(())
 }
 
-fn parents(c: &Connection) -> Result<()> {
+pub(super) fn parents(c: &Connection) -> Result<()> {
     c.execute_batch(
         "CREATE TABLE files_rows(id INTEGER PRIMARY KEY);
         CREATE TABLE symbols_rows(id INTEGER PRIMARY KEY);
@@ -179,6 +193,65 @@ fn parents(c: &Connection) -> Result<()> {
         CREATE VIEW symbols AS SELECT * FROM symbols_rows;
         CREATE VIEW facts AS SELECT * FROM facts_rows;",
     )
+}
+
+#[test]
+fn equal_selected_results_do_not_rewrite_blocks_and_empty_results_remove_old_edges() -> Result<()> {
+    let c = Connection::open_in_memory()?;
+    parents(&c)?;
+    c.execute_batch("ALTER TABLE facts_rows ADD COLUMN language TEXT DEFAULT 'go';
+        ALTER TABLE facts_rows ADD COLUMN relation TEXT DEFAULT 'calls';
+        ALTER TABLE facts_rows ADD COLUMN expression TEXT DEFAULT 'target';
+        INSERT INTO files_rows VALUES(1); INSERT INTO symbols_rows VALUES(1),(2);
+        INSERT INTO facts_rows(id,file_id) VALUES(1,1),(2,1);
+        CREATE TEMP TABLE changed_files(id INTEGER PRIMARY KEY);
+        CREATE TEMP TABLE affected_facts(id INTEGER PRIMARY KEY); INSERT INTO affected_facts VALUES(1);
+        CREATE TEMP TABLE resolution_relationships(id INTEGER PRIMARY KEY,fact_id INTEGER,source_id INTEGER,target_id INTEGER,external_key TEXT,resolution TEXT,rule TEXT,reason TEXT);")?;
+    super::super::packed::register(&c)?;
+    c.execute_batch(SCHEMA)?;
+    c.execute_batch(
+        "INSERT INTO resolution_relationships VALUES(1,1,1,2,NULL,'resolved','fixture',NULL),
+        (2,2,1,2,NULL,'resolved','fixture',NULL);",
+    )?;
+    publish(&c)?;
+    c.execute_batch("CREATE TEMP TABLE writes(value INTEGER);
+        CREATE TEMP TRIGGER observe_insert AFTER INSERT ON main.relation_blocks BEGIN INSERT INTO writes VALUES(1); END;
+        CREATE TEMP TRIGGER observe_update AFTER UPDATE ON main.relation_blocks BEGIN INSERT INTO writes VALUES(1); END;
+        CREATE TEMP TRIGGER observe_delete AFTER DELETE ON main.relation_blocks BEGIN INSERT INTO writes VALUES(1); END;
+        DELETE FROM resolution_relationships;
+        INSERT INTO resolution_relationships VALUES(1,1,1,2,NULL,'resolved','fixture',NULL);
+        BEGIN;")?;
+    partial(&c)?;
+    publish(&c)?;
+    assert_eq!(
+        c.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_, i64>(0))?,
+        0,
+        "unchanged selected relation rewrote its block"
+    );
+    assert_eq!(
+        c.query_row("SELECT sum(id) FROM relationships", [], |r| r
+            .get::<_, i64>(0))?,
+        3
+    );
+    c.execute_batch("DELETE FROM resolution_relationships;")?;
+    partial(&c)?;
+    publish(&c)?;
+    assert_eq!(
+        c.query_row("SELECT count(*) FROM relationships", [], |r| r
+            .get::<_, i64>(0))?,
+        1
+    );
+    assert_eq!(
+        c.query_row("SELECT id FROM relationships", [], |r| r.get::<_, i64>(0))?,
+        2
+    );
+    c.execute_batch("ROLLBACK;")?;
+    assert_eq!(
+        c.query_row("SELECT count(*) FROM relationships", [], |r| r
+            .get::<_, i64>(0))?,
+        2
+    );
+    Ok(())
 }
 
 #[test]

@@ -1,13 +1,15 @@
 -- Purpose: Ruby instance/singleton 방향을 유지한 상속·mixin 후보 탐색.
 -- Pattern: SQLite Recursive Query.
--- Usage: ruby.rs가 실제 receiver 후보와 이름·dispatch side를 전달.
+-- Usage: ruby/mod.rs가 실제 receiver 후보와 이름·dispatch side를 전달.
 -- Related: crates/kodstar-core/src/application/analysis/resolve/ruby/mod.rs.
 
 INSERT OR IGNORE INTO resolution_members
 WITH RECURSIVE matching(id,owner,side) AS (
   SELECT s.id,s.owner_id,COALESCE(b.module_name,'any') FROM symbols s
-  LEFT JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id AND b.kind='ruby_dispatch'
-  WHERE s.language='ruby' AND s.name=?1
+  LEFT JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id
+    AND b.kind_id=(SELECT id FROM atoms WHERE value='ruby_dispatch')
+  WHERE s.language_id=(SELECT id FROM atoms WHERE value='ruby')
+    AND s.name_key_id=(SELECT id FROM atoms WHERE value=?1)
 ), owners(id,side) AS (
   SELECT id,?2 FROM resolution_candidates
   UNION

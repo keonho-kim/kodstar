@@ -24,6 +24,7 @@ pub(super) type Filter = (usize, Value);
 
 pub(super) fn register(connection: &Connection) -> Result<()> {
     super::dictionary::routing::register(connection)?;
+    super::relations::register(connection)?;
     connection.execute_batch(super::relations::PRIOR_SCHEMA)?;
     const KEYS: Module<Table> = Module::eponymous_only_module();
     const EDGES: Module<Table> = Module::update_module();

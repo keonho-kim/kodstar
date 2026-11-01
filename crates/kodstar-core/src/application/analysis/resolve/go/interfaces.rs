@@ -40,9 +40,9 @@ pub(in crate::application::analysis::resolve) fn run(
         let fact:i64=connection.cached_row(
             "INSERT INTO facts(id,file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
              SELECT (SELECT COALESCE(MAX(id),0)+1 FROM facts_rows),file_id,id,scope_id,'@go-interface:'||(SELECT logical_key FROM symbols WHERE id=?2),'implements',language,condition,0,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM symbols WHERE id=?1 RETURNING id",params![source,target],|r|r.get(0))?;
-        connection.cached_execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set',?4)",params![fact,source,target,REASON])?;
+        connection.cached_execute("INSERT INTO resolution_relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set',?4)",params![fact,source,target,REASON])?;
     }
-    Ok(())
+    super::super::publication::flush_relationships(connection)
 }
 
 pub(in crate::application::analysis::resolve) fn dispatch(
@@ -61,7 +61,7 @@ pub(in crate::application::analysis::resolve) fn dispatch(
          JOIN go_methods implementation ON implementation.root=implements.source_id AND implementation.name=required.name
          WHERE rule.value='go_method_set' AND f.relation_id=(SELECT id FROM atoms WHERE value='calls')
            AND call.resolution='resolved' AND declaration.language_id=(SELECT id FROM atoms WHERE value='go')
-           AND (?1=0 OR f.file_id IN (SELECT id FROM changed_files) OR f.id IN (SELECT id FROM affected_facts))
+           AND (?1=0 OR f.id IN (SELECT id FROM affected_facts))
          ORDER BY call.fact_id,implementation.id")?;
     let records = statement.query_map([changed_only], |r| {
         Ok((
@@ -76,9 +76,12 @@ pub(in crate::application::analysis::resolve) fn dispatch(
         let fact:i64=connection.cached_row(
             "INSERT INTO facts(id,file_id,source_id,scope_id,expression,relation,language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte)
              SELECT (SELECT COALESCE(MAX(id),0)+1 FROM facts_rows),file_id,?2,scope_id,expression,'dispatch_candidate',language,condition,type_only,start_byte,end_byte,line,column_byte,end_line,end_column_byte FROM facts WHERE id=?1 RETURNING id",params![origin,source],|r|r.get(0))?;
-        connection.cached_execute("INSERT INTO relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set_dispatch',?4)",params![fact,source,target,REASON])?;
+        connection.cached_execute("INSERT INTO resolution_relationships(fact_id,source_id,target_id,resolution,rule,reason) VALUES(?1,?2,?3,'candidate','go_method_set_dispatch',?4)",params![fact,source,target,REASON])?;
+        if changed_only {
+            connection.cached_execute("INSERT OR IGNORE INTO affected_facts VALUES(?1)", [fact])?;
+        }
     }
-    Ok(())
+    super::super::publication::flush_relationships(connection)
 }
 
 pub(in crate::application::analysis::resolve) fn refresh_calls(
@@ -102,7 +105,7 @@ pub(in crate::application::analysis::resolve) fn refresh_calls(
     let methods:bool=connection.cached_row(
         "SELECT EXISTS(SELECT 1 FROM facts f
          CROSS JOIN relationships r ON r.fact_id=f.id JOIN symbols s ON s.id=r.target_id JOIN symbols owner ON owner.id=s.owner_id
-         WHERE (f.file_id IN (SELECT id FROM changed_files) OR f.id IN (SELECT id FROM affected_facts))
+         WHERE (f.id IN (SELECT id FROM affected_facts))
            AND f.relation_id=(SELECT id FROM atoms WHERE value='calls') AND r.resolution='resolved' AND s.language='go'
            AND owner.kind IN ('struct','interface','type') AND s.kind IN ('method','function'))",[],|r|r.get(0))?;
     if !methods {

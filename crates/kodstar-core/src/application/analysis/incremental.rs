@@ -1,4 +1,4 @@
-// Purpose: 사실 재사용과 변경 파일 해석을 허용하는 보수적인 조건 판정.
+// Purpose: 사실 재사용·부분 해석의 안전 조건과 전체 해석 전이 관리.
 // Pattern: Specification.
 // Usage: writer가 환경이 같은 본문 후보에만 검사하고 설정·삭제는 분석이 반영.
 // Related: crates/kodstar-core/src/application/analysis/mod.rs, crates/kodstar-core/src/domain/facts/fingerprint.rs.
@@ -8,7 +8,7 @@ use crate::infrastructure::index::FileRecord;
 use crate::infrastructure::index::invalidation;
 use rusqlite::Connection;
 
-mod body_environment;
+pub(super) mod inputs;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub(super) enum Resolution {
@@ -18,31 +18,41 @@ pub(super) enum Resolution {
     All,
 }
 
+impl Resolution {
+    pub fn reset_all(&mut self, connection: &Connection) -> Result<()> {
+        if *self != Self::All {
+            crate::infrastructure::index::statistics::inputs::finish(connection)?;
+            crate::infrastructure::index::relations::clear_all(connection)?;
+            *self = Self::All;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ReusePolicy {
-    bodies: Option<bool>,
     go_only: Option<bool>,
+    simple_modules: Option<(&'static str, bool)>,
 }
 
 impl ReusePolicy {
-    pub fn bodies(&mut self, connection: &Connection, language: &str) -> Result<bool> {
-        if language == "go" {
-            return Ok(true);
-        }
-        let eligible = match self.bodies {
-            Some(eligible) => eligible,
-            None => {
-                let eligible = body_environment::reusable(connection)?;
-                self.bodies = Some(eligible);
-                eligible
-            }
-        };
-        Ok(eligible)
-    }
-
     pub fn declarations(&mut self, connection: &Connection, language: &str) -> Result<bool> {
         if language != "go" {
-            return Ok(false);
+            let Some(group) = invalidation::static_modules::group(language) else {
+                return Ok(false);
+            };
+            let (selected, eligible) = match self.simple_modules {
+                Some(value) => value,
+                None => {
+                    let value = (
+                        group,
+                        invalidation::static_modules::project(connection, language)?,
+                    );
+                    self.simple_modules = Some(value);
+                    value
+                }
+            };
+            return Ok(selected == group && eligible);
         }
         let eligible = match self.go_only {
             Some(eligible) => eligible,
@@ -58,7 +68,7 @@ impl ReusePolicy {
 
 pub(super) fn scoped_declarations(connection: &Connection, record: &FileRecord) -> Result<bool> {
     if let Some(id) = invalidation::prior_file(connection, record)?
-        && !invalidation::package_functions(connection, id)?
+        && !invalidation::safe_file(connection, id)?
     {
         return Ok(false);
     }

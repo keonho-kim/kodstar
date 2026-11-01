@@ -16,6 +16,7 @@ mod extraction;
 mod incremental;
 mod module_identity;
 mod pipeline;
+mod positions;
 mod replay;
 mod resolve;
 mod swift_projects;
@@ -101,8 +102,18 @@ pub(crate) fn run(
             transaction.execute_batch("CREATE TEMP TABLE IF NOT EXISTS seen_files(path BLOB PRIMARY KEY); CREATE TEMP TABLE IF NOT EXISTS changed_files(id INTEGER PRIMARY KEY);
                 CREATE TEMP TABLE IF NOT EXISTS dependent_files(id INTEGER PRIMARY KEY);
                 CREATE TEMP TABLE IF NOT EXISTS affected_facts(id INTEGER PRIMARY KEY);
-                DELETE FROM seen_files; DELETE FROM changed_files; DELETE FROM dependent_files; DELETE FROM affected_facts; DELETE FROM relation_prior;")?;
-            index::statistics::delta::reset(&transaction, !full && generation > 0)?;
+                CREATE TEMP TABLE IF NOT EXISTS deleted_files(id INTEGER PRIMARY KEY);
+                CREATE TEMP TABLE IF NOT EXISTS body_files(id INTEGER PRIMARY KEY,granular INTEGER NOT NULL DEFAULT 0);
+                CREATE TEMP TABLE IF NOT EXISTS pending_lookup_keys(id INTEGER PRIMARY KEY);
+                CREATE TEMP TABLE IF NOT EXISTS invalidated_lookup_keys(id INTEGER PRIMARY KEY);
+                DELETE FROM seen_files; DELETE FROM changed_files; DELETE FROM dependent_files; DELETE FROM affected_facts; DELETE FROM deleted_files; DELETE FROM relation_prior;
+                DELETE FROM pending_lookup_keys; DELETE FROM invalidated_lookup_keys; DELETE FROM body_files;")?;
+            index::statistics::delta::reset(
+                &transaction,
+                !full && generation > 0,
+                selected.settings.fact_batch_bytes / 64,
+            )?;
+            index::statistics::inputs::begin(&transaction, !full && generation > 0)?;
             let (mut changed, mut parsed, reused, mut resolution) = pipeline::run(
                 pipeline::Input {
                     database,
@@ -114,11 +125,10 @@ pub(crate) fn run(
                 cancel,
                 progress,
             )?;
-            let deleted: u64 = transaction.query_row(
-                "SELECT COUNT(*) FROM files WHERE path NOT IN (SELECT path FROM seen_files)",
-                [],
-                |row| row.get(0),
-            )?;
+            index::body_reuse::clear(&transaction)?;
+            let deleted: u64 =
+                transaction
+                    .query_row("SELECT COUNT(*) FROM deleted_files", [], |row| row.get(0))?;
             let semantic_deletions =
                 deleted > 0 && index::inert_inputs::semantic_deletions(&transaction)?;
             let scoped_deletions =
@@ -127,12 +137,18 @@ pub(crate) fn run(
                 index::statistics::delta::remember_deleted(&transaction)?;
                 resolution = resolution.max(incremental::Resolution::Selected);
             }
+            if semantic_deletions && !scoped_deletions {
+                resolution.reset_all(&transaction)?;
+            }
             if deleted > 0 {
                 changed = true;
-                transaction.execute("DELETE FROM relation_blocks WHERE file_id IN (SELECT id FROM files WHERE path NOT IN (SELECT path FROM seen_files))", [])?;
+                transaction.execute(
+                    "DELETE FROM relation_blocks WHERE file_id IN (SELECT id FROM deleted_files)",
+                    [],
+                )?;
                 index::relations::remove_targets(&transaction, None)?;
                 transaction.execute(
-                    "DELETE FROM files WHERE path NOT IN (SELECT path FROM seen_files)",
+                    "DELETE FROM files WHERE id IN (SELECT id FROM deleted_files)",
                     [],
                 )?;
             }
@@ -151,7 +167,7 @@ pub(crate) fn run(
                 configurations::run(selected, &transaction, cancel, progress)?;
             changed |= configuration_changed;
             if full || (semantic_deletions && !scoped_deletions) || configuration_changed {
-                resolution = incremental::Resolution::All;
+                resolution.reset_all(&transaction)?;
             }
             parsed += configuration_parsed;
             let at = if changed {
@@ -181,6 +197,7 @@ pub(crate) fn run(
                 transaction.execute("UPDATE metadata SET generation=?1,config_hash=?2,indexed_at=?3,last_update='complete',last_error=NULL,engine_version=?4,extraction_version=?5,relation_registry_version=?6 WHERE singleton=1",params![next_generation,fingerprint,at,crate::VERSION,index::EXTRACTION_VERSION,crate::domain::relations::RELATION_REGISTRY_VERSION])?;
                 at
             } else {
+                index::statistics::inputs::finish(&transaction)?;
                 transaction.execute(
                     "UPDATE metadata SET last_update='complete',last_error=NULL
                  WHERE singleton=1 AND (last_update<>'complete' OR last_error IS NOT NULL)",

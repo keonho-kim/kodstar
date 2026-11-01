@@ -3,7 +3,6 @@
 // Usage: analysis discovery와 명시 설정 읽기가 저장된 소스를 선택.
 // Related: crates/kodstar-core/src/infrastructure/history/inputs/entry.rs.
 
-use super::Snapshot;
 mod entry;
 use crate::domain::{
     cancellation::Cancellation,
@@ -20,19 +19,24 @@ use std::path::Path;
 use std::rc::Rc;
 
 pub(crate) fn walk(
-    snapshot: &Snapshot,
+    connection: Rc<rusqlite::Connection>,
+    changed_only: bool,
     excludes: &[String],
     overrides: &[(globset::GlobMatcher, Language)],
     cancel: &Cancellation,
     emit: &mut dyn FnMut(Entry) -> Result<()>,
 ) -> Result<()> {
-    let connection = Rc::new(snapshot.open(cancel)?);
     let excluded = excludes
         .iter()
         .map(|s| globset::Glob::new(s).map(|g| g.compile_matcher()))
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| Error::caused_by("compile snapshot exclusions", e))?;
-    let mut statement = connection.prepare("SELECT f.path,f.blob,b.size,lower(hex(b.hash)) FROM snapshot_files f JOIN blobs b ON b.id=f.blob WHERE f.kind='file' ORDER BY f.path")?;
+    let source = if changed_only {
+        "snapshot_changes delta CROSS JOIN snapshot_files f ON f.path=delta.path"
+    } else {
+        "snapshot_files f"
+    };
+    let mut statement = connection.prepare(&format!("SELECT f.path,f.blob,b.size,lower(hex(b.hash)) FROM {source} JOIN blobs b ON b.id=f.blob WHERE f.kind='file' ORDER BY f.path"))?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         cancel.check()?;

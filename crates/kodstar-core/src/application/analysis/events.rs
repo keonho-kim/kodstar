@@ -29,6 +29,9 @@ pub(super) enum InputKind {
     Configuration,
 }
 pub(super) enum Event {
+    Remove {
+        path: PathBuf,
+    },
     Begin {
         record: FileRecord,
         preserve: bool,
@@ -44,6 +47,7 @@ pub(super) enum Event {
     UnchangedFacts {
         record: FileRecord,
         span: SourceSpan,
+        scope_ends: Vec<(u32, usize)>,
     },
     Reuse {
         record: FileRecord,
@@ -80,6 +84,7 @@ pub(super) struct Events {
 impl Events {
     pub(super) fn send(&self, event: Event) -> Result<()> {
         let size = match &event {
+            Event::Remove { path } => path.capacity(),
             Event::Facts { facts, .. } => {
                 facts.capacity() * std::mem::size_of::<(Language, Fact)>()
                     + facts
@@ -87,8 +92,10 @@ impl Events {
                         .map(|(_, fact)| fact.owned_bytes() - std::mem::size_of::<Fact>())
                         .sum::<usize>()
             }
+            Event::UnchangedFacts {
+                record, scope_ends, ..
+            } => record.owned_bytes() + scope_ends.capacity() * std::mem::size_of::<(u32, usize)>(),
             Event::Begin { record, .. }
-            | Event::UnchangedFacts { record, .. }
             | Event::Reuse { record, .. }
             | Event::Skip { record, .. } => record.owned_bytes(),
             Event::End { fingerprints, .. } => {

@@ -17,7 +17,7 @@ pub(super) fn run<'conn>(
 ) -> Result<()> {
     let mut current_context: Option<FileContext> = None;
     let filter = if selected_only {
-        "(file_id IN (SELECT id FROM changed_files) OR id IN (SELECT id FROM affected_facts)) AND "
+        "id IN (SELECT id FROM affected_facts) AND "
     } else {
         ""
     };
@@ -82,6 +82,7 @@ pub(super) fn run<'conn>(
                     ),
                     receiver: false,
                     ruby_side_checked: false,
+                    ruby_side: None,
                     prepared,
                 };
                 lookup.ejs_context(context, scope)?;

@@ -19,7 +19,7 @@ struct Digest(blake3::Hasher);
 impl Default for Digest {
     fn default() -> Self {
         let mut hash = blake3::Hasher::new();
-        hash.update(b"kodstar-syntax-facts-v1");
+        hash.update(b"kodstar-syntax-facts-v2");
         Self(hash)
     }
 }
@@ -42,15 +42,24 @@ pub(crate) struct Fingerprinter {
 
 impl Fingerprinter {
     pub(crate) fn push(&mut self, language: Language, fact: &mut Fact) {
-        let root = match fact {
-            Fact::Scope(s) => s.local_id == 0,
-            Fact::Definition(d) => d.local_id == 0,
-            _ => false,
+        let original = match fact {
+            Fact::Scope(s) if s.local_id != 0 => {
+                let original = s.span;
+                s.span.end_byte = s.span.start_byte;
+                s.span.end_line = s.span.line;
+                s.span.end_column = s.span.column;
+                Some(original)
+            }
+            Fact::Scope(_) | Fact::Definition(super::Definition { local_id: 0, .. }) => {
+                replace_span(fact)
+            }
+            _ => None,
         };
-        // File length is refreshed independently; every other fact field remains significant.
-        let original = root.then(|| replace_span(fact)).flatten();
+        // Scope ends are refreshed separately. Binding/use positions and definition
+        // extents remain significant, including any visibility or derived fact changes.
         language.as_str().hash(&mut self.all);
         fact.hash(&mut self.all);
+        restore_span(fact, original);
         if !matches!(fact, Fact::Use(u) if matches!(u.relation, RelationKind::Calls | RelationKind::References))
         {
             let position = replace_span(fact);
@@ -58,7 +67,6 @@ impl Fingerprinter {
             fact.hash(&mut self.environment);
             restore_span(fact, position);
         }
-        restore_span(fact, original);
     }
 
     pub(crate) fn finish(self) -> Fingerprints {

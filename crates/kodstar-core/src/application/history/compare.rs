@@ -11,7 +11,7 @@ use crate::domain::{
 };
 use crate::infrastructure::{
     cache::paths::{encoding, path_from_bytes},
-    history::{Repository, checkpoints},
+    history::{Repository, changes, checkpoints},
 };
 use rusqlite::OptionalExtension;
 
@@ -39,14 +39,14 @@ pub(super) fn run(
             .optional()?
             .flatten()
     };
-    if let Some(from) = from {
-        checkpoints::materialize(connection, from)?;
-    } else {
-        connection.execute_batch("DROP TABLE IF EXISTS temp.snapshot_files; CREATE TEMP TABLE snapshot_files(path BLOB,blob INTEGER,mode INTEGER,kind TEXT);")?;
-    }
-    connection.execute_batch("DROP TABLE IF EXISTS temp.diff_before; CREATE TEMP TABLE diff_before AS SELECT * FROM snapshot_files; CREATE UNIQUE INDEX temp.diff_before_path ON diff_before(path);")?;
-    checkpoints::materialize(connection, to)?;
-    let mut statement=connection.prepare("SELECT a.path,a.blob,b.blob,CASE WHEN x.hash IS NULL THEN NULL ELSE lower(hex(x.hash)) END,CASE WHEN y.hash IS NULL THEN NULL ELSE lower(hex(y.hash)) END,a.kind,b.kind,a.mode,b.mode FROM diff_before a LEFT JOIN snapshot_files b ON a.path=b.path LEFT JOIN blobs x ON x.id=a.blob LEFT JOIN blobs y ON y.id=b.blob WHERE b.path IS NULL OR a.blob<>b.blob OR a.mode<>b.mode OR a.kind<>b.kind UNION ALL SELECT b.path,NULL,b.blob,NULL,lower(hex(y.hash)),NULL,b.kind,NULL,b.mode FROM snapshot_files b JOIN blobs y ON y.id=b.blob WHERE NOT EXISTS(SELECT 1 FROM diff_before a WHERE a.path=b.path) ORDER BY 1")?;
+    changes::prepare(connection, from, to, cancel)?;
+    let mut statement=connection.prepare("SELECT c.path,c.before_blob,c.after_blob,
+        CASE WHEN x.hash IS NOT NULL THEN lower(hex(x.hash)) END,
+        CASE WHEN y.hash IS NOT NULL THEN lower(hex(y.hash)) END,
+        CASE WHEN c.before_blob IS NULL THEN NULL WHEN c.before_attributes&512 THEN 'symlink' ELSE 'file' END,
+        CASE WHEN c.after_blob IS NULL THEN NULL WHEN c.after_attributes&512 THEN 'symlink' ELSE 'file' END,
+        c.before_attributes&511,c.after_attributes&511 FROM snapshot_changes c
+        LEFT JOIN blobs x ON x.id=c.before_blob LEFT JOIN blobs y ON y.id=c.after_blob ORDER BY c.path")?;
     let mut rows = statement.query([])?;
     let mut count = 0;
     while let Some(row) = rows.next()? {

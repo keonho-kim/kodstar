@@ -12,7 +12,33 @@ pub(super) fn package_path(
     language: Option<Language>,
 ) -> crate::domain::diagnostics::Result<PathBuf> {
     let relative = &entry.relative;
-    let marker = match language {
+    let marker = marker(language);
+    let mut package_path = PathBuf::new();
+    if !marker.is_empty() {
+        for directory in relative
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .ancestors()
+        {
+            if entry.has_file(&directory.join(marker))? {
+                package_path = directory.to_path_buf();
+                break;
+            }
+        }
+    }
+    Ok(package_path)
+}
+
+pub(super) fn package_boundary(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        Language::ALL
+            .into_iter()
+            .any(|language| !marker(Some(language)).is_empty() && name == marker(Some(language)))
+    })
+}
+
+fn marker(language: Option<Language>) -> &'static str {
+    match language {
         Some(Language::Rust) => "Cargo.toml",
         Some(Language::Go) => "go.mod",
         Some(Language::Python) => "pyproject.toml",
@@ -28,21 +54,7 @@ pub(super) fn package_path(
         Some(Language::Swift) => "Package.swift",
         Some(Language::Elixir) => "mix.exs",
         _ => "",
-    };
-    let mut package_path = PathBuf::new();
-    if !marker.is_empty() {
-        for directory in relative
-            .parent()
-            .unwrap_or_else(|| Path::new(""))
-            .ancestors()
-        {
-            if entry.has_file(&directory.join(marker))? {
-                package_path = directory.to_path_buf();
-                break;
-            }
-        }
     }
-    Ok(package_path)
 }
 
 pub(super) fn module_identity(

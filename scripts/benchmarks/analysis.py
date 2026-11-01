@@ -145,6 +145,55 @@ def mutation_runs(binary, project, home, common, fixture):
         yield name, result
 
 
+def semantic_result(result, lookup_contract_change=False):
+    coverage = {key: value for key, value in result["coverage"].items() if key != "reused_files"}
+    indexed = dict(result["indexed_results"])
+    if lookup_contract_change:
+        indexed.pop("lookups_sha256")
+    return coverage, indexed, result["source_results"]
+
+
+def edit_run(binary, project, home, common, filename, suffix=b"\n", replacement=None):
+    source = (project / filename).resolve(strict=True)
+    if not source.is_relative_to(project.resolve()) or not source.is_file():
+        raise RuntimeError("newline probe must refer to a file inside the owned project copy")
+    if replacement:
+        before, after = (value.encode("utf-8") for value in replacement)
+        content = source.read_bytes()
+        if not before or before not in content or before == after:
+            raise RuntimeError("body replacement must change an existing nonempty source fragment")
+        source.write_bytes(content.replace(before, after, 1))
+    else:
+        with source.open("ab") as stream:
+            stream.write(suffix)
+    results = {}
+    for mode, arguments in [("incremental", ["symbols", filename, "--all", *common]),
+                            ("full", ["init", "--yes", "--full", *common])]:
+        result = measure(binary, project, home, arguments)
+        result["indexed_results"] = indexed_results(home)
+        result["source_results"] = source_results(project)
+        results[mode] = result
+    if semantic_result(results["incremental"]) != semantic_result(results["full"]):
+        raise RuntimeError("edited input incremental/full results differ")
+    return results
+
+
+def declaration_suffix(filename):
+    name = "kodstar_benchmark_added"
+    extension = Path(filename).suffix
+    patterns = {
+        ".py": f"\ndef {name}(): pass\n",
+        ".go": f"\nfunc {name}() {{}}\n",
+        ".rs": f"\npub fn {name}() {{}}\n",
+        ".js": f"\nexport function {name}() {{}}\n",
+        ".ts": f"\nexport function {name}() {{}}\n",
+        ".zig": f"\npub fn {name}() void {{}}\n",
+    }
+    if extension not in patterns:
+        raise RuntimeError("declaration probe requires a Python, Go, Rust, JavaScript, TypeScript or Zig file")
+    return patterns[extension].encode("utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__ or "Compare macOS KodStar release binaries")
     parser.add_argument("--baseline", required=True, type=Path)
@@ -155,16 +204,25 @@ def main():
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--mutations", action="store_true", help="also compare a Go probe's notes, body, additions and deletions")
+    parser.add_argument("--newline-edit", action="store_true", help="compare an appended newline and verify incremental/full equivalence")
+    parser.add_argument("--body-replacement", nargs=2, metavar=("OLD", "NEW"), help="replace one source fragment and verify incremental/full equivalence")
+    parser.add_argument("--declaration-edit", action="store_true", help="append a function and verify incremental/full equivalence")
+    parser.add_argument("--lookup-contract-change", action="store_true",
+                        help="compare nine output/source hashes across binaries; still require all ten for edited incremental/full")
     args = parser.parse_args()
+    if args.lookup_contract_change and not (args.newline_edit or args.declaration_edit or args.body_replacement):
+        parser.error("--lookup-contract-change requires an edit probe to verify the new dependency contract")
     if platform.system() != "Darwin" or args.repeats < 1 or args.jobs < 1:
         parser.error("macOS and positive repeat and worker counts are required")
     project = args.project.resolve(strict=True)
     report = {"platform": platform.platform(), "machine": platform.machine(), "jobs": args.jobs, "runs": [],
+              "lookup_contract_change": args.lookup_contract_change,
               "binary_sha256": {"baseline": binary_digest(args.baseline),
                                 "candidate": binary_digest(args.candidate)}}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     expected = None
     expected_mutations = {}
+    expected_edits = {}
     # Package and object identities include the canonical root. Reset one owned path
     # rather than comparing opaque identities from unrelated temporary roots.
     with tempfile.TemporaryDirectory(prefix="kodstar-benchmark-input-") as sandbox:
@@ -187,10 +245,13 @@ def main():
                     run["init"] = measure(binary.resolve(strict=True), working, home, ["init", "--yes", *common])
                     for mode, extra in [("synchronize", []), ("readonly", ["--no-refresh"])]:
                         run[mode] = measure(binary.resolve(strict=True), working, home,
-                                            ["symbols", args.file, *common, *extra])
+                                            ["symbols", args.file, "--all", *common, *extra])
                     run["indexed_results"] = indexed_results(home)
                     run["source_results"] = source_results(working)
-                    observed = (run["init"]["coverage"], {**run["indexed_results"], **run["source_results"]})
+                    compared = {**run["indexed_results"], **run["source_results"]}
+                    if args.lookup_contract_change:
+                        compared.pop("lookups_sha256")
+                    observed = (run["init"]["coverage"], compared)
                     report["runs"].append(run)
                     if expected is None:
                         expected = observed
@@ -205,11 +266,23 @@ def main():
                         args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
                         raise RuntimeError(f"indexed results differ; comparison refused: {args.output}")
                     print(label, repeat, "init", round(run["init"]["seconds"], 3), "seconds", flush=True)
+                    for name, enabled in [("newline", args.newline_edit), ("body", args.body_replacement), ("declaration", args.declaration_edit)]:
+                        if not enabled:
+                            continue
+                        suffix = declaration_suffix(args.file) if name == "declaration" else b"\n"
+                        run[name] = edit_run(binary.resolve(strict=True), working, home, common, args.file, suffix,
+                                             args.body_replacement if name == "body" else None)
+                        observed_edit = semantic_result(run[name]["incremental"], args.lookup_contract_change)
+                        if name not in expected_edits:
+                            expected_edits[name] = observed_edit
+                        elif observed_edit != expected_edits[name]:
+                            raise RuntimeError(f"baseline/candidate {name} results differ")
+                        print(label, repeat, name, round(run[name]["incremental"]["seconds"], 3), "seconds", flush=True)
                     if fixture:
                         run["mutations"] = {}
                         for name, result in mutation_runs(binary.resolve(strict=True), working, home, common, fixture):
                             run["mutations"][name] = result
-                            observed_mutation = (result["coverage"], result["indexed_results"], result["source_results"])
+                            observed_mutation = semantic_result(result, args.lookup_contract_change)
                             if name not in expected_mutations:
                                 expected_mutations[name] = observed_mutation
                             elif observed_mutation != expected_mutations[name]:
@@ -233,6 +306,12 @@ def main():
                 name: {key: statistics.median(run["mutations"][name][key] for run in runs)
                        for key in ["seconds", "rss_bytes", "history_bytes", "cache_bytes"]}
                 for name in expected_mutations
+            }
+        for name in expected_edits:
+            report["medians"][label][name] = {
+                mode: {key: statistics.median(run[name][mode][key] for run in runs)
+                       for key in ["seconds", "rss_bytes", "history_bytes", "cache_bytes"]}
+                for mode in ["incremental", "full"]
             }
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report["medians"], indent=2))

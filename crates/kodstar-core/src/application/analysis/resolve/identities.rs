@@ -1,7 +1,7 @@
-// Purpose: 명시적 C# partial 정의의 논리 키·대표 객체 대응 계산.
+// Purpose: 언어별 논리 정체성·대표 객체와 새 공개 후보의 대응 계산.
 // Pattern: Simple Module.
 // Usage: 매 갱신에서 lexical 해석 전에 실행하며 원래 구문 행은 보존.
-// Related: crates/kodstar-core/src/application/analysis/resolve/mod.rs, crates/kodstar-core/src/infrastructure/index/schema.sql.
+// Related: crates/kodstar-core/src/application/analysis/resolve/mod.rs, crates/kodstar-core/src/application/analysis/resolve/publication.rs.
 
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::Result;
@@ -142,7 +142,15 @@ pub(super) fn candidates(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn relationships(c: &Connection) -> Result<()> {
-    c.execute_batch("UPDATE relationship_rows SET source_id=(SELECT canonical_id FROM symbol_identities WHERE symbol_id=relationship_rows.source_id),target_id=(SELECT canonical_id FROM symbol_identities WHERE symbol_id=relationship_rows.target_id);")?;
+pub(super) fn publication(c: &Connection) -> Result<()> {
+    let merged: bool = c.cached_row("SELECT EXISTS(SELECT 1 FROM symbol_aliases)", [], |r| {
+        r.get(0)
+    })?;
+    if merged {
+        c.execute_batch("UPDATE resolution_relationships SET
+            source_id=COALESCE((SELECT canonical_id FROM symbol_aliases WHERE symbol_id=resolution_relationships.source_id),source_id),
+            target_id=COALESCE((SELECT canonical_id FROM symbol_aliases WHERE symbol_id=resolution_relationships.target_id),target_id)
+            WHERE source_id IN (SELECT symbol_id FROM symbol_aliases) OR target_id IN (SELECT symbol_id FROM symbol_aliases);")?;
+    }
     Ok(())
 }

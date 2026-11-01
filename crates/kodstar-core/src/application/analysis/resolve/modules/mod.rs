@@ -89,7 +89,15 @@ impl Lookup<'_, '_> {
             [depth],
             |row| row.get(0),
         )?;
-        if context.language != Language::Go {
+        if !matches!(
+            context.language,
+            Language::Go
+                | Language::Python
+                | Language::Rust
+                | Language::JavaScript
+                | Language::TypeScript
+                | Language::Zig
+        ) {
             self.dependency("module", &format!("{}:{module}", context.package), found)?;
         }
         if !found {

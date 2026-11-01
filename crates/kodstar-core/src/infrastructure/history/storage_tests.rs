@@ -7,6 +7,43 @@ use super::content::{blobs, chunks, reader};
 use super::*;
 use std::io::Cursor;
 
+#[test]
+fn current_snapshot_reads_a_pinned_view_without_copying_the_catalog() -> Result<()> {
+    let temporary = tempfile::tempdir().map_err(|e| Error::caused_by("test directory", e))?;
+    let database = temporary.path().join("history.sqlite");
+    let writer = Connection::open(&database)?;
+    writer.execute_batch(include_str!("schema.sql"))?;
+    writer.execute_batch(include_str!("metadata.sql"))?;
+    writer.execute_batch(
+        "PRAGMA journal_mode=WAL;
+        INSERT INTO blobs VALUES(1,zeroblob(32),0);
+        INSERT INTO checkpoints VALUES(1,NULL,0,1,1);
+        UPDATE branches SET checkpoint=1;
+        INSERT INTO working VALUES(CAST('first.rs' AS BLOB),1,420,'file',0,'','');",
+    )?;
+    let snapshot = Snapshot { database, id: 1 }.open(&Cancellation::default())?;
+    assert_eq!(
+        snapshot.query_row(
+            "SELECT type FROM sqlite_temp_schema WHERE name='snapshot_files'",
+            [],
+            |r| r.get::<_, String>(0)
+        )?,
+        "view"
+    );
+    writer.execute("DELETE FROM working", [])?;
+    assert_eq!(
+        snapshot.query_row("SELECT count(*) FROM snapshot_files", [], |r| r
+            .get::<_, i64>(0))?,
+        1
+    );
+    drop(snapshot);
+    drop(writer);
+    temporary
+        .close()
+        .map_err(|e| Error::caused_by("remove test directory", e))?;
+    Ok(())
+}
+
 fn database() -> Result<Connection> {
     let connection = Connection::open_in_memory()?;
     connection.execute_batch(include_str!("schema.sql"))?;

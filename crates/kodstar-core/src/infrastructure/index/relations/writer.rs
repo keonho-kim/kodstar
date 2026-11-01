@@ -3,24 +3,18 @@
 // Usage: 관계 publication·부분 무효화가 한 transaction에서 소유.
 // Related: crates/kodstar-core/src/infrastructure/index/relations/mod.rs, crates/kodstar-core/src/infrastructure/index/relations/publication.rs.
 
-use super::{Relation, codec};
+use super::{Relation, codec, routing, sets};
 use rusqlite::{Connection, Result, Statement, params};
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-
-const ROUTE_ENTITIES: &str = "SELECT 1 AS kind,json_extract(value,'$[1]') AS entity FROM jsonb_each(?1)
-    UNION ALL SELECT 3,json_extract(value,'$[2]') FROM jsonb_each(?1) WHERE json_extract(value,'$[2]') IS NOT NULL
-    UNION ALL SELECT 6,json_extract(value,'$[3]') FROM jsonb_each(?1)
-    UNION ALL SELECT 6,json_extract(value,'$[4]') FROM jsonb_each(?1) WHERE json_extract(value,'$[4]') IS NOT NULL";
 
 pub(super) struct Writer<'a> {
     connection: &'a Connection,
     pack: Statement<'a>,
     remove_ids: Statement<'a>,
-    remove_routes: Statement<'a>,
     remove_block: Statement<'a>,
     block: Statement<'a>,
     ids: Statement<'a>,
-    routes: Statement<'a>,
+    sets: sets::Writer<'a>,
 }
 
 impl<'a> Writer<'a> {
@@ -29,23 +23,21 @@ impl<'a> Writer<'a> {
             connection: c,
             pack: c.prepare("SELECT jsonb(?1)")?,
             remove_ids: c.prepare(&format!("DELETE FROM relation_id_ranges WHERE block=?2 AND (first,last) NOT IN ({})", super::addresses::RANGES))?,
-            remove_routes: c.prepare(&format!("DELETE FROM relation_routes WHERE block=?2 AND (kind,entity) NOT IN ({ROUTE_ENTITIES})"))?,
             remove_block: c.prepare("DELETE FROM relation_blocks WHERE id=?1")?,
-            block: c.prepare("INSERT INTO relation_blocks(id,file_id,source_id,count,payload) VALUES(nullif(?1,0),?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET count=excluded.count,payload=excluded.payload WHERE relation_blocks.count<>excluded.count OR relation_blocks.payload<>excluded.payload")?,
+            block: c.prepare("INSERT INTO relation_blocks(id,file_id,source_id,count,payload,routes) VALUES(nullif(?1,0),?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET count=excluded.count,payload=excluded.payload,routes=excluded.routes WHERE relation_blocks.count<>excluded.count OR relation_blocks.payload<>excluded.payload OR relation_blocks.routes<>excluded.routes")?,
             ids: c.prepare(&format!("INSERT OR IGNORE INTO relation_id_ranges SELECT first,last,?2 FROM ({})", super::addresses::RANGES))?,
-            routes: c.prepare(&format!("INSERT OR IGNORE INTO relation_routes SELECT kind,entity,?2 FROM ({ROUTE_ENTITIES})"))?,
+            sets: sets::Writer::new(c)?,
         })
     }
 
     pub fn store(&mut self, block: i64, file: i64, source: i64, rows: &[Relation]) -> Result<i64> {
-        let routes = serde_json::to_string(&Routes(rows))
+        let routes = serde_json::to_string(&Ids(rows))
             .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
         let packed = self.pack.query_row([&routes], |r| r.get::<_, Vec<u8>>(0));
         self.pack.clear_bindings();
         let routes = packed?;
         if block != 0 {
             self.remove_ids.execute(params![routes, block])?;
-            self.remove_routes.execute(params![routes, block])?;
         }
         if rows.is_empty() {
             self.remove_block.execute([block])?;
@@ -56,7 +48,8 @@ impl<'a> Writer<'a> {
             file,
             source,
             rows.len(),
-            codec::encode(rows)?
+            codec::encode(rows, &mut self.sets)?,
+            routing::encode(rows)?
         ])?;
         let block = if block == 0 {
             self.connection.last_insert_rowid()
@@ -65,17 +58,16 @@ impl<'a> Writer<'a> {
         };
         // Retain equal mappings and routes; only changed entries reach SQLite's writer.
         self.ids.execute(params![routes, block])?;
-        self.routes.execute(params![routes, block])?;
         Ok(block)
     }
 }
 
-struct Routes<'a>(&'a [Relation]);
-impl Serialize for Routes<'_> {
+struct Ids<'a>(&'a [Relation]);
+impl Serialize for Ids<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
         for row in self.0 {
-            sequence.serialize_element(&row.routes())?;
+            sequence.serialize_element(&[row.id])?;
         }
         sequence.end()
     }

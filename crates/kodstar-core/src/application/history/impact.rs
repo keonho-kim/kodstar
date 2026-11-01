@@ -180,13 +180,11 @@ fn changes(
     after: &Connection,
     cancel: &Cancellation,
 ) -> Result<()> {
-    checkpoints::materialize(repository, from)?;
-    repository.execute_batch("DROP TABLE IF EXISTS temp.impact_before; CREATE TEMP TABLE impact_before AS SELECT * FROM snapshot_files; CREATE UNIQUE INDEX temp.impact_before_path ON impact_before(path);")?;
-    checkpoints::materialize(repository, to)?;
+    crate::infrastructure::history::changes::prepare(repository, Some(from), to, cancel)?;
     for connection in [before, after] {
         connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS q_changed_inputs(path BLOB PRIMARY KEY); DELETE FROM q_changed_inputs;")?;
     }
-    let mut statement=repository.prepare("SELECT a.path FROM impact_before a LEFT JOIN snapshot_files b ON a.path=b.path WHERE b.path IS NULL OR a.blob<>b.blob OR a.mode<>b.mode OR a.kind<>b.kind UNION SELECT b.path FROM snapshot_files b WHERE NOT EXISTS(SELECT 1 FROM impact_before a WHERE a.path=b.path)")?;
+    let mut statement = repository.prepare("SELECT path FROM snapshot_changes ORDER BY path")?;
     let mut rows = statement.query([])?;
     let mut left = before.prepare("INSERT INTO q_changed_inputs VALUES(?1)")?;
     let mut right = after.prepare("INSERT INTO q_changed_inputs VALUES(?1)")?;

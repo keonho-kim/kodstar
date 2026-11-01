@@ -71,6 +71,17 @@ pub(crate) fn configuration_file(
 
 impl Lookup<'_, '_> {
     pub(super) fn indexed_path(&self, path: &Path, kind: PathKind, depth: usize) -> Result<bool> {
+        let provider = match kind {
+            PathKind::JavaScript => Some(crate::domain::resolve::lookup_keys::path_provider(
+                "javascript",
+                &path_bytes(&crate::domain::resolve::lookup_keys::javascript_path(path)),
+            )),
+            PathKind::Zig => Some(crate::domain::resolve::lookup_keys::path_provider(
+                "zig",
+                &path_bytes(path),
+            )),
+            _ => None,
+        };
         let (extensions, allowed): (&[&str], &str) = match kind {
             PathKind::JavaScript => (
                 &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
@@ -116,8 +127,14 @@ impl Lookup<'_, '_> {
                     "INSERT OR IGNORE INTO resolution_modules VALUES(?1,?2)",
                     params![depth, id],
                 )?;
+                if let Some(key) = &provider {
+                    self.dependency("path_provider", key, true)?;
+                }
                 return Ok(true);
             }
+        }
+        if let Some(key) = &provider {
+            self.dependency("path_provider", key, false)?;
         }
         Ok(false)
     }

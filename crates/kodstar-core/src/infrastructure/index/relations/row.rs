@@ -97,16 +97,6 @@ impl Relation {
         }
     }
 
-    pub fn routes(&self) -> [Option<i64>; 5] {
-        [
-            Some(self.id),
-            Some(self.fact),
-            self.target,
-            Some(self.rule),
-            self.reason,
-        ]
-    }
-
     pub fn owned_bytes(&self) -> usize {
         std::mem::size_of::<Self>() + self.external.as_ref().map_or(0, String::capacity)
     }

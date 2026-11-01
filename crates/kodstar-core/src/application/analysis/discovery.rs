@@ -12,6 +12,7 @@ use crate::infrastructure::index::{self, FileRecord};
 use crate::infrastructure::{formats, history::inputs};
 use crossbeam_channel as channel;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,8 +25,13 @@ pub(super) struct Pipeline<'a> {
     pub(super) events: Events,
 }
 
+pub(super) struct Inventory {
+    pub partial: bool,
+    pub retained: u64,
+}
+
 impl Pipeline<'_> {
-    pub(super) fn produce(&self, sender: channel::Sender<Work>) -> Result<()> {
+    pub(super) fn produce(&self, sender: channel::Sender<Work>) -> Result<Inventory> {
         let reader = index::open(
             self.database,
             &self.selected.root,
@@ -34,6 +40,13 @@ impl Pipeline<'_> {
         )?;
         index::limit_reads(&reader, self.selected.settings.memory_budget)?;
         index::observe_cancellation(&reader, &self.events.cancel)?;
+        let selection = super::incremental::inputs::prepare(
+            self.selected,
+            &reader,
+            self.full,
+            self.verify,
+            &self.events.cancel,
+        )?;
         let overrides: Vec<_> = self
             .selected
             .settings
@@ -45,8 +58,10 @@ impl Pipeline<'_> {
             .collect::<std::result::Result<_, _>>()
             .map_err(|error| Error::caused_by("compile language overrides", error))?;
         let mut previous_query = index::PreviousFiles::new(&reader)?;
+        let mut touched = 0u64;
         let mut emit = |mut entry: inputs::Entry| {
             let previous = previous_query.get(&entry.relative)?;
+            touched += u64::from(previous.is_some());
             if entry.detect_prefix {
                 entry.language = if !self.full
                     && !self.verify
@@ -199,17 +214,45 @@ impl Pipeline<'_> {
                 }
             }
         };
-        let snapshot = self
-            .selected
-            .snapshot
-            .as_ref()
-            .ok_or_else(|| Error::operation("analysis requires a captured checkpoint"))?;
         inputs::walk(
-            snapshot,
+            Rc::clone(&selection.connection),
+            selection.partial,
             &self.selected.settings.exclude,
             &overrides,
             &self.events.cancel,
             &mut emit,
-        )
+        )?;
+        drop(emit);
+        if selection.partial {
+            let mut q = selection.connection.prepare(
+                "SELECT path FROM snapshot_changes
+                WHERE before_blob IS NOT NULL AND before_attributes&512=0
+                AND (after_blob IS NULL OR after_attributes&512<>0)",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(row) = rows.next()? {
+                self.events.cancel.check()?;
+                let path = crate::infrastructure::cache::paths::path_from_bytes(
+                    &row.get::<_, Vec<u8>>(0)?,
+                )?;
+                if previous_query.get(&path)?.is_some() {
+                    touched += 1;
+                    self.events.send(Event::Remove { path })?;
+                }
+            }
+        }
+        Ok(Inventory {
+            partial: selection.partial,
+            retained: if selection.partial {
+                selection
+                    .previous_files
+                    .checked_sub(touched)
+                    .ok_or_else(|| {
+                        Error::operation("changed input count exceeds the prior analysis")
+                    })?
+            } else {
+                0
+            },
+        })
     }
 }

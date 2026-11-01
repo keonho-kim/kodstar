@@ -19,12 +19,27 @@ pub(super) fn reset(c: &Connection) -> Result<()> {
 pub(super) fn flush(c: &Connection) -> Result<()> {
     crate::infrastructure::index::dependencies::publish(c)?;
 
-    crate::infrastructure::index::relations::publish(c)?;
+    flush_relationships(c)?;
 
     crate::infrastructure::index::dictionary::retire(c)?;
     crate::infrastructure::index::dictionary::routing::collect(c)?;
 
-    c.execute_batch("DELETE FROM resolution_dependencies; DELETE FROM resolution_relationships; DELETE FROM relation_prior;")?;
+    c.execute_batch("DELETE FROM resolution_dependencies; DELETE FROM relation_prior;")?;
+    Ok(())
+}
+
+pub(super) fn flush_relationships(c: &Connection) -> Result<()> {
+    let pending: bool = c.cached_row(
+        "SELECT EXISTS(SELECT 1 FROM resolution_relationships) OR EXISTS(SELECT 1 FROM relation_prior)",
+        [],
+        |r| r.get(0),
+    )?;
+    if !pending {
+        return Ok(());
+    }
+    identities::publication(c)?;
+    crate::infrastructure::index::relations::publish(c)?;
+    c.cached_execute("DELETE FROM resolution_relationships", [])?;
     Ok(())
 }
 

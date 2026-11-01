@@ -6,23 +6,34 @@
 use crate::domain::diagnostics::Result;
 use rusqlite::{Connection, params};
 
-const LIMIT: i64 = 128;
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn reset(c: &Connection, eligible: bool) -> Result<()> {
-    c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS statistics_delta(enabled INTEGER NOT NULL);
+pub(crate) fn reset(c: &Connection, eligible: bool, budget: usize) -> Result<()> {
+    c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS statistics_delta(enabled INTEGER NOT NULL,limit_count INTEGER NOT NULL);
         CREATE TEMP TABLE IF NOT EXISTS statistics_previous(id INTEGER PRIMARY KEY,resolved INTEGER,bad INTEGER);
         CREATE TEMP TABLE IF NOT EXISTS statistics_pending(id INTEGER PRIMARY KEY);
+        CREATE TEMP TABLE IF NOT EXISTS body_files(id INTEGER PRIMARY KEY,granular INTEGER NOT NULL DEFAULT 0);
         DELETE FROM statistics_delta; DELETE FROM statistics_previous; DELETE FROM statistics_pending;")?;
-    let large = if eligible {
+    let (large, limit) = if eligible {
         let prior = super::read(c)?;
-        prior.relationships.saturating_add(prior.unresolved) >= (LIMIT * 4) as u64
+        let size = prior.relationships.saturating_add(prior.unresolved);
+        (
+            size >= 512,
+            (size / 4).clamp(128, budget.clamp(128, 16384) as u64),
+        )
     } else {
-        false
+        (false, 128)
     };
-    c.execute("INSERT INTO statistics_delta VALUES(?1)", [large])?;
+    c.execute(
+        "INSERT INTO statistics_delta VALUES(?1,?2)",
+        params![large, limit],
+    )?;
     Ok(())
+}
+
+fn limit(c: &Connection) -> Result<i64> {
+    Ok(c.query_row("SELECT limit_count FROM statistics_delta", [], |r| r.get(0))?)
 }
 
 fn enabled(c: &Connection) -> Result<bool> {
@@ -40,7 +51,7 @@ pub(crate) fn remember_file(c: &Connection, file: i64) -> Result<()> {
     }
     c.execute(
         "INSERT OR IGNORE INTO statistics_pending SELECT id FROM facts WHERE file_id=?1 LIMIT ?2",
-        params![file, LIMIT + 1],
+        params![file, limit(c)? + 1],
     )?;
     remember(c)
 }
@@ -49,21 +60,31 @@ pub(crate) fn remember_deleted(c: &Connection) -> Result<()> {
     if !enabled(c)? {
         return Ok(());
     }
-    c.execute("INSERT OR IGNORE INTO statistics_pending
-        SELECT id FROM facts WHERE file_id IN (SELECT id FROM files WHERE path NOT IN (SELECT path FROM seen_files)) LIMIT ?1", [LIMIT+1])?;
+    c.execute(
+        "INSERT OR IGNORE INTO statistics_pending
+        SELECT id FROM facts WHERE file_id IN (SELECT id FROM deleted_files) LIMIT ?1",
+        [limit(c)? + 1],
+    )?;
     remember(c)
+}
+
+pub(crate) fn remember_selected(c: &Connection) -> Result<()> {
+    if enabled(c)? {
+        remember(c)?;
+    }
+    Ok(())
 }
 
 fn remember(c: &Connection) -> Result<()> {
     c.execute(
         "INSERT OR IGNORE INTO statistics_pending SELECT id FROM affected_facts LIMIT ?1",
-        [LIMIT + 1],
+        [limit(c)? + 1],
     )?;
     c.execute_batch(
         "DELETE FROM statistics_pending WHERE id IN (SELECT id FROM statistics_previous);",
     )?;
     let count: i64 = c.query_row("SELECT (SELECT count(*) FROM statistics_previous)+(SELECT count(*) FROM statistics_pending)", [], |r| r.get(0))?;
-    if count > LIMIT {
+    if count > limit(c)? {
         return disable(c);
     }
     c.execute_batch("INSERT INTO statistics_previous
@@ -81,13 +102,13 @@ pub(super) fn difference(c: &Connection) -> Result<Option<(i64, i64)>> {
     c.execute_batch(
         "INSERT OR IGNORE INTO statistics_pending SELECT id FROM statistics_previous;",
     )?;
-    c.execute("INSERT OR IGNORE INTO statistics_pending SELECT id FROM facts WHERE file_id IN (SELECT id FROM changed_files) LIMIT ?1", [LIMIT+1])?;
+    c.execute("INSERT OR IGNORE INTO statistics_pending SELECT id FROM facts WHERE file_id IN (SELECT id FROM changed_files) AND file_id NOT IN (SELECT id FROM body_files WHERE granular=1) LIMIT ?1", [limit(c)?+1])?;
     c.execute(
         "INSERT OR IGNORE INTO statistics_pending SELECT id FROM affected_facts LIMIT ?1",
-        [LIMIT + 1],
+        [limit(c)? + 1],
     )?;
     let count: i64 = c.query_row("SELECT count(*) FROM statistics_pending", [], |r| r.get(0))?;
-    if count > LIMIT {
+    if count > limit(c)? {
         disable(c)?;
         return Ok(None);
     }
@@ -99,25 +120,4 @@ pub(super) fn difference(c: &Connection) -> Result<Option<(i64, i64)>> {
         LEFT JOIN statistics_previous prior ON prior.id=current.id", [], |r| Ok((r.get(0)?,r.get(1)?)))?;
     c.execute_batch("DELETE FROM statistics_pending; DELETE FROM statistics_previous;")?;
     Ok(Some(difference))
-}
-
-pub(super) fn apply(c: &Connection, generation: i64, resolved: i64, bad: i64) -> Result<bool> {
-    let valid: bool = c.query_row(
-        "SELECT relationships+?1>=0 AND unresolved+?2>=0 FROM coverage WHERE singleton=1",
-        params![resolved, bad],
-        |r| r.get(0),
-    )?;
-    if !valid {
-        return Err(crate::domain::diagnostics::Error::operation(
-            "incremental coverage would become negative",
-        ));
-    }
-    Ok(c.execute("INSERT OR REPLACE INTO coverage
-        SELECT 1,?1,input.scanned,input.analyzed,input.skipped,input.unsupported,input.bytes,
-            (SELECT COUNT(DISTINCT key_blob) FROM symbols),previous.relationships+?2,previous.unresolved+?3
-        FROM (SELECT COUNT(*) AS scanned,COALESCE(SUM(status='analyzed'),0) AS analyzed,
-            COALESCE(SUM(status='skipped'),0) AS skipped,COALESCE(SUM(status='unsupported'),0) AS unsupported,
-            COALESCE(SUM(CASE WHEN status='analyzed' THEN size ELSE 0 END),0) AS bytes FROM files) input
-        CROSS JOIN coverage previous JOIN metadata m ON m.generation=previous.generation
-        WHERE previous.singleton=1 AND m.singleton=1", params![generation,resolved,bad])? == 1)
 }

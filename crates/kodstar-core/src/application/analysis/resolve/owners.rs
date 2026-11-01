@@ -56,6 +56,7 @@ pub(super) fn run<'conn>(
             ),
             receiver: false,
             ruby_side_checked: false,
+            ruby_side: None,
             prepared,
         };
         let external = lookup.external_scope()?;

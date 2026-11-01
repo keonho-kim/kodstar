@@ -102,6 +102,8 @@ cargo build --workspace --locked
 ```
 
 엔진 통합 테스트를 따로 실행하거나 이름으로 좁힐 수 있다.
+`tests/engine.rs`는 사례 모듈을 연결하고, 기본 조회·갱신·실패·경로 계약은
+`tests/cases/engine_contracts.rs`가 소유한다.
 
 ```bash
 cargo test -p kodstar-core --test engine --locked
@@ -176,8 +178,18 @@ SQLite page·freelist·table 크기와 보존 payload를 포함한다. `dbstat` 
 실제 사용자 캐시·이력을 이 방식으로 열지 않는다. 분석 범위·스킵·미해결 수를 함께 확인하고,
 변경 확인 포함 시간과 순수 조회를 구분한다. 분석 규칙 변경은 증분·전체 결과 일치도 검증한다.
 
+`--newline-edit`는 지정한 파일의 임시 복제본에 개행을 추가하고 증분·전체 분석의 일곱 분석 해시와
+세 이력 해시·coverage를 비교한다. 복제본 밖으로 이어지는 경로는 거절한다.
 `--mutations`는 임시 입력에 Go 검증 파일을 추가하고 문서·본문·정의 추가·삭제를 비교한다.
 각 단계도 일곱 분석 해시와 세 소스 이력 해시·coverage가 모두 같아야 한다.
+`--body-replacement OLD NEW`는 지정 파일의 첫 일치 구간을 바꾸고, `--declaration-edit`는
+지원하는 언어의 함수 하나를 추가한다. 두 방식 모두 임시 복제본에서 증분·전체 분석을
+실행하며 열 해시와 coverage를 대조한다. 일치하는 본문 구간이 없으면 측정을 거절한다.
+
+lookup key의 계약을 의도적으로 변경한 바이너리 비교는 변경 시나리오와 `--lookup-contract-change`를
+명시한다. 바이너리 사이에서는 lookup을 제외한 아홉 해시와 coverage를 비교하며, 각 바이너리의
+변경 후 증분·전체 분석은 lookup까지 포함한 열 해시가 같아야 한다. 보고서에는 비교 옵션과
+비교에서 제외한 원래 lookup 해시도 남긴다. 일반 성능 변경의 기본 비교는 열 해시 모두를 사용한다.
 
 ## 의존성과 grammar
 
@@ -195,8 +207,8 @@ SQLite page·freelist·table 크기와 보존 payload를 포함한다. `dbstat` 
 
 의존성 변경은 manifest·lockfile·라이선스/NOTICE·native 번들·grammar ABI를 함께 확인한다.
 SQLite 내부 JSON 처리는 번들 SQLite의 JSONB를 사용하며 로드 가능한 외부 확장은 요구하지 않는다.
-분석 인덱스 형식 15는 기존 캐시를 명시적으로 정리한 뒤 재생성한다. 영구 이력 형식 1~5는
-`history upgrade`로 형식 6에 전환하며 소스 이력의 자동 삭제·재생성은 하지 않는다.
+분석 캐시의 호환성과 재생성은 [저장 일관성](../kodstar-spec.md#16-저장-일관성과-장애-시-동작),
+영구 이력의 형식 전환은 [이력 정책](../kodstar-spec.md#153-영구-이력-저장소)을 따른다.
 Swift grammar의 배포 원본처럼 revision만으로 배포물을 재구성할 수 없는 경우에는 crate checksum을 기준으로 한다.
 
 ```bash

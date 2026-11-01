@@ -8,52 +8,12 @@ use crate::domain::diagnostics::Result;
 use crate::domain::languages::Language;
 use rusqlite::params;
 
+mod side;
+pub(super) use side::Side;
+mod barriers;
+pub(super) use barriers::Barriers;
+
 impl Lookup<'_, '_> {
-    fn ruby_side(&self) -> Result<String> {
-        let Some(fact) = self.fact else {
-            return Ok("ambiguous".into());
-        };
-        let (expression,source_side):(String,String)=self.connection.cached_row("SELECT f.expression,COALESCE(b.module_name,CASE WHEN s.kind IN ('class','module') THEN 'singleton' ELSE 'instance' END)
-            FROM facts f
-            JOIN symbols s ON s.id=f.source_id
-            LEFT JOIN bindings b ON b.file_id=s.file_id
-            AND b.target_local=s.local_id
-            AND b.kind='ruby_dispatch'
-            WHERE f.id=?1",[fact],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        if expression.starts_with("@result:") {
-            return Ok("instance".into());
-        }
-        if expression.starts_with("@constructor:") {
-            return Ok("singleton".into());
-        }
-        if let Some((receiver, _)) = expression.rsplit_once('.') {
-            if receiver == "self" {
-                return Ok(source_side);
-            }
-            return Ok(if receiver.starts_with("::")
-                || receiver.chars().next().is_some_and(char::is_uppercase)
-            {
-                "singleton"
-            } else {
-                "instance"
-            }
-            .into());
-        }
-        Ok(source_side)
-    }
-
-    fn ruby_barred(&self) -> Result<bool> {
-        Ok(self.connection.cached_row("WITH RECURSIVE owners(id) AS (
-            SELECT CASE WHEN s.kind IN ('method','function') THEN s.owner_id ELSE s.id END
-            FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id
-            UNION SELECT r.target_id FROM owners o JOIN relationships r ON r.source_id=o.id JOIN facts f ON f.id=r.fact_id
-              WHERE f.relation IN ('inherits','mixes_in') AND r.resolution='resolved'
-          ) SELECT EXISTS(SELECT 1 FROM bindings b JOIN symbols s ON s.file_id=b.file_id AND s.local_id=b.target_local
-              WHERE b.kind='ruby_lookup_barrier' AND (s.id IN (SELECT id FROM owners)
-                OR s.kind='file' AND (s.file_id IN (SELECT file_id FROM symbols WHERE id IN (SELECT id FROM owners)) OR s.file_id=(SELECT file_id FROM facts WHERE id=?1))))
-            OR EXISTS(SELECT 1 FROM bindings b WHERE b.kind='ruby_project_barrier')",[self.fact],|r|r.get(0))?)
-    }
-
     pub(in crate::application::analysis::resolve) fn ruby_members(
         &mut self,
         name: &str,
@@ -63,9 +23,9 @@ impl Lookup<'_, '_> {
         self.connection
             .cached_execute("DELETE FROM resolution_members", [])?;
         self.connection
-            .cached_execute(include_str!("members.sql"), params![name, side])?;
+            .cached_execute(include_str!("members.sql"), params![name, side.as_str()])?;
         self.connection.execute_batch("DELETE FROM resolution_candidates; INSERT INTO resolution_candidates SELECT id FROM resolution_members;")?;
-        if barred || side == "ambiguous" {
+        if barred || side == Side::Ambiguous {
             self.candidate_only = true;
             self.reason = Some(
                 "Ruby lookup can change through factories, mixins, refinements or dynamic method mutation",
@@ -113,12 +73,13 @@ impl Lookup<'_, '_> {
         let side = self.ruby_side()?;
         let barred = self.ruby_barred()?;
         if !self.ruby_side_checked {
-            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE id IN (
-            SELECT s.id FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id
-            WHERE b.kind='ruby_dispatch' AND ?1<>'ambiguous' AND b.module_name NOT IN (?1,'ambiguous'))",[&side])?;
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE EXISTS (
+            SELECT 1 FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id
+            WHERE s.id=resolution_candidates.id AND b.kind_id=(SELECT id FROM atoms WHERE value='ruby_dispatch')
+              AND ?1<>'ambiguous' AND b.module_name NOT IN (?1,'ambiguous'))",[side.as_str()])?;
         }
         let uncertain:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_candidates c CROSS JOIN symbols s ON s.id=c.id JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind='ruby_dispatch' AND b.module_name='ambiguous')",[],|r|r.get(0))?;
-        if barred || uncertain || side == "ambiguous" {
+        if barred || uncertain || side == Side::Ambiguous {
             self.candidate_only = true;
             self.reason = Some(
                 "Ruby lookup can change through factories, mixins, refinements or dynamic method mutation",

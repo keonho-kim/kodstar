@@ -14,7 +14,7 @@ fn integer(bytes: &mut Vec<u8>, mut value: u64) {
 }
 
 pub fn mark(c: &Connection, file: &str) -> Result<()> {
-    super::postings::display_path(c)?;
+    super::postings::register(c)?;
     let blocks=c.prepare("SELECT b.id,b.payload FROM relation_blocks b JOIN files f ON f.id=b.file_id WHERE f.display_path=?1")?.query_map([file],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,Vec<u8>>(1)?)))?.collect::<Result<Vec<_>>>()?;
     let tx = c.unchecked_transaction()?;
     for (block, bytes) in blocks {

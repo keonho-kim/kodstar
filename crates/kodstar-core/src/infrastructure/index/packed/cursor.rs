@@ -20,6 +20,7 @@ pub(super) struct Cursor {
     block: i64,
     rows: Rows,
     at: usize,
+    routes: super::super::relations::routing::Cursor,
 }
 
 impl Cursor {
@@ -32,6 +33,7 @@ impl Cursor {
             block: 0,
             rows: Rows::Empty,
             at: 0,
+            routes: Default::default(),
         }
     }
 
@@ -46,9 +48,12 @@ impl Cursor {
                 Kind::Dictionary => {
                     super::super::dictionary::scan(&self.connection, self.block, &self.filters)?
                 }
-                Kind::Relations => {
-                    super::super::relations::scan(&self.connection, self.block, &self.filters)?
-                }
+                Kind::Relations => super::super::relations::scan(
+                    &self.connection,
+                    self.block,
+                    &self.filters,
+                    &mut self.routes,
+                )?,
             };
             let Some((block, rows)) = next else {
                 return Ok(());
@@ -77,6 +82,7 @@ unsafe impl VTabCursor for Cursor {
             }
         }
         self.block = 0;
+        self.routes = Default::default();
         self.rows = Rows::Empty;
         self.at = 0;
         self.advance()

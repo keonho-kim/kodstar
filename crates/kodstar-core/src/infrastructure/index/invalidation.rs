@@ -7,6 +7,19 @@ use super::FileRecord;
 use crate::domain::diagnostics::Result;
 use crate::infrastructure::cache::paths::path_bytes;
 use rusqlite::{Connection, OptionalExtension};
+pub(crate) mod static_modules;
+
+pub(crate) fn safe_file(connection: &Connection, id: i64) -> Result<bool> {
+    let language: String =
+        connection.query_row("SELECT language FROM files WHERE id=?1", [id], |r| r.get(0))?;
+    if language == "go" {
+        package_functions(connection, id)
+    } else if static_modules::group(&language).is_some() {
+        static_modules::file(connection, id)
+    } else {
+        Ok(false)
+    }
+}
 
 pub(crate) fn package_functions(connection: &Connection, id: i64) -> Result<bool> {
     Ok(connection.query_row(
@@ -43,18 +56,20 @@ pub(crate) fn only_go(connection: &Connection) -> Result<bool> {
 }
 
 pub(crate) fn capture(connection: &Connection, record: &FileRecord) -> Result<()> {
-    let prefix = format!("{}:{}:", record.package, record.module);
-    // Record the provider selected by go.work/replace, including empty package lookups.
-    let package = crate::domain::resolve::lookup_keys::go_package(&record.package, &record.module);
-    connection.execute(
-        "INSERT OR IGNORE INTO affected_facts
-        SELECT json_extract(j.value,'$[0]') FROM lookup_keys k CROSS JOIN lookup_blocks b ON b.key_id=k.id
-        JOIN files u ON u.id=b.file_id
-        CROSS JOIN json_each(kodstar_postings(b.payload,b.count)) j
-        WHERE u.language='go' AND ((k.kind='go_package' AND k.lookup_key=?2)
-            OR (k.kind='module_name' AND substr(k.lookup_key,1,length(?1))=?1))",
-        rusqlite::params![prefix, package],
-    )?;
+    if record.language == "go" {
+        let prefix = format!("{}:{}:", record.package, record.module);
+        // Record the provider selected by go.work/replace, including empty package lookups.
+        let package =
+            crate::domain::resolve::lookup_keys::go_package(&record.package, &record.module);
+        connection.execute(
+            "INSERT OR IGNORE INTO pending_lookup_keys
+        SELECT id FROM lookup_keys k WHERE (k.kind='go_package' AND k.lookup_key=?2)
+            OR (k.kind='module_name' AND substr(k.lookup_key,1,length(?1))=?1)",
+            rusqlite::params![prefix, package],
+        )?;
+    } else {
+        static_modules::capture(connection, record)?;
+    }
     connection.execute(
         "INSERT OR IGNORE INTO affected_facts
         SELECT r.fact_id FROM relationships r
@@ -64,24 +79,20 @@ pub(crate) fn capture(connection: &Connection, record: &FileRecord) -> Result<()
     )?;
     let key = blake3::hash(&path_bytes(&record.path)).to_hex().to_string();
     connection.execute(
-        "INSERT OR IGNORE INTO affected_facts
-        SELECT json_extract(j.value,'$[0]') FROM lookup_keys k CROSS JOIN lookup_blocks b ON b.key_id=k.id
-        CROSS JOIN json_each(kodstar_postings(b.payload,b.count)) j
-        WHERE k.kind='file' AND k.lookup_key=?1",
+        "INSERT OR IGNORE INTO pending_lookup_keys
+        SELECT id FROM lookup_keys k WHERE k.kind='file' AND k.lookup_key=?1",
         [&key],
     )?;
+    super::dependencies::affect(connection)?;
     include_dispatch(connection)?;
     connection.execute_batch("INSERT OR IGNORE INTO dependent_files SELECT f.file_id FROM affected_facts a JOIN facts f ON f.id=a.id;")?;
     Ok(())
 }
 
 pub(crate) fn capture_deleted(connection: &Connection) -> Result<bool> {
-    if !only_go(connection)? {
-        return Ok(false);
-    }
     let mut statement = connection.prepare(
         "SELECT id,path,language,module,package,lower(hex(content_hash)),size,status FROM files
-        WHERE path NOT IN (SELECT path FROM seen_files)",
+        WHERE id IN (SELECT id FROM deleted_files)",
     )?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
@@ -94,12 +105,18 @@ pub(crate) fn capture_deleted(connection: &Connection) -> Result<bool> {
             }
             return Ok(false);
         }
-        if !package_functions(connection, id)? {
+        let language: String = row.get(2)?;
+        let eligible = if language == "go" {
+            only_go(connection)?
+        } else {
+            static_modules::project(connection, &language)?
+        };
+        if !eligible || !safe_file(connection, id)? {
             return Ok(false);
         }
         let record = FileRecord {
             path: crate::infrastructure::cache::paths::path_from_bytes(&path)?,
-            language: row.get(2)?,
+            language,
             module: row.get(3)?,
             package: row.get(4)?,
             content_hash: row.get(5)?,
@@ -112,12 +129,20 @@ pub(crate) fn capture_deleted(connection: &Connection) -> Result<bool> {
 }
 
 pub(crate) fn prepare_partial(connection: &Connection) -> Result<()> {
+    connection.execute_batch("INSERT OR IGNORE INTO affected_facts
+        SELECT id FROM facts WHERE file_id IN (SELECT id FROM changed_files)
+        AND (file_id NOT IN (SELECT id FROM body_files)
+            OR file_id IN (SELECT id FROM body_files WHERE granular=0) AND relation IN ('calls','references'));
+        INSERT OR IGNORE INTO dependent_files SELECT file_id FROM facts WHERE id IN (SELECT id FROM affected_facts);
+        INSERT OR IGNORE INTO dependent_files SELECT id FROM body_files;")?;
     include_dispatch(connection)?;
     super::relations::partial(connection)?;
-    super::dependencies::remove_selected(connection)?;
-    connection.execute_batch("
+    super::dependencies::prepare_selected(connection)?;
+    connection.execute_batch(
+        "
         DELETE FROM facts WHERE relation='dispatch_candidate'
-            AND (file_id IN (SELECT id FROM changed_files) OR id IN (SELECT id FROM affected_facts));")?;
+            AND id IN (SELECT id FROM affected_facts);",
+    )?;
     Ok(())
 }
 
@@ -125,7 +150,9 @@ pub(crate) fn include_dispatch(connection: &Connection) -> Result<()> {
     connection.execute_batch(
         "INSERT OR IGNORE INTO affected_facts
         SELECT derived.id FROM affected_facts selected JOIN facts origin ON origin.id=selected.id
-        JOIN facts derived ON derived.file_id=origin.file_id AND derived.source_id=origin.source_id
+        JOIN facts derived ON derived.file_id=origin.file_id
+            AND (derived.source_id=origin.source_id OR derived.source_id IN
+                (SELECT canonical_id FROM symbol_aliases WHERE symbol_id=origin.source_id))
             AND derived.scope_id=origin.scope_id AND derived.start_byte=origin.start_byte
             AND derived.end_byte=origin.end_byte AND derived.expression=origin.expression
         WHERE origin.relation='calls' AND derived.relation='dispatch_candidate';",

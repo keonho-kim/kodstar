@@ -77,7 +77,7 @@ pub(crate) fn run(
     let connection = &Connection::new(connection)?;
     let all = selection == super::incremental::Resolution::All;
     if all {
-        connection.execute_batch("DELETE FROM relation_blocks;")?;
+        crate::infrastructure::index::relations::clear_all(connection)?;
         connection.cached_execute(
             "DELETE FROM facts WHERE relation IN ('overrides','dispatch_candidate')
              OR (language='go' AND relation='implements' AND expression LIKE '@go-interface:%')",
@@ -109,14 +109,12 @@ pub(crate) fn run(
     if all {
         crate::application::analysis::resolve::go::interfaces::run(connection, cancel)?;
 
-        dispatch::run(connection, cancel)?;
+        dispatch::run(connection, cancel, false)?;
 
         crate::application::analysis::resolve::go::interfaces::dispatch(connection, cancel, false)?;
     } else {
+        dispatch::run(connection, cancel, true)?;
         crate::application::analysis::resolve::go::interfaces::refresh_calls(connection, cancel)?;
-    }
-    if merged {
-        identities::relationships(connection)?;
     }
     connection.execute_batch("DELETE FROM relation_texts WHERE NOT EXISTS(SELECT 1 FROM relation_routes r WHERE r.kind=6 AND r.entity=relation_texts.id);")?;
 
@@ -172,6 +170,7 @@ struct Lookup<'conn, 'operation> {
     namespace: crate::domain::resolve::namespaces::Namespace,
     receiver: bool,
     ruby_side_checked: bool,
+    ruby_side: Option<ruby::Side>,
     prepared: &'operation prepared::Prepared<'conn>,
 }
 

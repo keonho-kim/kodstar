@@ -112,6 +112,22 @@ impl Lookup<'_, '_> {
                 ),
                 params![context.language.as_str(), context.package, module, depth],
             )?;
+            if matches!(context.language, Language::Python | Language::Rust) {
+                let found: bool = self.connection.cached_row(
+                    "SELECT EXISTS(SELECT 1 FROM resolution_modules WHERE depth=?1)",
+                    [depth],
+                    |r| r.get(0),
+                )?;
+                self.dependency(
+                    "module_provider",
+                    &crate::domain::resolve::lookup_keys::module_provider(
+                        context.language.as_str(),
+                        &context.package,
+                        &module,
+                    ),
+                    found,
+                )?;
+            }
         }
         if javascript
             || context.language == Language::Ruby && raw.starts_with('.')

@@ -83,7 +83,15 @@ def register(database):
     if not database.execute("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='dictionary_blocks')").fetchone()[0]:
         return
     database.create_function("reference_keys", 2, keys, deterministic=True)
-    database.create_function("reference_edges", 3, edges, deterministic=True)
+    shared = database.execute("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='relation_sets')").fetchone()[0]
+    if shared:
+        from relation_sets import edges as shared_edges, postings
+        database.create_function("reference_edges", 3,
+                                 lambda payload, count, owner: shared_edges(database, payload, count, owner),
+                                 deterministic=True)
+        database.create_function("kodstar_relation_postings", 2, postings, deterministic=True)
+    else:
+        database.create_function("reference_edges", 3, edges, deterministic=True)
     database.create_function("kodstar_routes", 1, lambda payload: json.dumps(routes(payload)), deterministic=True)
     database.create_function("kodstar_route_at", 2,
                              lambda payload, slot: dict(routes(payload)).get(slot, 0), deterministic=True)

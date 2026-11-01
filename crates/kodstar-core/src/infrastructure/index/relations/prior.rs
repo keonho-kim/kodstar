@@ -17,6 +17,7 @@ pub(super) const MAX_ID: &str = "SELECT max(coalesce((SELECT last FROM relation_
 
 pub(super) struct Prior<'a> {
     consume: Statement<'a>,
+    present: Statement<'a>,
     active: bool,
     next: i64,
 }
@@ -29,6 +30,9 @@ impl<'a> Prior<'a> {
                 AND target_id IS ?3 AND external_key IS ?4 AND resolution=?5 AND rule_id=?6
                 AND reason_id IS ?7 ORDER BY id LIMIT 1) RETURNING id",
             )?,
+            present: c.prepare("SELECT EXISTS(SELECT 1 FROM relation_id_ranges
+                WHERE first=(SELECT first FROM relation_id_ranges WHERE first<=?1 ORDER BY first DESC LIMIT 1)
+                AND last>=?1)")?,
             active: c.query_row("SELECT EXISTS(SELECT 1 FROM relation_prior)", [], |r| {
                 r.get(0)
             })?,
@@ -36,7 +40,11 @@ impl<'a> Prior<'a> {
         })
     }
 
-    pub fn assign(&mut self, row: &Relation) -> Result<i64> {
+    pub fn active(&self) -> bool {
+        self.active
+    }
+
+    pub fn assign(&mut self, row: &Relation) -> Result<(i64, bool)> {
         if self.active {
             let prior = self
                 .consume
@@ -54,11 +62,11 @@ impl<'a> Prior<'a> {
                 )
                 .optional()?;
             if let Some(id) = prior {
-                return Ok(id);
+                return Ok((id, self.present.query_row([id], |r| r.get(0))?));
             }
         }
         self.next = self.next.checked_add(1).ok_or_else(super::invalid)?;
-        Ok(self.next)
+        Ok((self.next, false))
     }
 }
 

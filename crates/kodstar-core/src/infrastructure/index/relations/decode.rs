@@ -4,9 +4,9 @@
 // Related: crates/kodstar-core/src/infrastructure/index/relations/codec.rs, crates/kodstar-core/src/infrastructure/index/relations/row.rs.
 
 use super::super::packed::codec::{self, Input};
-use super::Relation;
+use super::{Relation, groups::Groups, sets::targets};
 use crate::domain::relations::Resolution;
-use rusqlite::{Result, types::ValueRef};
+use rusqlite::{Connection, Result, Statement, types::ValueRef};
 
 pub(super) struct Borrowed<'a> {
     id: i64,
@@ -51,56 +51,59 @@ impl Borrowed<'_> {
 }
 
 pub(super) fn visit(
+    c: &Connection,
     bytes: &[u8],
     count: usize,
     source: i64,
     mut consume: impl FnMut(Borrowed<'_>) -> Result<()>,
 ) -> Result<()> {
-    if !(1..=128).contains(&count) || source <= 0 {
+    if source <= 0 {
         return Err(codec::invalid());
     }
-    let mut input = Input(bytes);
-    let (mut previous, mut fact) = (0i64, 0i64);
-    for _ in 0..count {
-        let gap = input.id()?;
-        let id = previous.checked_add(gap).ok_or_else(codec::invalid)?;
-        let delta = input.integer()?;
-        let delta = ((delta >> 1) as i64) ^ -((delta & 1) as i64);
-        fact = fact.checked_add(delta).ok_or_else(codec::invalid)?;
-        let target = input.id()?;
-        let rule = input.id()?;
-        let reason = input.id()?;
-        let flags = input.integer()?;
-        if gap == 0 || fact <= 0 || rule == 0 || flags > 7 {
-            return Err(codec::invalid());
-        }
-        let external = if flags & 1 == 1 {
-            Some(input.text_ref()?)
+    let mut groups = Groups::new(bytes, count)?;
+    let mut read: Option<Statement<'_>> = None;
+    while let Some((range, set)) = groups.next()? {
+        if set == 0 {
+            rows(&mut groups.input, &groups.rows[range], source, &mut consume)?;
         } else {
-            None
-        };
-        let state = match flags >> 1 {
-            0 => Resolution::Resolved,
-            1 => Resolution::Candidate,
-            2 => Resolution::Ambiguous,
-            _ => Resolution::Unresolved,
-        };
-        if target > 0 && external.is_some()
-            || state == Resolution::Resolved && target == 0 && external.is_none()
-        {
-            return Err(codec::invalid());
+            let query = match &mut read {
+                Some(query) => query,
+                slot @ None => {
+                    slot.insert(c.prepare("SELECT count,payload FROM relation_sets WHERE id=?1")?)
+                }
+            };
+            let payload: Vec<u8> = query.query_row([set], |r| {
+                if r.get::<_, usize>(0)? != range.len() {
+                    return Err(codec::invalid());
+                }
+                r.get(1)
+            })?;
+            let mut input = Input(&payload);
+            rows(&mut input, &groups.rows[range], source, &mut consume)?;
+            input.finish()?;
         }
+    }
+    groups.finish()
+}
+
+fn rows(
+    input: &mut Input<'_>,
+    associations: &[(i64, i64)],
+    source: i64,
+    consume: &mut impl FnMut(Borrowed<'_>) -> Result<()>,
+) -> Result<()> {
+    for &(id, fact) in associations {
+        let target = targets::read(input)?;
         consume(Borrowed {
             id,
             fact,
             source,
-            target: (target > 0).then_some(target),
-            external,
-            state,
-            rule,
-            reason: (reason > 0).then_some(reason),
+            target: target.target,
+            external: target.external,
+            state: target.state,
+            rule: target.rule,
+            reason: target.reason,
         })?;
-        previous = id;
     }
-    input.finish()
+    Ok(())
 }

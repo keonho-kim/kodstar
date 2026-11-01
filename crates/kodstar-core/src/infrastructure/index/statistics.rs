@@ -4,8 +4,9 @@
 // Related: crates/kodstar-core/src/infrastructure/index/schema.sql, crates/kodstar-core/src/application/analysis/mod.rs.
 
 use crate::domain::diagnostics::{Coverage, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension, params};
 pub(crate) mod delta;
+pub(crate) mod inputs;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Update {
@@ -16,36 +17,50 @@ pub(crate) enum Update {
 #[cfg(test)]
 mod tests;
 
-pub(super) fn refresh(connection: &Connection, generation: i64, update: Update) -> Result<()> {
-    if matches!(update, Update::Selected)
-        && let Some((resolved, bad)) = delta::difference(connection)?
-        && delta::apply(connection, generation, resolved, bad)?
-    {
-        return Ok(());
-    }
-    if matches!(update, Update::Files) && connection.execute(
-        "INSERT OR REPLACE INTO coverage
-         SELECT 1,?1,input.scanned,input.analyzed,input.skipped,input.unsupported,input.bytes,
-             previous.symbols,previous.relationships,previous.unresolved
-         FROM (SELECT COUNT(*) AS scanned,COALESCE(SUM(status='analyzed'),0) AS analyzed,
-             COALESCE(SUM(status='skipped'),0) AS skipped,COALESCE(SUM(status='unsupported'),0) AS unsupported,
-             COALESCE(SUM(CASE WHEN status='analyzed' THEN size ELSE 0 END),0) AS bytes FROM files) input
-         CROSS JOIN coverage previous JOIN metadata m ON m.generation=previous.generation
-         WHERE previous.singleton=1 AND m.singleton=1", [generation],
-    )? == 1 { return Ok(()); }
-    connection.execute(
-        "INSERT OR REPLACE INTO coverage
-         SELECT 1,?1,COUNT(*),COALESCE(SUM(status='analyzed'),0),
-           COALESCE(SUM(status='skipped'),0),COALESCE(SUM(status='unsupported'),0),
-           COALESCE(SUM(CASE WHEN status='analyzed' THEN size ELSE 0 END),0),
-           (SELECT COUNT(DISTINCT key_blob) FROM symbols),
-           (SELECT COUNT(*) FROM relationships WHERE resolution='resolved'),
-           (SELECT COUNT(DISTINCT fact_id) FROM relationships
-             WHERE resolution IN ('unresolved','ambiguous'))
-         FROM files",
-        [generation],
+pub(super) fn refresh(c: &Connection, generation: i64, update: Update) -> Result<()> {
+    let input = inputs::read(c)?;
+    let previous: Option<(i64, i64)> = if matches!(update, Update::All) {
+        None
+    } else {
+        c.query_row("SELECT c.relationships,c.unresolved FROM coverage c JOIN metadata m ON m.generation=c.generation
+            WHERE c.singleton=1 AND m.singleton=1", [], |r| Ok((r.get(0)?, r.get(1)?))).optional()?
+    };
+    let retained = match (update, previous) {
+        (Update::Files, prior) => prior,
+        (Update::Selected, Some((relations, unresolved))) => delta::difference(c)?
+            .map(|(a, b)| -> Result<_> {
+                let relations = relations.checked_add(a).filter(|n| *n >= 0);
+                let unresolved = unresolved.checked_add(b).filter(|n| *n >= 0);
+                relations.zip(unresolved).ok_or_else(|| {
+                    crate::domain::diagnostics::Error::operation(
+                        "incremental relationship coverage is inconsistent",
+                    )
+                })
+            })
+            .transpose()?,
+        _ => None,
+    };
+    let (relationships, unresolved) = match retained {
+        Some(value) => value,
+        None => c.query_row("SELECT (SELECT COUNT(*) FROM relationships WHERE resolution='resolved'),
+            (SELECT COUNT(DISTINCT fact_id) FROM relationships WHERE resolution IN ('unresolved','ambiguous'))",
+            [], |r| Ok((r.get(0)?, r.get(1)?)))?,
+    };
+    c.execute(
+        "INSERT OR REPLACE INTO coverage VALUES(1,?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        params![
+            generation,
+            input.scanned,
+            input.analyzed,
+            input.skipped,
+            input.unsupported,
+            input.bytes,
+            input.symbols,
+            relationships,
+            unresolved
+        ],
     )?;
-    Ok(())
+    inputs::finish(c)
 }
 
 pub(super) fn read(connection: &Connection) -> Result<Coverage> {

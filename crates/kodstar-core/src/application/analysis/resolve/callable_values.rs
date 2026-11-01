@@ -79,7 +79,10 @@ impl Lookup<'_, '_> {
                 })?;
         self.connection.cached_execute("DELETE FROM resolution_candidates WHERE NOT EXISTS (SELECT 1 FROM symbols WHERE id=resolution_candidates.id AND (kind IN ('function','method')))",[])?;
         if self.relation == "indirect_call" {
-            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE id IN (SELECT s.id FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id WHERE b.kind IN ('python_property','callable_accessor'))",[])?;
+            self.connection.cached_execute("DELETE FROM resolution_candidates WHERE EXISTS (
+                SELECT 1 FROM symbols s JOIN bindings b ON b.file_id=s.file_id AND b.target_local=s.local_id
+                WHERE s.id=resolution_candidates.id AND b.kind_id IN (
+                    SELECT id FROM atoms WHERE value IN ('python_property','callable_accessor')))",[])?;
         }
         let count: u64 =
             self.connection

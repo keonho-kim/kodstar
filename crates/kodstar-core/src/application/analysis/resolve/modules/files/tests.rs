@@ -61,6 +61,7 @@ fn exact_module_lookup_does_not_scan_unrelated_files()
         namespace: Namespace::Any,
         receiver: false,
         ruby_side_checked: false,
+        ruby_side: None,
         prepared: &prepared,
     };
     let mut calls = 0;

@@ -21,6 +21,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+mod start;
+
 pub(super) struct Input<'a> {
     pub(super) database: &'a Path,
     pub(super) selected: &'a SelectedProject,
@@ -72,15 +74,21 @@ pub(super) fn run(
             inputs,
             events: events.clone(),
         };
-        scope.spawn(move || {
+        let discovery = scope.spawn(move || {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 producer.produce(work_tx)
             })) {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => producer.events.fail(error),
-                Err(_) => producer
-                    .events
-                    .fail(Error::operation("analysis scanner panicked")),
+                Ok(Ok(inventory)) => Some(inventory),
+                Ok(Err(error)) => {
+                    producer.events.fail(error);
+                    None
+                }
+                Err(_) => {
+                    producer
+                        .events
+                        .fail(Error::operation("analysis scanner panicked"));
+                    None
+                }
             }
         });
         for _ in 0..selected.settings.jobs {
@@ -118,47 +126,20 @@ pub(super) fn run(
                     return Ok(());
                 }
                 match message.event {
+                    Event::Remove { path } => {
+                        connection.execute("INSERT OR IGNORE INTO deleted_files SELECT id FROM files WHERE path=?1",
+                            [path_bytes(&path)])?;
+                    }
                     Event::Begin { record, preserve } => {
-                        let preserve = preserve
-                            && resolution != Resolution::All
-                            && reuse.bodies(connection, &record.language)?;
-                        connection.execute(
-                            "INSERT OR IGNORE INTO seen_files VALUES(?1)",
-                            [path_bytes(&record.path)],
+                        let context = start::file(
+                            connection,
+                            &record,
+                            preserve,
+                            full,
+                            &mut reuse,
+                            &mut resolution,
+                            selected.settings.fact_batch_bytes,
                         )?;
-                        let scoped = !full
-                            && !preserve
-                            && resolution != Resolution::All
-                            && reuse.declarations(connection, &record.language)?
-                            && super::incremental::scoped_declarations(connection, &record)?;
-                        let id = if preserve {
-                            record.refresh_metadata(connection)?;
-                            let id: i64 = connection.query_row(
-                                "SELECT id FROM files WHERE path=?1",
-                                [path_bytes(&record.path)],
-                                |r| r.get(0),
-                            )?;
-                            index::statistics::delta::remember_file(connection, id)?;
-                            index::relations::clear_bodies(connection, id)?;
-                            connection.execute("DELETE FROM facts WHERE file_id=?1
-                                AND NOT (language='go' AND relation='implements' AND expression LIKE '@go-interface:%')", [id])?;
-                            id
-                        } else {
-                            let id = record.persist(connection)?;
-                            if scoped {
-                                index::statistics::delta::remember_file(connection, id)?;
-                            }
-                            index::clear_file(connection, id)?;
-                            id
-                        };
-                        resolution = resolution.max(if preserve || scoped {
-                            Resolution::Selected
-                        } else {
-                            Resolution::All
-                        });
-                        connection
-                            .execute("INSERT OR IGNORE INTO changed_files VALUES(?1)", [id])?;
-                        let context = index::FileFacts::new(id, &record, preserve);
                         files.insert(record.path, context);
                         changed = true;
                     }
@@ -179,11 +160,14 @@ pub(super) fn run(
                         let context = files.remove(path.as_ref()).ok_or_else(|| {
                             Error::operation("file completion has no matching extraction")
                         })?;
+                        if context.call_reuse {
+                            index::body_reuse::finish(connection, context.id)?;
+                        }
                         if resolution == Resolution::Selected
                             && !context.preserves_definitions()
-                            && !index::invalidation::package_functions(connection, context.id)?
+                            && !index::invalidation::safe_file(connection, context.id)?
                         {
-                            resolution = Resolution::All;
+                            resolution.reset_all(connection)?;
                         }
                         connection.execute(
                             "UPDATE files SET facts_hash=?1,environment_hash=?2 WHERE id=?3",
@@ -200,12 +184,16 @@ pub(super) fn run(
                             source_bytes: 0,
                         })?;
                     }
-                    Event::UnchangedFacts { record, span } => {
+                    Event::UnchangedFacts {
+                        record,
+                        span,
+                        scope_ends,
+                    } => {
                         connection.execute(
                             "INSERT OR IGNORE INTO seen_files VALUES(?1)",
                             [path_bytes(&record.path)],
                         )?;
-                        record.refresh_unchanged(connection, span)?;
+                        record.refresh_unchanged(connection, span, &scope_ends)?;
                         changed = true;
                         parsed += 1;
                         progress(&Progress {
@@ -234,6 +222,7 @@ pub(super) fn run(
                             changed = true;
                             return Ok(());
                         }
+                        resolution.reset_all(connection)?;
                         let id = record.persist(connection)?;
                         index::clear_file(connection, id)?;
                         connection.execute(
@@ -241,7 +230,6 @@ pub(super) fn run(
                             params![id, reason, reason],
                         )?;
                         changed = true;
-                        resolution = Resolution::All;
                     }
                 }
                 Ok(())
@@ -253,6 +241,9 @@ pub(super) fn run(
                 internal.cancel();
             }
         }
+        let inventory = discovery
+            .join()
+            .map_err(|_| Error::operation("analysis scanner panicked"))?;
         let worker_error = worker_failure
             .lock()
             .map_err(|_| Error::operation("analysis failure state lock poisoned"))?
@@ -262,7 +253,15 @@ pub(super) fn run(
         } else if !files.is_empty() {
             Err(Error::operation("analysis ended with unfinished files"))
         } else {
-            Ok((changed, parsed, reused, resolution))
+            let inventory =
+                inventory.ok_or_else(|| Error::operation("analysis inventory did not complete"))?;
+            if !inventory.partial {
+                connection.execute_batch(
+                    "INSERT OR IGNORE INTO deleted_files
+                    SELECT id FROM files WHERE path NOT IN (SELECT path FROM seen_files);",
+                )?;
+            }
+            Ok((changed, parsed, reused + inventory.retained, resolution))
         }
     })
 }

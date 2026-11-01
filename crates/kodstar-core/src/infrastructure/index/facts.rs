@@ -19,6 +19,7 @@ pub(crate) struct FileFacts {
     package: String,
     module: String,
     preserve: bool,
+    pub(crate) call_reuse: bool,
 }
 impl FileFacts {
     pub(crate) fn preserves_definitions(&self) -> bool {
@@ -31,17 +32,22 @@ impl FileFacts {
             package: record.package.clone(),
             module: record.module.clone(),
             preserve,
+            call_reuse: false,
         }
     }
 }
 
 pub(crate) struct FactWriter<'conn> {
+    connection: &'conn Connection,
+    body: Option<super::body_reuse::Matcher<'conn>>,
     statements: Statements<'conn>,
     atoms: super::atoms::writer::Writer<'conn>,
 }
 impl<'conn> FactWriter<'conn> {
     pub(crate) fn new(connection: &'conn Connection) -> Result<Self> {
         Ok(Self {
+            connection,
+            body: None,
             statements: Statements::new(connection)?,
             atoms: super::atoms::writer::Writer::new(connection)?,
         })
@@ -203,12 +209,53 @@ impl<'conn> FactWriter<'conn> {
                 )?;
             }
             Fact::Use(usage) => {
+                if context.preserve
+                    && !matches!(
+                        usage.relation,
+                        crate::domain::relations::RelationKind::Calls
+                            | crate::domain::relations::RelationKind::References
+                    )
+                {
+                    return Ok(());
+                }
                 let source = self.local_symbol(file, usage.source)?;
                 let span = usage.span;
                 let expression = self.atoms.intern(&usage.expression)?;
                 let relation = self.atoms.intern(usage.relation.as_str())?;
                 let condition = self.atoms.optional(usage.condition.as_deref())?;
                 let language_id = self.atoms.intern(language.as_str())?;
+                if context.call_reuse {
+                    let values = [
+                        file,
+                        source,
+                        i64::from(usage.scope),
+                        expression,
+                        relation,
+                        condition.unwrap_or(0),
+                        i64::from(usage.type_only),
+                        span.start_byte as i64,
+                        span.end_byte as i64,
+                        span.line as i64,
+                        span.column as i64,
+                        span.end_line as i64,
+                        span.end_column as i64,
+                        language_id,
+                    ];
+                    let matcher = match &mut self.body {
+                        Some(matcher) => matcher,
+                        slot @ None => slot.insert(super::body_reuse::Matcher::new(
+                            self.connection,
+                            (self
+                                .connection
+                                .limit(rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH)?
+                                as usize)
+                                .saturating_sub(self.statements.memory_bytes()),
+                        )?),
+                    };
+                    if matcher.matches(&values)? {
+                        return Ok(());
+                    }
+                }
                 self.statements.execute(
                     Write::Usage,
                     params![
@@ -228,6 +275,12 @@ impl<'conn> FactWriter<'conn> {
                         language_id
                     ],
                 )?;
+                if context.call_reuse {
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO affected_facts VALUES(?1)",
+                        [self.connection.last_insert_rowid()],
+                    )?;
+                }
             }
             Fact::Module {
                 name,

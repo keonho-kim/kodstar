@@ -3,6 +3,7 @@
 // Usage: application/history와 공통 실행 문맥이 저장소를 연다.
 // Related: crates/kodstar-core/src/infrastructure/history/schema.sql, crates/kodstar-core/src/infrastructure/cache/locks.rs.
 
+pub(crate) mod changes;
 pub(crate) mod checkout;
 pub(crate) mod checkpoints;
 pub(crate) mod content;
@@ -241,7 +242,14 @@ impl Snapshot {
         configure_cache(&connection, SNAPSHOT_CACHE_BYTES)?;
         content::chunks::register(&connection)?;
         crate::infrastructure::index::observe_cancellation(&connection, cancel)?;
-        checkpoints::materialize(&connection, self.id)?;
+        connection.execute_batch("BEGIN;")?;
+        if checkpoints::head(&connection)? == Some(self.id) {
+            connection.execute_batch(
+                "CREATE TEMP VIEW snapshot_files AS SELECT path,blob,mode,kind FROM working;",
+            )?;
+        } else {
+            checkpoints::materialize(&connection, self.id)?;
+        }
         Ok(connection)
     }
 }

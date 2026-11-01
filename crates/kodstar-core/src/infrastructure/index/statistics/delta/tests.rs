@@ -34,6 +34,7 @@ fn small_changes_match_full_counts_without_reading_unrelated_facts() -> Result<(
         WITH RECURSIVE ids(id) AS (VALUES(10) UNION ALL SELECT id+1 FROM ids WHERE id<609)
         INSERT INTO facts SELECT id,2,2,0,id,id+1,'stable','calls' FROM ids;
         CREATE TABLE symbols(key_blob TEXT); INSERT INTO symbols VALUES('a'),('b');
+        CREATE TABLE symbol_aliases(symbol_id INTEGER PRIMARY KEY,canonical_id INTEGER);
         CREATE TABLE raw_relations(fact_id INTEGER,resolution TEXT); CREATE INDEX relation_fact ON raw_relations(fact_id);
         INSERT INTO raw_relations VALUES(1,'ambiguous'),(1,'ambiguous'),(2,'resolved'),(3,'unresolved');
         INSERT INTO raw_relations SELECT id,'resolved' FROM facts WHERE id>=10;
@@ -42,7 +43,7 @@ fn small_changes_match_full_counts_without_reading_unrelated_facts() -> Result<(
         CREATE TEMP TABLE changed_files(id INTEGER PRIMARY KEY); INSERT INTO changed_files VALUES(1);
         CREATE TEMP TABLE affected_facts(id INTEGER PRIMARY KEY); INSERT INTO affected_facts VALUES(2);")?;
     refresh(&c, 1, Update::All)?;
-    reset(&c, true)?;
+    reset(&c, true, 128)?;
     remember_file(&c, 1)?;
     c.execute_batch("DELETE FROM raw_relations WHERE fact_id IN (1,2,3);
         INSERT INTO raw_relations VALUES(1,'ambiguous'),(2,'ambiguous'),(2,'ambiguous'),(4,'resolved'),(5,'resolved');
@@ -60,7 +61,7 @@ fn small_changes_match_full_counts_without_reading_unrelated_facts() -> Result<(
         (partial.symbols, partial.relationships, partial.unresolved),
         (full.symbols, full.relationships, full.unresolved)
     );
-    reset(&c, true)?;
+    reset(&c, true, 128)?;
     remember_file(&c, 2)?;
     assert!(!enabled(&c)?);
     assert!(difference(&c)?.is_none());

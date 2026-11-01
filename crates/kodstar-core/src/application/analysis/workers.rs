@@ -50,7 +50,9 @@ fn extract(
     let mut preserve = false;
     let ready = if let Some(previous) = &work.previous {
         let mut fingerprint = Fingerprinter::default();
-        let mut replay = super::replay::Replay::new(fact_limit);
+        let window = fact_limit.min(65536);
+        let mut positions = super::positions::ScopeEnds::new(window / 4);
+        let mut replay = super::replay::Replay::new(window - window / 4);
         super::extraction::run(
             parser,
             &path,
@@ -59,15 +61,19 @@ fn extract(
             &events.cancel,
             &mut |language, mut fact: Fact| {
                 fingerprint.push(language, &mut fact);
+                positions.push(&fact);
                 replay.push(language, fact);
                 Ok(())
             },
         )?;
         let next = fingerprint.finish();
-        if next.all == previous.all {
+        if next.all == previous.all
+            && let Some(scope_ends) = positions.finish()
+        {
             return events.send(Event::UnchangedFacts {
                 record: work.record,
                 span: SourceSpan::at(&work.source, 0, work.source.len()),
+                scope_ends,
             });
         }
         preserve = next.environment == previous.environment;
