@@ -59,6 +59,9 @@ test -f llvm/lib/libclangAST.a
 test -f llvm/include/c++/v1/__config_site
 
 if [[ "$target" == aarch64-apple-darwin ]]; then
+    # Keep the SDK's C++ runtime as the link target. The archive's reexports use @rpath.
+    mkdir alternate-runtime
+    mv llvm/lib/libc++*.a llvm/lib/libc++*.dylib llvm/lib/libunwind*.a llvm/lib/libunwind*.dylib alternate-runtime/
     zig_archive=zig-aarch64-macos-0.17.0.tar.xz
     fetch_verified "https://ziglang.org/download/0.17.0/$zig_archive" "$zig_archive" \
         b607e9b9234790a008116ae5bdb71c6243b84b9fb42a53a9e70fde41c06c536a

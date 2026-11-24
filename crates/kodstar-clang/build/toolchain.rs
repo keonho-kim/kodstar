@@ -81,6 +81,9 @@ pub(super) fn compile(llvm: &Llvm) -> Result<(), Box<dyn std::error::Error>> {
         .flag_if_supported("-fdata-sections")
         .define("NDEBUG", None)
         .opt_level(2);
+    if output(&llvm.config, &["--has-rtti"])? == "NO" {
+        build.flag("-fno-rtti");
+    }
     if std::env::var("CARGO_CFG_TARGET_OS")?.as_str() == "macos" {
         let sdk = output(Path::new("xcrun"), &["--sdk", "macosx", "--show-sdk-path"])?;
         build

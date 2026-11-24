@@ -92,6 +92,7 @@ cargo build --workspace --locked
 [Release 워크플로](../.github/workflows/release.yml)는 macOS ARM64와 Ubuntu 24.04 x86-64 러너에서
 각각 같은 커밋의 `dist` 바이너리를 빌드한다. [도구 준비 스크립트](../scripts/release/toolchain.sh)는
 공식 LLVM 23.1.4와 macOS용 Zig 0.17.0 배포 파일의 SHA-256을 확인한다.
+macOS 빌드의 배포 대상은 14.0이며, 공식 아카이브의 bitcode와 같은 버전의 `libLTO` 및 시스템 libc++를 사용한다.
 [패키징 검사](../scripts/release/package.py)는 격리한 홈에서 설치하고 내장 Clang 호출이 해석되는지 확인한 뒤
 바이너리·설치 스크립트·라이선스 고지를 아카이브에 담는다.
 

@@ -62,7 +62,13 @@ jobs:
           rustup toolchain install "$toolchain" --profile minimal
           host="$(rustup run "$toolchain" rustc -vV | sed -n 's/^host: //p')"
           test "$host" = "$TARGET"
-          rustup run "$toolchain" cargo build --locked --profile dist -p kodstar-cli
+          link_args=()
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            # The macOS archive contains LLVM bitcode and needs the matching LTO reader.
+            export MACOSX_DEPLOYMENT_TARGET=14.0
+            link_args=(-C "link-arg=-Wl,-lto_library,$RUNNER_TEMP/kodstar-native/llvm/lib/libLTO.dylib")
+          fi
+          rustup run "$toolchain" cargo rustc --locked --profile dist -p kodstar-cli --bin kodstar -- "${link_args[@]}"
 
       - name: Verify and package distribution
         run: |
