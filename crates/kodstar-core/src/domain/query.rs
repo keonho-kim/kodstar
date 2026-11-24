@@ -5,6 +5,7 @@
 
 //! Validated query requests shared by CLI and engine consumers.
 
+pub(crate) mod terms;
 mod validation;
 
 use std::path::PathBuf;
@@ -39,7 +40,7 @@ pub struct Selector {
 }
 
 impl Selector {
-    /// Locate the separator after a file extension, preserving drive letters and `::` in names.
+    /// Locate the separator after a file extension, preserving path colons and qualified names.
     pub fn parse(value: &str) -> Result<Self> {
         let separator = value
             .match_indices("::")
@@ -100,6 +101,12 @@ pub enum Query {
         name: String,
         prefix: bool,
     },
+    /// Rank identifier and path words and include direct relationships for the leading matches.
+    RankedSearch {
+        text: String,
+    },
+    /// Summarize resolved internal relationships within the selected index.
+    Overview,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -197,9 +204,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn path_selector_keeps_windows_drive_and_qualified_symbol() -> Result<()> {
-        let selector = Selector::parse(r"C:\work\api.rs::Service::run")?;
-        assert_eq!(selector.file, PathBuf::from(r"C:\work\api.rs"));
+    fn path_selector_keeps_unix_path_colons_and_qualified_symbol() -> Result<()> {
+        let selector = Selector::parse("/work/name:space/api.rs::Service::run")?;
+        assert_eq!(selector.file, PathBuf::from("/work/name:space/api.rs"));
         assert_eq!(selector.name, "Service::run");
         assert!(Selector::parse("src/api.rs::").is_err());
         Ok(())

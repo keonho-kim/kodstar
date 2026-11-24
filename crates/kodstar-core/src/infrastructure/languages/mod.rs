@@ -5,6 +5,7 @@
 
 //! Canonical upstream Tree-sitter grammars. No language-specific process is executed.
 
+mod header;
 mod syntax;
 
 use std::path::Path;
@@ -41,7 +42,6 @@ pub(crate) fn grammar(language: Language, path: &Path) -> Result<tree_sitter::La
         Language::Elixir => tree_sitter_elixir::LANGUAGE.into(),
         Language::Erlang => tree_sitter_erlang::LANGUAGE.into(),
         Language::CommonLisp => tree_sitter_commonlisp::LANGUAGE_COMMONLISP.into(),
-        Language::Pascal => tree_sitter_pascal::LANGUAGE.into(),
         _ => {
             return Err(Error::operation(
                 "mixed input must be split into original-position embedded ranges before parsing",
@@ -59,25 +59,7 @@ pub(crate) fn detect(path: &Path, prefix: &[u8]) -> Option<Language> {
         return Some(Language::Blade);
     }
     if path.extension().is_some_and(|extension| extension == "h") {
-        let text = String::from_utf8_lossy(prefix);
-        if text.contains("@interface")
-            || text.contains("@implementation")
-            || text.contains("#import <Foundation")
-        {
-            return None;
-        }
-        return Some(
-            if text.contains("namespace ")
-                || text.contains("template<")
-                || text.contains("template <")
-                || text.contains("class ")
-                || text.contains("std::")
-            {
-                Language::Cpp
-            } else {
-                Language::C
-            },
-        );
+        return header::detect(prefix);
     }
     if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
         return Language::ALL
@@ -115,16 +97,16 @@ pub(crate) fn detect(path: &Path, prefix: &[u8]) -> Option<Language> {
 pub(crate) fn capability(language: Language) -> LanguageCapability {
     let mut limitations = vec![
         "static syntax and explicit bindings only; dynamic targets may remain unresolved",
-        "no execution or macro evaluation; runtime dispatch and complete type inference are not proven",
+        "no project execution, build scripts or compiler plugins; runtime dispatch and complete type inference are not proven",
     ];
     limitations.push(match language {
         Language::Rust => "separate type/value/bang-macro lookups, raw identifiers, inline imports, tuple/Self constructors, impl owners and explicit macro_export crate-root paths/textual/reexports supported; visibility, cfg_attr-derived exports, macro_use imports, NFC equivalence, lifetimes and full trait/generic selection remain incomplete",
         Language::Python => "global/nonlocal, comprehension/outer-iterable/walrus scopes, static __all__ wildcard exports, module binding reexports, proven function-value references/indirect candidates, unshadowed static getattr, property reads, C3/super, constructors, annotated returns and nearest pytest fixtures supported; dynamic decorators, arbitrary export evaluation and complete inference remain incomplete",
-        Language::JavaScript | Language::TypeScript => "JSX/TSX component tags and ESM/CommonJS, JSONC path configs, indexed workspace package exports/imports and proven function-value references/indirect candidates supported; conditional CommonJS exports remain candidates; dynamic modules and full type/value namespaces remain incomplete",
+        Language::JavaScript | Language::TypeScript => "static Hono apps, route/middleware registrations, imported sub-app mounts and JSX/static HTML responses supported; runtime route factories and renderer execution are not evaluated; JSX/TSX component tags and ESM/CommonJS, JSONC path configs, indexed workspace package exports/imports and proven function-value references/indirect candidates supported; conditional CommonJS exports remain candidates; dynamic modules and full type/value namespaces remain incomplete",
         Language::Go => "go.mod/go.work, indexed local replacements, exported package access, receiver/field embedding and interface name/arity candidates supported; MVS/version selection, complete signature and pointer method sets remain incomplete",
         Language::Java => "annotation class literals and indexed package qualification supported; explicit imports, typed fields, constructors/annotated return chains and interface/override candidates supported; overloads, access checks and transitive dispatch remain incomplete",
         Language::CSharp => "block/file namespaces, non-generic partial types within static SDK/Compile membership, linked sources, XAML project context and constructor/annotated return chains supported; conditional/dynamic/imported membership is diagnosed and isolated; per-project source instances, generic/partial methods, overloads, access checks and transitive dispatch remain incomplete",
-        Language::C | Language::Cpp => "header namespaces, typed receivers, include-backed top-level forward types/free functions, canonical whole-header guards and exact-signature C++ member declarations supported; internal linkage stays file-local and conflicting definitions stay ambiguous; nested forward, conditional includes, compiler modules, macro expansion, templates, type equivalence and overload selection remain incomplete",
+        Language::C | Language::Cpp => "header namespaces, typed receivers, include-backed top-level forward types/free functions, canonical whole-header guards and exact-signature C++ member declarations supported; internal linkage stays file-local and conflicting definitions stay ambiguous; nested forward, conditional includes, compiler modules and complete type equivalence remain incomplete; statically linked Clang proves successful-TU callee selection, templates and generated function definitions in its observed context; absent SDK/headers, unsupported arguments, resource limits and unevaluated conditional declarations are diagnosed or retain syntax candidates",
         Language::Ruby => "static require_relative, Class/Struct/Data factories, constructor locals, singleton/instance sides and explicit mixin candidates supported; dynamic lookup, refinements, visibility mutations, runtime ordering and load paths remain incomplete",
         Language::Swift => "annotated parameters/returns, constructors, typed/factory properties, optional receivers and proven SwiftUI Environment wrappers supported; static SwiftPM targets/sources/excludes/dependencies and selected imports supported; generic extensions, local package products, dynamic manifests, testable imports, access and overload selection remain incomplete",
         Language::Kotlin => "escaped names, AST import aliases, annotation names and static class-literal arguments supported; declared package/FQN, object/companion owners, aliased imports, constructor locals and annotated return chains supported; extension selection, type aliases, complete generic/access and Gradle module semantics remain incomplete",
@@ -134,7 +116,7 @@ pub(crate) fn capability(language: Language) -> LanguageCapability {
         Language::Elixir => "nested modules, protocol/defimpl containers, alias groups, arity/clauses/defaults/pipelines, explicit captures and only/except imports supported; protocol runtime dispatch, dynamic/multiple implementation target expansion, alias-derived implementation names, dynamic macros and full binding remain incomplete",
         Language::Erlang => "name/arity clauses, function/type export visibility, static type/opaque/macro declarations, included records/macros, type-spec references and explicit function values supported; complete spec-to-function ownership, preprocessing and behaviour/callback checking remain incomplete",
         Language::CommonLisp => "default ASCII reader, quote/backquote, lexical functions, standard macro/symbol/setf/compiler definers and static package/use/import/export/shadow/nickname lookup supported; compiler/setf bindings do not shadow normal calls; package mutation, CLOS applicability, evaluated custom definers and custom readtables remain incomplete",
-        Language::Pascal => "ASCII case-insensitive units/uses, explicit unit files, split method owners, matching declaration/definition locations, typed properties/fields and paired form events supported; overload selection, generic equivalence, include contexts and compiler directives remain incomplete",
+        Language::Html => "embedded JavaScript, static htmx requests, hx-disable scopes and same-file #id target references supported; browser base URLs, runtime DOM mutation, other inherited htmx settings and arbitrary CSS selectors are not evaluated",
         Language::Vue | Language::Svelte => "explicit imported template components and implicit component defaults supported; Vue kebab-case tags and Vue/Svelte bare event handlers preserve original ranges; script/style/comments/attribute/interpolation strings are excluded; module/setup/instance boundaries and full template expression or framework semantics remain incomplete",
         Language::Astro => "TypeScript server frontmatter and template imports are isolated from browser scripts; processed TypeScript modules have independent scopes, inline classic globals are shared and client exports do not escape as component exports; original ranges and implicit component defaults are preserved; runtime define:vars, bundling, page-level script order and full template expressions are not evaluated",
         Language::Razor => "static using/alias/static imports, model/inject/inherits/namespace/page, code/functions methods, bare event handlers and project-scoped component files supported; unproven default namespaces remain candidates; statement blocks, _Imports hierarchy, generated classes, implicit routes and full Razor compilation are not modeled",
@@ -164,6 +146,7 @@ pub(crate) fn capability(language: Language) -> LanguageCapability {
                 | Language::TypeScript
                 | Language::Go
                 | Language::Java
+                | Language::C
                 | Language::Cpp
                 | Language::CSharp
                 | Language::Php
@@ -173,7 +156,9 @@ pub(crate) fn capability(language: Language) -> LanguageCapability {
                 | Language::Ruby
                 | Language::Elixir
         ),
-        provider: if language.is_component() {
+        provider: if matches!(language, Language::C | Language::Cpp) {
+            "tree-sitter + embedded Clang"
+        } else if language.is_component() {
             "tree-sitter + embedded-range scanner"
         } else {
             "tree-sitter"

@@ -41,7 +41,13 @@ pub(in crate::infrastructure::formats::components) fn excluded(
     } else {
         find(source, *at + open.len(), close)
             .map(|p| p + close.len())
-            .ok_or_else(|| Error::operation("Blade comment/verbatim is incomplete"))?
+            .ok_or_else(|| {
+                Error::input(
+                    "source_syntax_error",
+                    "Blade comment/verbatim is incomplete",
+                    None,
+                )
+            })?
     };
     Ok(true)
 }
@@ -183,5 +189,9 @@ fn code_end(
         }
         at += 1;
     }
-    Err(Error::operation("Blade PHP body is incomplete"))
+    Err(Error::input(
+        "source_syntax_error",
+        "Blade PHP body is incomplete",
+        None,
+    ))
 }

@@ -23,8 +23,8 @@
 
 ---
 
-**kod<sup>☆</sup>** is a source-code relationship analysis engine and CLI written in Rust.
-It extracts syntax facts with official **Tree-sitter** parsers and stores relationships and analysis state in **SQLite**.
+**kod<sup>☆</sup>** is a Rust CLI for exploring source-code relationships.
+It extracts syntax facts with official **Tree-sitter** parsers, enriches C/C++ calls with embedded **Clang**, and stores relationships and analysis state in **SQLite**.
 Follow calls, references, and dependencies, while automatic checkpoints preserve changes observed as you use the CLI.
 
 ## Features
@@ -33,6 +33,7 @@ Follow calls, references, and dependencies, while automatic checkpoints preserve
 - **Inspect change impact** — Trace the impact of a symbol or changes since a saved checkpoint.
 - **Incremental synchronization** — After initialization, regular commands check for changes and update the analysis.
 - **Automatic local history** — Name checkpoints, compare changes, restore files, and work with local branches.
+- **Project exploration** — Find dependencies across directories and packages, trace import cycles, and search by identifier or path words.
 - **Configurable resource budgets** — Set worker counts and memory budgets, backed by a disk-based index.
 - **Tool integration** — Use text, JSON, JSONL, or TSV output, file watching, and stdio sessions.
 
@@ -40,7 +41,7 @@ Follow calls, references, and dependencies, while automatic checkpoints preserve
 
 ### 1. Install
 
-You need `rustup`, the [pinned Rust toolchain](rust-toolchain.toml), and native C build tools.
+Source builds need `rustup`, the [pinned Rust toolchain](rust-toolchain.toml), C/C++ build tools, and **LLVM/Clang 23.1.4 development headers and static libraries**. Set `LLVM_CONFIG_PATH` to the matching `llvm-config` when needed. The installed CLI includes its analyzer and builtin headers; it runs without an external Clang executable or extracted runtime.
 See [development setup](docs/development.md#개발-환경) for platform-specific requirements.
 
 ```bash
@@ -92,7 +93,11 @@ kodstar symbols src/api.rs
 kodstar deps src/api.rs caller
 kodstar explain src/api.rs caller
 
-# Search definitions by name
+# Survey the project and find where to start
+kodstar overview
+kodstar search 'order storage' --ranked
+
+# Search definitions by exact name
 kodstar search target
 ```
 
@@ -112,13 +117,16 @@ A `<revision>` is a checkpoint ID or a saved checkpoint name.
 | `kodstar list <file>` | List directly connected files. |
 | `kodstar search <name>` | Find definitions by exact name. |
 | `kodstar search <prefix> --prefix` | Find definitions whose names start with a prefix. |
+| `kodstar search <words> --ranked` | Rank definitions using identifier, qualified name, and path words. Show direct relationships for the leading candidates. |
+| `kodstar overview` | Summarize directories, package dependencies, frequently used symbols, and import cycles. |
 | `kodstar related <file> <symbol>` | Show incoming and outgoing relationships. |
 | `kodstar deps <file> <symbol>` | Show outgoing dependencies. |
 | `kodstar refs <file> <symbol>` | Show incoming references. |
-| `kodstar explain <file> <symbol>` | Explain definitions and relationship evidence. |
+| `kodstar explain <file> <symbol>` | Explain definitions, relationship evidence, and explicit ADR or RFC references. |
 | `kodstar impact <file> [symbol]` | Find static impact candidates for a file or symbol. |
 | `kodstar impact --since <revision>` | Inspect the impact of changes since a checkpoint. |
 | `kodstar path <file::symbol> <file::symbol>` | Find a shortest directed relationship path between two symbols. |
+| `kodstar path <file::symbol> <file::symbol> --undirected` | Find a shortest path that can change direction, including paths through a shared dependency. |
 
 ### Local history and branches
 
@@ -128,6 +136,7 @@ A `<revision>` is a checkpoint ID or a saved checkpoint name.
 | `kodstar history save <name>` | Capture the current source state and name its checkpoint. |
 | `kodstar history diff` | Compare the current checkpoint with its parent. |
 | `kodstar history diff --from <revision> --to <revision>` | Compare two saved checkpoints; both options are required together. |
+| `kodstar history diff --graph [--from <revision> --to <revision>]` | Show changes in relationship targets, resolution, and counts. |
 | `kodstar history restore <revision> [path]` | Restore all tracked files or a selected path, preserving current changes first. |
 | `kodstar history upgrade` | Verify, upgrade, and repack history storage. |
 | `kodstar branch` | List local branches and their checkpoints. |
@@ -162,6 +171,16 @@ A `<revision>` is a checkpoint ID or a saved checkpoint name.
 Query commands support `--format text|json|jsonl|tsv`, `--rev <revision>` for saved analysis,
 and `--no-refresh` to skip change checks. Use `--root <path>` on project commands to select a project explicitly.
 For subcommands, put options after the subcommand, for example `kodstar history diff --root /work/your-project`.
+
+Progress and stage timings are printed to stderr by default in terminals, pipes, and redirected runs. They show source capture,
+parsing and native analysis, relationship resolution, and index publication. JSON stdout stays
+machine-readable. Native analysis reports the affected file and reason when context is missing
+or a file task reaches a resource limit. Memory is scheduled by phase; native tasks wait for
+workspace and release it when their file finishes.
+Use `kodstar --verbose false related src/api.rs caller` to suppress routine progress and timings,
+or `kodstar --verbose true related src/api.rs caller` to enable them explicitly. The option is global
+and also works after a subcommand. Errors and analysis warnings remain visible; result output and
+structured stdio progress frames are unaffected. No log files are created.
 See the [CLI specification](kodstar-spec.md#7-cli-명령어-전체) for complete behavior and limits.
 
 ## Examples
@@ -197,6 +216,7 @@ kodstar search target
 # Name the updated checkpoint, compare, and inspect change impact
 kodstar history save after-edit
 kodstar history diff --from baseline --to after-edit
+kodstar history diff --graph --from baseline --to after-edit
 kodstar impact --since baseline
 
 # Query a saved checkpoint and restore a file
@@ -229,19 +249,35 @@ JSON, JSONL, TSV, and stdio contracts are defined in the [specification](kodstar
 
 ## Supported languages
 
-kod<sup>☆</sup> provides selected static analysis rules for **19 languages** and **6 component and template formats**.
+kod<sup>☆</sup> provides selected static analysis rules for **18 languages** and **7 HTML, component, and template formats**.
 
 | Category | Languages and formats |
 |---|---|
 | Systems and native | Rust, Go, C, C++, Zig |
-| Application languages | Java, Kotlin, Scala, C#, Swift, Pascal |
+| Application languages | Java, Kotlin, Scala, C#, Swift |
 | Dynamic languages and web | Python, JavaScript, TypeScript, Ruby, PHP |
 | BEAM·Lisp | Elixir, Erlang, Common Lisp |
-| Components and templates | Vue, Svelte, Astro, EJS, Blade, Razor |
+| HTML, components and templates | HTML, Vue, Svelte, Astro, EJS, Blade, Razor |
 
 Analysis uses static syntax, explicit bindings, and language-specific resolution rules.
 Run `kodstar languages --format json` for each language's capabilities and limitations,
 and see the [language reference](kodstar-spec.md#3-지원-언어) for supported inputs.
+
+React uses the JSX/TSX analyzer. Hono route and middleware registrations connect to handlers and JSX or static HTML responses. Static htmx attributes in HTML, JSX, and supported templates become HTTP route candidates; `hx-target="#id"` can reference a unique ID in the same file.
+
+```bash
+kodstar related index.html index.html --relation http_request --include-candidates
+kodstar deps src/server.tsx show --relation renders
+kodstar --licenses
+```
+
+HTTP matches describe static dependencies. They do not establish the deployed origin, middleware execution order, dynamic routes, or browser DOM state. C/C++ semantic gaps are reported by `doctor`; missing project SDKs and unsupported compilation context retain the available syntax analysis.
+
+Tree-sitter builds the base graph and recovers reliable declarations from partially parsed files.
+Uncertain scopes and providers retain candidate relationships. Partial syntax coverage returns
+`complete: false`; `kodstar doctor` lists affected files. Embedded Clang adds C/C++ semantic evidence;
+missing SDKs or native task limits preserve the syntax graph and report separate coverage counts.
+Unreadable inputs contribute no stale symbols. Source checkpoints preserve their original bytes.
 
 Supported platforms are **macOS and Linux**. **Windows is not supported.**
 
@@ -315,10 +351,10 @@ cargo test --workspace --locked
 ```
 
 Pinned dependencies and grammar sources are recorded in the [dependency inventory](LICENSES/dependencies.json).
-Third-party license texts and notices are preserved in [LICENSES](LICENSES).
+Third-party license texts and notices are preserved in [LICENSES](LICENSES) and bundled in the executable. Run `kodstar --licenses` to read them.
 
 ---
 
 <p align="center">
-  <sub>Built with Rust · Parsed with Tree-sitter · Stored in SQLite</sub>
+  <sub>Built with Rust · Tree-sitter + Clang · Stored in SQLite</sub>
 </p>

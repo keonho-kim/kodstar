@@ -172,24 +172,3 @@ fn membership(
         |name| (name.clone(), Some(name)),
     ))
 }
-
-pub(super) fn identities(c: &Connection, cancel: &Cancellation) -> Result<()> {
-    let mut statement=c.prepare("SELECT s.id,s.syntax_key,f.module,f.package FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.language='swift' ORDER BY s.id")?;
-    let mut rows = statement.query([])?;
-    while let Some(row) = rows.next()? {
-        cancel.check()?;
-        let id: i64 = row.get(0)?;
-        let mut hash = blake3::Hasher::new();
-        hash.update(b"swift-module-definition");
-        for column in [1, 2, 3] {
-            let part: String = row.get(column)?;
-            hash.update(&(part.len() as u64).to_le_bytes());
-            hash.update(part.as_bytes());
-        }
-        c.execute(
-            "UPDATE symbols SET resolved_key=NULLIF(?1,syntax_key) WHERE id=?2",
-            params![hash.finalize().to_hex().to_string(), id],
-        )?;
-    }
-    Ok(())
-}

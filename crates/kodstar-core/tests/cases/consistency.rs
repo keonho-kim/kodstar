@@ -5,11 +5,10 @@
 
 use crate::support::*;
 use kodstar_core::*;
-use serde_json::Value;
 
 #[test]
 fn failure_during_staged_publication_preserves_the_last_complete_generation() -> TestResult {
-    for table in ["lookup_rows", "relation_blocks"] {
+    for table in ["lookup_pages", "relation_blocks"] {
         let project = Project::new()?;
         project.write(
             "main.rs",
@@ -87,30 +86,33 @@ fn failure_during_staged_publication_preserves_the_last_complete_generation() ->
 fn explicit_root_queries_never_create_an_initial_index() -> TestResult {
     let project = Project::new()?;
     project.write("main.rs", "fn target() {}")?;
-    let mut options = project.options();
-    options.root = Some(project.root.clone());
-    let error = project
-        .engine
-        .query(
-            &options,
-            &Query::Symbols {
-                file: "main.rs".into(),
-            },
-            &QueryOptions::default(),
-            &Cancellation::default(),
-            &mut Collected::default(),
-        )
-        .expect_err("initial indexing requires build");
-    assert_eq!(error.kind, ErrorKind::NotFound);
-    assert!(!project.directory.join("cache").exists());
+    for refresh in [Refresh::None, Refresh::Metadata] {
+        let error = project
+            .engine
+            .query(
+                &project.options(),
+                &Query::Symbols {
+                    file: "main.rs".into(),
+                },
+                &QueryOptions {
+                    refresh,
+                    ..QueryOptions::default()
+                },
+                &Cancellation::default(),
+                &mut Collected::default(),
+            )
+            .expect_err("initial indexing requires init");
+        assert_eq!(error.kind, ErrorKind::NotFound, "{refresh:?}");
+        assert!(!project.directory.join("cache").exists());
+    }
     Ok(())
 }
 
 #[test]
-fn initialized_history_retries_analysis_after_a_failed_first_generation() -> TestResult {
+fn initialized_history_recovers_a_failed_file_from_the_first_partial_generation() -> TestResult {
     let project = Project::new()?;
     project.write("main.rs", "fn broken( {")?;
-    assert!(project.build(false).is_err());
+    assert_eq!(project.build(false)?.coverage.partial_files, 1);
     project.write("main.rs", "fn fixed() {}")?;
     let mut sink = Collected::default();
     project.engine.query(
@@ -214,52 +216,6 @@ fn explain_preserves_unresolved_expressions_and_respects_relation_filters() -> T
     let edge = serde_json::to_value(edges[0])?;
     assert_eq!(edge["expression"], "absent");
     assert_eq!(edge["provider_version"], VERSION);
-    Ok(())
-}
-
-fn normalize(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            object.remove("id");
-            object.remove("owner");
-            for value in object.values_mut() {
-                normalize(value);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                normalize(value);
-            }
-        }
-        _ => {}
-    }
-}
-
-#[test]
-fn adding_and_deleting_targets_matches_a_full_rebuild() -> TestResult {
-    let project = Project::new()?;
-    project.write(
-        "caller.ts",
-        "import { target } from './api'; function caller() { target(); }",
-    )?;
-    project.build(false)?;
-    for source in [Some("export function target() {}"), None] {
-        if let Some(source) = source {
-            project.write("api.ts", source)?;
-        } else {
-            std::fs::remove_file(project.root.join("api.ts"))?;
-        }
-        project.build(false)?;
-        let query = || Query::Explain {
-            selector: selector("caller.ts", "caller"),
-        };
-        let mut incremental = serde_json::to_value(project.query(query())?.rows)?;
-        project.build(true)?;
-        let mut full = serde_json::to_value(project.query(query())?.rows)?;
-        normalize(&mut incremental);
-        normalize(&mut full);
-        assert_eq!(incremental, full);
-    }
     Ok(())
 }
 

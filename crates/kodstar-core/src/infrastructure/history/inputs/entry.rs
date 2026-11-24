@@ -11,6 +11,7 @@ use crate::domain::{
 use rusqlite::Connection;
 use std::{path::PathBuf, rc::Rc};
 
+#[derive(Clone)]
 pub(crate) struct Entry {
     pub relative: PathBuf,
     pub language: Option<Language>,
@@ -19,7 +20,7 @@ pub(crate) struct Entry {
     pub(super) connection: Rc<Connection>,
     pub(super) blob: i64,
     pub(super) size: u64,
-    pub(super) hash: String,
+    pub(super) hash: [u8; 32],
 }
 
 impl Entry {
@@ -28,8 +29,8 @@ impl Entry {
     }
 
     /// Reuse only after read has verified the stored bytes against this digest.
-    pub fn content_hash(&self) -> &str {
-        &self.hash
+    pub fn content_hash(&self) -> [u8; 32] {
+        self.hash
     }
 
     pub fn has_file(&self, path: &std::path::Path) -> Result<bool> {
@@ -65,5 +66,19 @@ impl Entry {
 
     pub fn read(&self, max_bytes: usize, cancel: &Cancellation) -> Result<Vec<u8>> {
         super::super::content::blobs::read(&self.connection, self.blob, max_bytes, cancel)
+    }
+    pub fn read_in(
+        &self,
+        max_bytes: usize,
+        cancel: &Cancellation,
+        workspace: &mut super::ReadWorkspace,
+    ) -> Result<Vec<u8>> {
+        super::super::content::blobs::read_in(
+            &self.connection,
+            self.blob,
+            max_bytes,
+            cancel,
+            workspace,
+        )
     }
 }

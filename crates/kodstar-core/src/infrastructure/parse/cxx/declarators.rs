@@ -39,3 +39,30 @@ pub(in crate::infrastructure::parse) fn leaf(mut node: Node<'_>) -> Node<'_> {
     }
     node
 }
+
+pub(in crate::infrastructure::parse) fn value_name(mut node: Node<'_>) -> Option<Node<'_>> {
+    for _ in 0..64 {
+        match node.kind() {
+            "field_identifier" | "identifier" => return Some(node),
+            "function_declarator"
+                if !node
+                    .child_by_field_name("declarator")
+                    .is_some_and(|n| n.kind() == "parenthesized_declarator") =>
+            {
+                return None;
+            }
+            "pointer_declarator"
+            | "array_declarator"
+            | "reference_declarator"
+            | "parenthesized_declarator"
+            | "function_declarator"
+            | "init_declarator" => {
+                node = node
+                    .child_by_field_name("declarator")
+                    .or_else(|| node.named_child(0))?;
+            }
+            _ => return None,
+        }
+    }
+    None
+}

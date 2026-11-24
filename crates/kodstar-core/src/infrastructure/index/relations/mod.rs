@@ -10,8 +10,10 @@ mod groups;
 mod merge;
 mod prior;
 pub(super) use prior::SCHEMA as PRIOR_SCHEMA;
+mod reader;
 pub(in crate::infrastructure::index) mod routing;
 mod row;
+pub(crate) use reader::Reader;
 mod sets;
 mod writer;
 pub(crate) use row::Relation;
@@ -47,6 +49,7 @@ pub(super) fn scan(
     after: i64,
     filters: &[Filter],
     routes: &mut routing::Cursor,
+    columns: u64,
 ) -> Result<Option<(i64, Rows)>> {
     let find = |col| filters.iter().find(|(k, _)| *k == col).map(|(_, v)| v);
     let block = if let Some(id) = find(0) {
@@ -54,7 +57,8 @@ pub(super) fn scan(
     } else if let Some(value) = find(1) {
         routes.next(c, 1, value, after)?
     } else if let Some(source) = find(2) {
-        c.query_row(
+        super::packed::statements::row(
+            c,
             "SELECT id FROM relation_blocks WHERE source_id=?1 AND id>?2 ORDER BY id LIMIT 1",
             params![source, after],
             |r| r.get(0),
@@ -65,7 +69,8 @@ pub(super) fn scan(
     } else if let Some(value) = find(6) {
         routes.next(c, 6, value, after)?
     } else {
-        c.query_row(
+        super::packed::statements::row(
+            c,
             "SELECT id FROM relation_blocks WHERE id>?1 ORDER BY id LIMIT 1",
             [after],
             |r| r.get(0),
@@ -77,14 +82,15 @@ pub(super) fn scan(
             let (_, source, count, bytes) = block_data(c, id)?;
             Ok((
                 id,
-                Rows::Relations(codec::select(c, &bytes, count, source, filters)?),
+                Rows::Relations(codec::project(c, &bytes, count, source, filters, columns)?),
             ))
         })
         .transpose()
 }
 
 fn block_data(c: &Connection, id: i64) -> Result<(i64, i64, usize, Vec<u8>)> {
-    c.query_row(
+    super::packed::statements::row(
+        c,
         "SELECT file_id,source_id,count,payload FROM relation_blocks WHERE id=?1",
         [id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),

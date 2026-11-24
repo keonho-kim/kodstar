@@ -30,15 +30,29 @@ pub(super) fn commands() -> Vec<Command> {
     let search = base(
         Command::new("search")
             .about("Find object definitions by name")
-            .long_about("Find definition candidates by exact name, or by name prefix with --prefix. Matching follows the \
-                relevant language's name rules; input is not a regular expression. Definitions remain distinct \
-                by language, scope, and location.")
-            .after_long_help("Examples:\n  kodstar search target\n  kodstar search Service --prefix --format json")
+            .long_about("Find definitions by exact name or prefix using language-specific name rules. Use --ranked to \
+                match words in identifiers, qualified names and paths, then show direct relationships for up to \
+                eight leading definitions. Definitions stay distinct by language, scope, and location.")
+            .after_long_help("Examples:\n  kodstar search target\n  kodstar search Service --prefix --format json\n  kodstar search StoreOrder --ranked")
             .arg(Arg::new("name").required(true)
-                .help("Definition name, or name prefix with --prefix"))
-            .arg(flag("prefix", "Match a name prefix")),
+                .help("Definition name, prefix or words"))
+            .arg(flag("prefix", "Match a name prefix"))
+            .arg(flag("ranked", "Rank definitions and show direct relationships").conflicts_with("prefix"))
+            .arg(visited_limit().requires("ranked")
+                .help("Maximum matching definitions scored (0 for unlimited)")
+                .long_help("Limit how many definitions with at least one matching word or word prefix are scored by ranked search. A value of 0 removes this bound.")),
     );
-    let mut commands = vec![symbols, list, search];
+    let overview = base(
+        Command::new("overview")
+            .about("Summarize project structure and important dependencies")
+            .long_about("List source directories, connections across directories and package boundaries, objects with many \
+                distinct users, and groups of files that participate in import cycles. Use a single index generation and resolved \
+                internal relationships. File, relationship and output bounds can produce a partial report.")
+            .after_long_help("Examples:\n  kodstar overview\n  kodstar overview --rev baseline --format jsonl")
+            .arg(visited_limit().help("Maximum indexed files examined; 0 removes this bound")
+                .long_help("Limit the indexed files included in the report. The memory budget can further limit files and relationships.")),
+    );
+    let mut commands = vec![symbols, list, search, overview];
     for (name, about, details, examples) in [
         (
             "related",
@@ -126,9 +140,10 @@ pub(super) fn commands() -> Vec<Command> {
                     .about("Find a shortest directed relationship path")
                     .long_about("Find one shortest directed path between two file::qualified-name selectors using the selected \
                         directions and relationship filters. Both directions are allowed by default, with no default \
-                        depth bound; result and visited-node limits still apply. Preserve :: inside a qualified symbol \
-                        name.")
-                    .after_long_help("Examples:\n  kodstar path src/api.rs::caller src/db.rs::save\n  kodstar path src/api.rs::caller src/db.rs::save --direction out --relation calls")
+                        depth bound; result and visited-node limits still apply. --undirected allows a direction change \
+                        between hops while showing each edge's actual direction. Preserve :: inside a qualified symbol name.")
+                    .after_long_help("Examples:\n  kodstar path src/api.rs::caller src/db.rs::save\n  kodstar path src/api.rs::caller src/db.rs::other --undirected --relation calls")
+                    .arg(flag("undirected", "Allow direction changes between hops").conflicts_with("direction"))
                     .arg(Arg::new("from").required(true)
                         .help("Start selector: file::qualified-name; file is relative to the current directory or absolute"))
                     .arg(Arg::new("to").required(true)
@@ -179,7 +194,10 @@ fn relations(command: Command, name: &str) -> Command {
             let direction: Direction = value
                 .parse()
                 .map_err(|error: kodstar_core::Error| error.to_string())?;
-            if out_only && direction != Direction::Out || in_only && direction != Direction::In {
+            if out_only && direction != Direction::Out
+                || in_only && direction != Direction::In
+                || direction == Direction::Undirected
+            {
                 return Err("direction conflicts with this command".to_owned());
             }
             Ok(direction)
@@ -224,15 +242,17 @@ fn traversal(command: Command) -> Command {
         )
         .arg(flag("transitive", "Traverse without a depth bound")
             .long_help("Remove the depth bound while retaining the output-row and visited-node limits. Conflicts with --depth."))
-        .arg(
-            Arg::new("max-nodes")
-                .long("max-nodes")
-                .value_parser(clap::value_parser!(usize))
-                .help("Maximum visited objects; 0 removes this bound")
-                .long_help(format!("Limit visited objects separately from output rows and depth. Built-in default: {}; TOML \
-                    configuration can override it. A value of 0 removes this bound; traversal still uses its \
-                    remaining limits.", Settings::default().max_nodes)),
-        )
+        .arg(visited_limit())
+}
+
+fn visited_limit() -> Arg {
+    Arg::new("max-nodes")
+        .long("max-nodes")
+        .value_parser(clap::value_parser!(usize))
+        .help("Maximum visited objects; 0 removes this bound")
+        .long_help(format!("Limit visited objects separately from output rows and depth. Built-in default: {}; TOML \
+            configuration can override it. A value of 0 removes this bound; traversal still uses its \
+            remaining limits.", Settings::default().max_nodes))
 }
 
 fn symbol(required: bool) -> Arg {

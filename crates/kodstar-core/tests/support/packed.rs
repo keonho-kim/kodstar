@@ -4,6 +4,8 @@
 // Related: crates/kodstar-core/tests/support/postings.rs, crates/kodstar-core/tests/support/packed_mutations.rs.
 
 use rusqlite::{Connection, Result, functions::FunctionFlags};
+#[path = "../../src/infrastructure/index/packed/expansion.rs"]
+pub(super) mod expansion;
 mod relations;
 mod routing;
 
@@ -67,9 +69,8 @@ pub fn register(c: &Connection) -> Result<()> {
         | FunctionFlags::SQLITE_INNOCUOUS;
     relations::register(c, flags)?;
     routing::register(c, flags)?;
-    c.create_scalar_function("kodstar_routes", 1, flags, |ctx| {
-        serde_json::to_string(&routes(ctx.get_raw(0).as_blob()?)?)
-            .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+    expansion::register(c, c"kodstar_dictionary_route_rows", |bytes, _| {
+        routes(bytes)
     })?;
     c.create_scalar_function("kodstar_route_at", 2, flags, |ctx| {
         let slot: usize = ctx.get(1)?;

@@ -3,11 +3,25 @@
 // Usage: text renderer가 구조화된 HistoryRow를 전달.
 // Related: crates/kodstar-cli/src/output/text.rs.
 
-use kodstar_core::HistoryRow;
+use kodstar_core::{GraphEvidence, HistoryRow};
 use std::io::{self, Write};
 
 pub(super) fn row(writer: &mut impl Write, row: &HistoryRow) -> io::Result<()> {
     match row {
+        HistoryRow::GraphChange {
+            change,
+            before,
+            after,
+        } => {
+            writeln!(writer, "{change}")?;
+            if let Some(edge) = before {
+                evidence(writer, "-", edge)?;
+            }
+            if let Some(edge) = after {
+                evidence(writer, "+", edge)?;
+            }
+            Ok(())
+        }
         HistoryRow::Impact {
             checkpoint,
             relationship,
@@ -85,4 +99,24 @@ pub(super) fn row(writer: &mut impl Write, row: &HistoryRow) -> io::Result<()> {
             "{operation}  {branch}  {checkpoint}  changed={changed_files}"
         ),
     }
+}
+
+fn evidence(writer: &mut impl Write, side: &str, edge: &GraphEvidence) -> io::Result<()> {
+    let target = edge
+        .target
+        .as_ref()
+        .map(|t| t.name.as_str())
+        .or(edge.external.as_deref())
+        .unwrap_or("<unresolved>");
+    writeln!(
+        writer,
+        "{side} {} {} -> {target} [{}] | {}:{}:{} | count {}",
+        edge.source,
+        edge.relation,
+        edge.resolution,
+        edge.site.file,
+        edge.site.span.line,
+        edge.site.span.column,
+        edge.count,
+    )
 }

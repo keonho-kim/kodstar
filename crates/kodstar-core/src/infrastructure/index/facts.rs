@@ -13,13 +13,17 @@ use crate::domain::languages::Language;
 use crate::infrastructure::cache::paths::path_bytes;
 use rusqlite::{Connection, params};
 
+mod definitions;
+mod retained;
+
 pub(crate) struct FileFacts {
     pub(crate) id: i64,
     path: Vec<u8>,
     package: String,
-    module: String,
+    pub(super) module: String,
     preserve: bool,
     pub(crate) call_reuse: bool,
+    pub(crate) addition: Option<super::append_reuse::RetainedRows>,
 }
 impl FileFacts {
     pub(crate) fn preserves_definitions(&self) -> bool {
@@ -33,6 +37,7 @@ impl FileFacts {
             module: record.module.clone(),
             preserve,
             call_reuse: false,
+            addition: None,
         }
     }
 }
@@ -69,6 +74,11 @@ impl<'conn> FactWriter<'conn> {
         fact: Fact,
     ) -> Result<()> {
         let file = context.id;
+        if let Some(rows) = context.addition.clone()
+            && self.retain(context, &rows, &fact)?
+        {
+            return Ok(());
+        }
         match fact {
             Fact::Scope(scope) => {
                 if context.preserve {
@@ -93,86 +103,19 @@ impl<'conn> FactWriter<'conn> {
                     ],
                 )?;
             }
-            Fact::Definition(definition) => {
-                if context.preserve {
-                    let span = definition.span;
-                    return self.statements.execute(
-                        Write::UpdateDefinition,
-                        params![
-                            span.start_byte,
-                            span.end_byte,
-                            span.line,
-                            span.column,
-                            span.end_line,
-                            span.end_column,
-                            file,
-                            definition.local_id
-                        ],
-                    );
-                }
-                let owner = definition
-                    .owner
-                    .map(|owner| self.local_symbol(file, owner))
-                    .transpose()?;
-                let name = self.atoms.intern(&definition.name)?;
-                let name_key = self.atoms.intern(&language.lookup_key(&definition.name))?;
-                let qualified = self.atoms.intern(&definition.qualified_name)?;
-                let kind = self.atoms.intern(definition.kind.as_str())?;
-                let signature = self.atoms.intern(&definition.signature)?;
-                let condition = self.atoms.optional(definition.condition.as_deref())?;
-                let language_id = self.atoms.intern(language.as_str())?;
-                let ordinal = self.statements.integer(
-                    Write::Ordinal,
-                    params![file, qualified, kind, signature, condition],
-                )?;
-                let mut hasher = blake3::Hasher::new();
-                for part in [
-                    language.as_str().as_bytes(),
-                    context.package.as_bytes(),
-                    context.module.as_bytes(),
-                    context.path.as_slice(),
-                    definition.qualified_name.as_bytes(),
-                    definition.kind.as_str().as_bytes(),
-                    definition.signature.as_bytes(),
-                    definition.condition.as_deref().unwrap_or("").as_bytes(),
-                    &ordinal.to_le_bytes(),
-                ] {
-                    hasher.update(&(part.len() as u64).to_le_bytes());
-                    hasher.update(part);
-                }
-                let identity = hasher.finalize();
-                let span = definition.span;
-                self.statements.execute(
-                    Write::Definition,
-                    params![
-                        file,
-                        definition.local_id,
-                        definition.scope,
-                        identity.as_bytes().as_slice(),
-                        name,
-                        name_key,
-                        qualified,
-                        kind,
-                        signature,
-                        condition,
-                        owner,
-                        definition.exported,
-                        span.start_byte,
-                        span.end_byte,
-                        span.line,
-                        span.column,
-                        span.end_line,
-                        span.end_column,
-                        language_id
-                    ],
-                )?;
-            }
+            Fact::Definition(definition) => self.definition(context, language, definition)?,
             Fact::Binding(binding) => {
-                if context.preserve {
+                if context.preserve && binding.kind != "clang_call" {
                     if matches!(binding.kind, "function" | "go_signature") {
                         self.statements.execute(
-                            Write::UpdateFunctionEnd,
-                            params![binding.span.end_byte, file, binding.target],
+                            Write::UpdateCallableSpan,
+                            params![
+                                binding.span.start_byte,
+                                binding.span.end_byte,
+                                file,
+                                binding.target,
+                                binding.kind
+                            ],
                         )?;
                     }
                     return Ok(());
@@ -240,6 +183,16 @@ impl<'conn> FactWriter<'conn> {
                         span.end_line as i64,
                         span.end_column as i64,
                         language_id,
+                        if matches!(language, Language::C | Language::Cpp)
+                            && usage.relation == crate::domain::relations::RelationKind::Calls
+                        {
+                            self.statements.integer(
+                                Write::NativeCallModule,
+                                params![file, usage.scope, span.start_byte, span.end_byte],
+                            )?
+                        } else {
+                            0
+                        },
                     ];
                     let matcher = match &mut self.body {
                         Some(matcher) => matcher,
@@ -275,7 +228,7 @@ impl<'conn> FactWriter<'conn> {
                         language_id
                     ],
                 )?;
-                if context.call_reuse {
+                if context.call_reuse || context.addition.is_some() {
                     self.connection.execute(
                         "INSERT OR IGNORE INTO affected_facts VALUES(?1)",
                         [self.connection.last_insert_rowid()],

@@ -10,15 +10,18 @@ use crate::infrastructure::cache::paths::path_bytes;
 use rusqlite::{Connection, OptionalExtension, Statement};
 use std::path::Path;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) struct PreviousFile {
     pub(crate) size: u64,
-    pub(crate) hash: String,
+    pub(crate) hash: [u8; 32],
     pub(crate) language: String,
     pub(crate) status: String,
     pub(crate) base_module: String,
     pub(crate) package: String,
     pub(crate) configuration: bool,
-    pub(crate) fingerprints: Fingerprints,
+    pub(crate) fingerprints: Option<Fingerprints>,
 }
 
 impl PreviousFile {
@@ -38,17 +41,23 @@ pub(crate) struct PreviousFiles<'conn> {
 }
 impl<'conn> PreviousFiles<'conn> {
     pub(crate) fn new(connection: &'conn Connection) -> Result<Self> {
-        Ok(Self { statement: connection.prepare("SELECT lower(hex(facts_hash)),lower(hex(environment_hash)),size,lower(hex(content_hash)),
-            language,status,path_module,path_package,EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=files.id AND b.kind='configuration') FROM files WHERE path=?1")? })
+        Ok(Self { statement: connection.prepare("SELECT facts_hash,environment_hash,size,content_hash,
+            language,status,path_module,path_package,(EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=files.id AND b.kind='configuration') OR EXISTS(SELECT 1 FROM diagnostics d WHERE d.file_id=files.id AND d.code='configuration_invalid')) FROM files WHERE path=?1")? })
     }
     pub(crate) fn get(&mut self, path: &Path) -> Result<Option<PreviousFile>> {
         Ok(self
             .statement
             .query_row([path_bytes(path)], |row| {
                 Ok(PreviousFile {
-                    fingerprints: Fingerprints {
-                        all: row.get(0)?,
-                        environment: row.get(1)?,
+                    fingerprints: if row.get_ref(0)?.as_blob()?.is_empty()
+                        && row.get_ref(1)?.as_blob()?.is_empty()
+                    {
+                        None
+                    } else {
+                        Some(Fingerprints {
+                            all: row.get(0)?,
+                            environment: row.get(1)?,
+                        })
                     },
                     size: row.get(2)?,
                     hash: row.get(3)?,

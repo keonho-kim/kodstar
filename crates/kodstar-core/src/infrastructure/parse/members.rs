@@ -23,7 +23,6 @@ impl Extractor<'_> {
                 | "enum_entry"
                 | "simple_enum_case"
                 | "full_enum_case"
-                | "declEnumValue"
         ) || node.kind() == "property_identifier"
             && node.parent().is_some_and(|p| p.kind() == "enum_body")
             || node.kind() == "container_field"

@@ -123,6 +123,7 @@ impl Repository {
         }
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH, 256 * 1024)?;
+        connection.set_prepared_statement_cache_capacity(4);
         connection.execute_batch(
             "PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA temp_store=FILE;",
         )?;
@@ -204,6 +205,15 @@ impl Repository {
 
     pub fn release(&mut self) {
         self.lock = None;
+    }
+
+    pub(crate) fn query_snapshot(&mut self) -> Result<rusqlite::Transaction<'_>> {
+        let transaction = self.connection.transaction()?;
+        transaction.query_row("SELECT singleton FROM repository", [], |row| {
+            row.get::<_, i64>(0)
+        })?;
+        self.lock = None;
+        Ok(transaction)
     }
 
     pub fn state(&self) -> Result<HistoryState> {

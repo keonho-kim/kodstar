@@ -1,0 +1,83 @@
+{
+  "schema_version": 2,
+  "upstream_repository": "https://github.com/tree-sitter/tree-sitter-ruby",
+  "upstream_revision": "71bd32fb7607035768799732addba884a37a6210",
+  "generator": "0.26.10",
+  "abi": 15,
+  "targets": [
+    "."
+  ],
+  "inputs": [
+    {
+      "path": "Cargo.toml",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/Cargo.toml",
+      "sha256": "2e7fd28a9c135cf7c83bddd16893eb12ce8aa684ff0470aad8bd7b614d433904"
+    },
+    {
+      "path": "grammar.js",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/grammar.js",
+      "sha256": "3b5a0afa4ad836b2579c6d836450a373c6736bb0da3d7e030a9d4e66b94fbc7a"
+    },
+    {
+      "path": "tree-sitter.json",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/tree-sitter.json",
+      "sha256": "7de08cd47b857dfa02845c25032bba7a6653ddd673502b19018a92d8404d2b24"
+    },
+    {
+      "path": "bindings/rust/lib.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/bindings/rust/lib.rs",
+      "sha256": "96a7ac7cd9a54f62e5829944f60ee634b7fafd6ca4a9d5a50eb671c34e4b5ddb"
+    },
+    {
+      "path": "bindings/rust/build.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/bindings/rust/build.rs",
+      "sha256": "58cfadea70b4b5f4054b87b0610680fd5f16c077a15875b42cc1f9cf58b53c07"
+    },
+    {
+      "path": "src/scanner.c",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/src/scanner.c",
+      "sha256": "e7a6196d6e78bf4c6728502e924c867dee5d851c6253e43fcdb8ba169009bc58"
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/LICENSE",
+      "sha256": "ee006f02a3d856df282e409be2a86e24a65bb573a98b9c28343771141351bb6b"
+    },
+    {
+      "path": "queries/highlights.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/queries/highlights.scm",
+      "sha256": "0858de9feece6dcd3408a541f995a34918d587ac2c552096026b0e47e2b332e6"
+    },
+    {
+      "path": "queries/locals.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/queries/locals.scm",
+      "sha256": "f00178e94b9c2ea672fd4ee2e60ac5d7d90be59c72e86292e22620358ac9dbb0"
+    },
+    {
+      "path": "queries/tags.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-ruby/71bd32fb7607035768799732addba884a37a6210/queries/tags.scm",
+      "sha256": "ed1e7dc07a95b87aef267e7f9715c6717a70f09efbd7b6f48bbd51c7b7510cf3"
+    }
+  ],
+  "dependencies": [],
+  "files": {
+    "Cargo.toml": "683fb7da9d4be9fc7d2c6b5b3d59317aec5755c5691f979e043fa761126377fa",
+    "LICENSE": "ee006f02a3d856df282e409be2a86e24a65bb573a98b9c28343771141351bb6b",
+    "bindings/rust/build.rs": "58cfadea70b4b5f4054b87b0610680fd5f16c077a15875b42cc1f9cf58b53c07",
+    "bindings/rust/lib.rs": "96a7ac7cd9a54f62e5829944f60ee634b7fafd6ca4a9d5a50eb671c34e4b5ddb",
+    "grammar.js": "93d3cb2cf67f866a1d7a6a5448df7b69866857e7c37030f1d5fd9f11588b104a",
+    "queries/highlights.scm": "0858de9feece6dcd3408a541f995a34918d587ac2c552096026b0e47e2b332e6",
+    "queries/locals.scm": "f00178e94b9c2ea672fd4ee2e60ac5d7d90be59c72e86292e22620358ac9dbb0",
+    "queries/tags.scm": "ed1e7dc07a95b87aef267e7f9715c6717a70f09efbd7b6f48bbd51c7b7510cf3",
+    "src/grammar.json": "224486fd00eca4b637bfe94588739c5e1aeb8a9dd97420a985402f9c29a47573",
+    "src/node-types.json": "f585b0065974609de5b0e39ae65729f442b4b52f6a866a7cf2f54d0aac6df425",
+    "src/parser.c": "60e60e4a18f1ccb9c314f8d5e6051c89be9a813048ef1430a1f6fa2353485f70",
+    "src/scanner.c": "e7a6196d6e78bf4c6728502e924c867dee5d851c6253e43fcdb8ba169009bc58",
+    "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+    "src/tree_sitter/array.h": "31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c",
+    "src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+    "tree-sitter.json": "7de08cd47b857dfa02845c25032bba7a6653ddd673502b19018a92d8404d2b24",
+    "patch.json": "e7c5a3d0bac192f6fa5db3ecc870f6bcbf377091d0af326e6b4e746905d3bf97"
+  },
+  "manifest_adjustment": "Omit the unused upstream README reference."
+}

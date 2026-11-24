@@ -9,7 +9,7 @@ use kodstar_core::{Engine, Error, QuerySummary, Result};
 use std::io;
 use std::process::ExitCode;
 
-pub(crate) fn execute(mut invocation: Invocation) -> Result<ExitCode> {
+pub(crate) fn execute(mut invocation: Invocation, verbose: bool) -> Result<ExitCode> {
     match invocation.action {
         Action::Install => return crate::installation::install(),
         Action::Uninstall => return crate::installation::uninstall(invocation.yes),
@@ -22,7 +22,8 @@ pub(crate) fn execute(mut invocation: Invocation) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let stdout = io::stdout();
-    let mut sink = Renderer::new(stdout.lock(), invocation.format);
+    let writer = io::BufWriter::with_capacity(64 * 1024, stdout.lock());
+    let mut sink = Renderer::new(writer, invocation.format, verbose);
     let mut project = invocation
         .project
         .ok_or_else(|| Error::argument("project options are required"))?;

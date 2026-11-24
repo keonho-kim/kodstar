@@ -15,6 +15,7 @@ enum TokenType {
     GET,
     SET,
     DOLLAR,
+    PRIMARY_CONSTRUCTOR_SEMI,
 };
 
 #define MAX_WORD_SIZE 16
@@ -32,6 +33,49 @@ static bool scan_word(TSLexer *lexer, const char *const word) {
         skip(lexer);
     }
     return true;
+}
+
+static bool annotated_primary_constructor(TSLexer *lexer) {
+    for (unsigned tokens = 0; tokens < 512 && !lexer->eof(lexer); ++tokens) {
+        while (iswspace(lexer->lookahead)) skip(lexer);
+        if (lexer->lookahead == '@') {
+            skip(lexer);
+            while (iswalnum(lexer->lookahead) || lexer->lookahead == '_' ||
+                   lexer->lookahead == '.' || lexer->lookahead == ':') skip(lexer);
+            if (lexer->lookahead == '(') {
+                unsigned depth = 1;
+                skip(lexer);
+                while (depth && !lexer->eof(lexer)) {
+                    if (lexer->lookahead == '"' || lexer->lookahead == '\'') {
+                        int32_t quote = lexer->lookahead;
+                        skip(lexer);
+                        while (!lexer->eof(lexer) && lexer->lookahead != quote) {
+                            if (lexer->lookahead == '\\') skip(lexer);
+                            if (!lexer->eof(lexer)) skip(lexer);
+                        }
+                        if (!lexer->eof(lexer)) skip(lexer);
+                    } else {
+                        if (lexer->lookahead == '(') ++depth;
+                        if (lexer->lookahead == ')') --depth;
+                        skip(lexer);
+                    }
+                }
+                if (depth) return false;
+            }
+            continue;
+        }
+        char word[32] = {0};
+        unsigned length = 0;
+        while (iswalnum(lexer->lookahead) || lexer->lookahead == '_') {
+            if (length + 1 >= sizeof(word)) return false;
+            word[length++] = (char)lexer->lookahead;
+            skip(lexer);
+        }
+        if (!strcmp(word, "constructor")) return true;
+        if (strcmp(word, "internal") && strcmp(word, "private") &&
+            strcmp(word, "protected") && strcmp(word, "public")) return false;
+    }
+    return false;
 }
 
 static bool scan_words(TSLexer *lexer, const char words[MAX_WORDS][MAX_WORD_SIZE], char scanned_word[16],
@@ -258,6 +302,10 @@ bool tree_sitter_kotlin_external_scanner_scan(void *payload, TSLexer *lexer, con
                 // If `CLASS_MEMBER_SEMI` is valid, we found a secondary constructor and so we want to insert a semi, OR
                 // we found a variable named constructor whose field is being accessed
                 if (index == 5) {
+                    if (valid_symbols[PRIMARY_CONSTRUCTOR_SEMI]) {
+                        lexer->result_symbol = PRIMARY_CONSTRUCTOR_SEMI;
+                        return true;
+                    }
                     while (iswspace(lexer->lookahead)) {
                         skip(lexer);
                     }
@@ -286,6 +334,10 @@ bool tree_sitter_kotlin_external_scanner_scan(void *payload, TSLexer *lexer, con
                 else if (index == 4 && (!valid_symbols[SET] || lexer->lookahead == '[' || lexer->lookahead == '(' ||
                                         lexer->lookahead == '.')) {
                     if (lexer->lookahead == '(' && valid_symbols[SET]) {
+                        skip(lexer);
+                        while (iswspace(lexer->lookahead)) skip(lexer);
+                        // An empty call is an identifier use, never a setter parameter.
+                        if (lexer->lookahead == ')') return true;
                         // skip until the closing parenthesis
                         while (lexer->lookahead != ')' && !lexer->eof(lexer)) {
                             skip(lexer);
@@ -313,6 +365,10 @@ bool tree_sitter_kotlin_external_scanner_scan(void *payload, TSLexer *lexer, con
                 lexer->mark_end(lexer);
                 return true;
             case '@':
+                if (valid_symbols[PRIMARY_CONSTRUCTOR_SEMI]) {
+                    if (annotated_primary_constructor(lexer)) lexer->result_symbol = PRIMARY_CONSTRUCTOR_SEMI;
+                    return true;
+                }
                 if (valid_symbols[CONSTRUCTOR]) {
                     while (!iswspace(lexer->lookahead)) {
                         skip(lexer);

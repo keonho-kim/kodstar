@@ -15,10 +15,14 @@ mod events;
 mod extraction;
 mod incremental;
 mod module_identity;
+mod native_inputs;
 mod pipeline;
 mod positions;
+mod progress;
 mod replay;
 mod resolve;
+pub(in crate::application) mod resources;
+mod routing;
 mod swift_projects;
 mod workers;
 
@@ -46,6 +50,13 @@ pub(crate) struct Session<'a> {
     pub started: Instant,
 }
 
+pub(crate) fn fingerprint(settings: &crate::application::workspace::Settings) -> Result<String> {
+    Ok(crate::infrastructure::clang::fingerprint(
+        &settings.fingerprint()?,
+        settings.native_phase_bytes()?,
+    ))
+}
+
 pub(crate) fn run(
     session: Session<'_>,
     connection: &mut rusqlite::Connection,
@@ -53,6 +64,8 @@ pub(crate) fn run(
     cancel: &Cancellation,
     progress: &mut dyn FnMut(&Progress) -> Result<()>,
 ) -> Result<InitReport> {
+    let _span =
+        tracing::info_span!("analysis", full = options.full, verify = options.verify).entered();
     let Session {
         store,
         selected,
@@ -66,7 +79,7 @@ pub(crate) fn run(
         "SELECT generation,config_hash,extraction_version,indexed_at,relation_registry_version FROM metadata WHERE singleton=1", [],
         |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)))?;
     let maintenance = super::maintenance::run(store, selected, now_seconds()?, cancel)?;
-    let fingerprint = selected.settings.fingerprint()?;
+    let fingerprint = fingerprint(&selected.settings)?;
     let full = options.full
         || previous_repository.as_deref()
             != selected.history.as_ref().map(|s| s.repository.as_str())
@@ -114,6 +127,7 @@ pub(crate) fn run(
                 selected.settings.fact_batch_bytes / 64,
             )?;
             index::statistics::inputs::begin(&transaction, !full && generation > 0)?;
+            index::append_reuse::begin(&transaction)?;
             let (mut changed, mut parsed, reused, mut resolution) = pipeline::run(
                 pipeline::Input {
                     database,
@@ -171,27 +185,23 @@ pub(crate) fn run(
             }
             parsed += configuration_parsed;
             let at = if changed {
-                if resolution != incremental::Resolution::None {
-                    progress(&Progress {
-                        phase: "resolve",
-                        completed_files: parsed + reused,
-                        source_bytes: 0,
-                    })?;
-                }
                 index::limit_reads(&transaction, selected.settings.memory_budget)?;
                 if resolution == incremental::Resolution::All {
+                    progress(&Progress::phase("project_links"))?;
                     dotnet_projects::run(&transaction, &selected.root, cancel)?;
                     swift_projects::run(&transaction, &selected.root, cancel)?;
                 }
                 if resolution != incremental::Resolution::None {
-                    resolve::run(&transaction, cancel, resolution)?;
+                    resolve::run(&transaction, cancel, resolution, progress)?;
                 }
+                index::ranked_terms::refresh(&transaction, cancel)?;
                 let update = match resolution {
                     incremental::Resolution::None => index::CoverageUpdate::Files,
                     incremental::Resolution::Selected => index::CoverageUpdate::Selected,
                     incremental::Resolution::All => index::CoverageUpdate::All,
                 };
                 index::atoms::collect(&transaction)?;
+                progress(&Progress::phase("publish"))?;
                 index::refresh_coverage(&transaction, next_generation, update)?;
                 let at = now_seconds()?;
                 transaction.execute("UPDATE metadata SET generation=?1,config_hash=?2,indexed_at=?3,last_update='complete',last_error=NULL,engine_version=?4,extraction_version=?5,relation_registry_version=?6 WHERE singleton=1",params![next_generation,fingerprint,at,crate::VERSION,index::EXTRACTION_VERSION,crate::domain::relations::RELATION_REGISTRY_VERSION])?;

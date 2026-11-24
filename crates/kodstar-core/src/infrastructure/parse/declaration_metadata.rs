@@ -49,9 +49,6 @@ impl Extractor<'_> {
         if self.language == Language::Kotlin {
             return self.kotlin_signature(node);
         }
-        if self.language == Language::Pascal {
-            return self.pascal_signature(node);
-        }
         if self.language == Language::CommonLisp {
             return self.lisp_signature(node);
         }
@@ -123,28 +120,6 @@ impl Extractor<'_> {
     pub(super) fn definition_exported(&self, node: Node<'_>, name: &str) -> bool {
         match self.language {
             Language::Swift => self.swift_exported(node),
-            Language::Pascal => {
-                let mut next = Some(node);
-                while let Some(parent) = next {
-                    if parent.kind() == "declSection" {
-                        let mut cursor = parent.walk();
-                        if parent
-                            .named_children(&mut cursor)
-                            .any(|n| matches!(n.kind(), "kPrivate" | "kProtected"))
-                        {
-                            return false;
-                        }
-                    }
-                    if parent.kind() == "interface" {
-                        return true;
-                    }
-                    if parent.kind() == "implementation" {
-                        return false;
-                    }
-                    next = parent.parent();
-                }
-                false
-            }
             Language::Zig => {
                 let declaration = if matches!(
                     node.kind(),

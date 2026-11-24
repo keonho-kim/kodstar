@@ -5,14 +5,9 @@
 
 use crate::domain::diagnostics::Result;
 use crate::domain::languages::Language;
-use crate::infrastructure::formats::components::regions::matching_brace;
 use std::ops::Range;
 
-pub(super) struct Attribute<'a> {
-    pub name: &'a str,
-    pub value: &'a str,
-    pub range: Range<usize>,
-}
+use crate::infrastructure::formats::markup::{Attribute, attributes};
 
 pub(super) fn extract(
     format: Language,
@@ -24,7 +19,9 @@ pub(super) fn extract(
         return Ok(());
     }
     attributes(source, range, &mut |attribute| {
-        let Attribute { name, value, range } = attribute;
+        let Attribute {
+            name, value, range, ..
+        } = attribute;
         let event = if format == Language::Vue {
             name.starts_with('@') || name.starts_with("v-on:")
         } else if format == Language::Razor {
@@ -47,81 +44,4 @@ pub(super) fn extract(
         }
         Ok(())
     })
-}
-
-pub(super) fn attributes(
-    source: &[u8],
-    range: Range<usize>,
-    emit: &mut dyn FnMut(Attribute<'_>) -> Result<()>,
-) -> Result<()> {
-    let mut at = range.start;
-    while at < range.end {
-        while at < range.end && source[at].is_ascii_whitespace() {
-            at += 1;
-        }
-        let start = at;
-        while at < range.end
-            && !source[at].is_ascii_whitespace()
-            && !matches!(source[at], b'=' | b'/' | b'>')
-        {
-            at += 1;
-        }
-        if start == at {
-            at += 1;
-            continue;
-        }
-        let name = std::str::from_utf8(&source[start..at]).unwrap_or("");
-        let name_end = at;
-        while at < range.end && source[at].is_ascii_whitespace() {
-            at += 1;
-        }
-        if source.get(at) != Some(&b'=') {
-            emit(Attribute {
-                name,
-                value: "",
-                range: name_end..name_end,
-            })?;
-            continue;
-        }
-        at += 1;
-        while at < range.end && source[at].is_ascii_whitespace() {
-            at += 1;
-        }
-        let begin;
-        let end;
-        match source.get(at) {
-            Some(b'\'' | b'"') => {
-                let quote = source[at];
-                begin = at + 1;
-                end = source[begin..range.end]
-                    .iter()
-                    .position(|&b| b == quote)
-                    .map_or(range.end, |i| begin + i);
-                at = end + 1;
-            }
-            Some(b'{') => {
-                begin = at + 1;
-                end = matching_brace(source, at)?;
-                at = end + 1;
-            }
-            _ => {
-                begin = at;
-                while at < range.end && !source[at].is_ascii_whitespace() && source[at] != b'>' {
-                    at += 1;
-                }
-                end = at;
-            }
-        }
-        if end <= range.end {
-            let raw = std::str::from_utf8(&source[begin..end]).unwrap_or("");
-            let value = raw.trim();
-            let leading = raw.len() - raw.trim_start().len();
-            emit(Attribute {
-                name,
-                value,
-                range: begin + leading..begin + leading + value.len(),
-            })?;
-        }
-    }
-    Ok(())
 }

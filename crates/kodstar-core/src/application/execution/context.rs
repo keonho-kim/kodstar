@@ -120,7 +120,7 @@ impl<'a> Context<'a> {
         context.project = Some(if let Plan::Revision(revision, refresh) = plan {
             super::prepare::revision(store, selected, revision, refresh, cancel)?
         } else {
-            super::prepare::project(store, selected, initialize, refresh, watch, cancel)?
+            super::prepare::project(store, selected, &context.intent, refresh, watch, cancel)?
         });
         Ok(context)
     }
@@ -147,9 +147,11 @@ impl<'a> Context<'a> {
         let Some(project) = &mut self.project else {
             return Ok(());
         };
+        progress(&Progress::phase("lock"))?;
         project.repository.acquire(cancel)?;
         if self.intent.initializes() || project.refresh != Refresh::None {
             if !project.input.historical() {
+                progress(&Progress::phase("capture"))?;
                 let mut state = capture::run(
                     &mut project.repository,
                     &self.store.home,

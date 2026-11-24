@@ -25,6 +25,8 @@ pub(in crate::infrastructure::formats::components) fn extract(
         usage(source, &mut positions, emit, expression, relation, range)
     })?;
     positions = Positions::new();
+    let htmx = memchr::memmem::find(source, b"hx-").is_some();
+    let mut html_scope = crate::infrastructure::formats::htmx::scope::Scope::default();
     let mut at = 0usize;
     while at < source.len() {
         if at.is_multiple_of(4096) {
@@ -66,11 +68,12 @@ pub(in crate::infrastructure::formats::components) fn extract(
                 .map_or(source.len(), |p| p + 3);
             continue;
         }
-        if !source.get(at + 1).is_some_and(u8::is_ascii_alphabetic) {
+        let close = source.get(at + 1) == Some(&b'/');
+        let start = at + 1 + usize::from(close);
+        if !source.get(start).is_some_and(u8::is_ascii_alphabetic) {
             at += 1;
             continue;
         }
-        let start = at + 1;
         let end = source[start..]
             .iter()
             .position(|b| !b.is_ascii_alphanumeric() && !matches!(b, b'_' | b'.' | b':' | b'-'))
@@ -78,6 +81,11 @@ pub(in crate::infrastructure::formats::components) fn extract(
         let closing = tag_end(source, end)?;
         at = closing + 1;
         let name = &source[start..end];
+        let tag = std::str::from_utf8(name).unwrap_or("");
+        if close {
+            html_scope.close(tag);
+            continue;
+        }
         if name.eq_ignore_ascii_case(b"script") || name.eq_ignore_ascii_case(b"style") {
             let delimiter = if name.eq_ignore_ascii_case(b"script") {
                 b"</script".as_slice()
@@ -88,6 +96,14 @@ pub(in crate::infrastructure::formats::components) fn extract(
                 .map_or(source.len(), |p| p + delimiter.len());
             continue;
         }
+        let disabled = htmx
+            && html_scope.open(
+                tag,
+                source,
+                end..closing,
+                source.get(closing.saturating_sub(1)) == Some(&b'/'),
+            )?;
+        let origin = positions.span(source, start..start);
         crate::infrastructure::formats::components::blade::livewire::extract(
             source,
             start..end,
@@ -96,6 +112,21 @@ pub(in crate::infrastructure::formats::components) fn extract(
                 usage(source, &mut positions, emit, expression, relation, range)
             },
         )?;
+        if htmx {
+            crate::infrastructure::formats::htmx::attributes(
+                source,
+                end..closing,
+                origin,
+                crate::infrastructure::formats::htmx::Owner {
+                    language: Language::Php,
+                    source: 0,
+                    scope: 0,
+                    disabled,
+                },
+                Some(code),
+                emit,
+            )?;
+        }
     }
     Ok(())
 }

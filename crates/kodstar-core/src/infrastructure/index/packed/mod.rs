@@ -5,7 +5,9 @@
 
 pub(crate) mod codec;
 mod cursor;
+pub(in crate::infrastructure::index) mod expansion;
 mod rows;
+pub(in crate::infrastructure::index) mod statements;
 pub(super) use rows::{Rows, key_matches, matches};
 
 use rusqlite::{
@@ -19,17 +21,20 @@ use std::{borrow::Cow, ffi::CStr, rc::Rc};
 pub(super) enum Kind {
     Dictionary,
     Relations,
+    Dependencies,
 }
 pub(super) type Filter = (usize, Value);
 
 pub(super) fn register(connection: &Connection) -> Result<()> {
     super::dictionary::routing::register(connection)?;
     super::relations::register(connection)?;
+    super::dependencies::pages::register(connection)?;
     connection.execute_batch(super::relations::PRIOR_SCHEMA)?;
     const KEYS: Module<Table> = Module::eponymous_only_module();
     const EDGES: Module<Table> = Module::update_module();
     connection.create_module(c"kodstar_keys", &KEYS, Some(Kind::Dictionary))?;
-    connection.create_module(c"kodstar_relations", &EDGES, Some(Kind::Relations))
+    connection.create_module(c"kodstar_relations", &EDGES, Some(Kind::Relations))?;
+    connection.create_module(c"kodstar_lookups", &EDGES, Some(Kind::Dependencies))
 }
 
 #[repr(C)]
@@ -58,9 +63,11 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
         // callbacks stay on that connection's thread, retain no statements, never close it.
         // Each cursor clones the Rc, so xUpdate cannot alias a Rust borrow into the table.
         let connection = Rc::new(unsafe { Connection::from_handle(db.handle())? });
+        connection.set_prepared_statement_cache_capacity(4);
         let schema = match kind {
             Kind::Dictionary => c"CREATE TABLE x(id INTEGER,kind TEXT,lookup_key TEXT)",
             Kind::Relations => c"CREATE TABLE x(id INTEGER,fact_id INTEGER,source_id INTEGER,target_id INTEGER,external_key TEXT,resolution TEXT,rule_id INTEGER,reason_id INTEGER)",
+            Kind::Dependencies => c"CREATE TABLE x(route_group INTEGER,key_id INTEGER,file_id INTEGER,part INTEGER,count INTEGER,payload BLOB)",
         };
         Ok((
             Cow::Borrowed(schema),
@@ -84,6 +91,7 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
             let supported = match self.kind {
                 Kind::Dictionary => (0..=2).contains(&column) && (column == 0 || binary[index]),
                 Kind::Relations => (0..=3).contains(&column) || column == 6,
+                Kind::Dependencies => (0..=3).contains(&column),
             };
             if supported
                 && constraint.is_usable()
@@ -95,14 +103,16 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
                 // SQLite rechecks types/collations: routing must never change SQL equality.
             }
         }
-        info.set_idx_str(
-            &columns
+        info.set_idx_str(&format!(
+            "{}:{}",
+            info.col_used(),
+            columns
                 .iter()
                 .map(i32::to_string)
                 .collect::<Vec<_>>()
-                .join(","),
-        );
-        let exact = columns.contains(&0);
+                .join(",")
+        ));
+        let exact = !matches!(self.kind, Kind::Dependencies) && columns.contains(&0);
         info.set_estimated_rows(if exact {
             1
         } else if columns.is_empty() {
@@ -134,12 +144,18 @@ impl CreateVTab<'_> for Table {
 
 impl UpdateVTab<'_> for Table {
     fn delete(&mut self, id: rusqlite::types::ValueRef<'_>) -> Result<()> {
+        if matches!(self.kind, Kind::Dependencies) {
+            return super::dependencies::pages::remove(&self.connection, id.as_i64()?);
+        }
         super::relations::remove(&self.connection, id.as_i64()?)
     }
     fn insert(&mut self, args: &vtab::Inserts<'_>) -> Result<i64> {
         let values = (2..args.len())
             .map(|i| args.get::<Value>(i))
             .collect::<Result<Vec<_>>>()?;
+        if matches!(self.kind, Kind::Dependencies) {
+            return super::dependencies::pages::insert(&self.connection, values);
+        }
         super::relations::insert(&self.connection, values)
     }
     fn update(&mut self, args: &vtab::Updates<'_>) -> Result<()> {
@@ -147,6 +163,12 @@ impl UpdateVTab<'_> for Table {
         let mut values = (2..args.len())
             .map(|i| args.get::<Value>(i))
             .collect::<Result<Vec<_>>>()?;
+        if matches!(self.kind, Kind::Dependencies) {
+            if args.get::<i64>(1)? != old {
+                return Err(codec::invalid());
+            }
+            return super::dependencies::pages::update(&self.connection, old, values);
+        }
         let rowid: i64 = args.get(1)?;
         if values[0] == Value::Integer(old) {
             values[0] = Value::Integer(rowid);

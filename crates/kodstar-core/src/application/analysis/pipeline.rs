@@ -5,23 +5,22 @@
 
 use super::budget::ByteBudget;
 use super::discovery::Pipeline;
-use super::events::{Event, Events, Inbox, Work};
+use super::events::{Events, Inbox, Work};
 use super::incremental::Resolution;
 use crate::application::workspace::SelectedProject;
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::{Error, Result};
 use crate::domain::results::Progress;
-use crate::infrastructure::cache::paths::path_bytes;
 use crate::infrastructure::index::{self};
 use crossbeam_channel as channel;
-use rusqlite::{Connection, params};
-use std::collections::HashMap;
+use rusqlite::Connection;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 mod start;
+mod writer;
 
 pub(super) struct Input<'a> {
     pub(super) database: &'a Path,
@@ -36,6 +35,7 @@ pub(super) fn run(
     cancel: &Cancellation,
     progress: &mut dyn FnMut(&Progress) -> Result<()>,
 ) -> Result<(bool, u64, u64, Resolution)> {
+    let _span = tracing::info_span!("extract", jobs = input.selected.settings.jobs).entered();
     let Input {
         database,
         selected,
@@ -43,10 +43,10 @@ pub(super) fn run(
         verify,
     } = input;
     let connection = &index::cached::Sql::new(connection)?;
-    let mut reuse = super::incremental::ReusePolicy::default();
     let internal = Cancellation::default();
     let (events_tx, events_rx) = channel::bounded(selected.settings.jobs * 4);
     let (work_tx, work_rx) = channel::bounded::<Work>(selected.settings.jobs);
+    let (native_tx, native_rx) = channel::bounded::<Work>(1);
     let inputs = ByteBudget::new(
         selected
             .settings
@@ -61,6 +61,8 @@ pub(super) fn run(
         cancel: internal.clone(),
         failure: Arc::clone(&worker_failure),
     };
+    let resources = super::resources::Resources::new(selected)?;
+    progress(&Progress::phase("parse"))?;
     thread::scope(|scope| {
         let messages = Inbox {
             receiver: events_rx,
@@ -76,7 +78,10 @@ pub(super) fn run(
         };
         let discovery = scope.spawn(move || {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                producer.produce(work_tx)
+                producer.produce(super::routing::Router {
+                    general: work_tx,
+                    native: native_tx,
+                })
             })) {
                 Ok(Ok(inventory)) => Some(inventory),
                 Ok(Err(error)) => {
@@ -91,22 +96,37 @@ pub(super) fn run(
                 }
             }
         });
-        for _ in 0..selected.settings.jobs {
-            let receiver = work_rx.clone();
+        for worker in 0..selected.settings.jobs {
+            let receiver = super::routing::Inbox::new(
+                work_rx.clone(),
+                (worker == 0).then(|| native_rx.clone()),
+            );
             let events = events.clone();
             let fact_limit = selected.settings.fact_batch_bytes;
-            scope.spawn(move || {
-                super::workers::run(receiver, events, fact_limit);
-            });
+            let resources = resources.clone();
+            thread::Builder::new()
+                .name(
+                    if worker == 0 {
+                        "kodstar-native"
+                    } else {
+                        "kodstar-analysis"
+                    }
+                    .into(),
+                )
+                .stack_size(if worker == 0 {
+                    super::resources::WORKER_STACK_BYTES
+                } else {
+                    super::resources::GENERAL_STACK_BYTES
+                })
+                .spawn_scoped(scope, move || {
+                    super::workers::run(receiver, events, fact_limit, resources);
+                })
+                .map_err(|error| Error::caused_by("start analysis worker", error))?;
         }
         drop(work_rx);
+        drop(native_rx);
         drop(events);
-        let mut writer = None;
-        let mut files = HashMap::new();
-        let mut changed = false;
-        let mut resolution = Resolution::None;
-        let mut parsed = 0;
-        let mut reused = 0;
+        let mut writer = writer::Writer::new(connection, full, selected.settings.fact_batch_bytes);
         let mut failure = None;
         loop {
             if cancel.is_cancelled() && failure.is_none() {
@@ -125,113 +145,7 @@ pub(super) fn run(
                 if failure.is_some() {
                     return Ok(());
                 }
-                match message.event {
-                    Event::Remove { path } => {
-                        connection.execute("INSERT OR IGNORE INTO deleted_files SELECT id FROM files WHERE path=?1",
-                            [path_bytes(&path)])?;
-                    }
-                    Event::Begin { record, preserve } => {
-                        let context = start::file(
-                            connection,
-                            &record,
-                            preserve,
-                            full,
-                            &mut reuse,
-                            &mut resolution,
-                            selected.settings.fact_batch_bytes,
-                        )?;
-                        files.insert(record.path, context);
-                        changed = true;
-                    }
-                    Event::Facts { path, facts } => {
-                        let context = files.get_mut(path.as_ref()).ok_or_else(|| {
-                            Error::operation("fact arrived outside its file transaction")
-                        })?;
-                        let writer = match &mut writer {
-                            Some(writer) => writer,
-                            slot @ None => slot.insert(index::FactWriter::new(connection)?),
-                        };
-                        for (language, fact) in facts {
-                            cancel.check()?;
-                            writer.persist(context, language, fact)?;
-                        }
-                    }
-                    Event::End { path, fingerprints } => {
-                        let context = files.remove(path.as_ref()).ok_or_else(|| {
-                            Error::operation("file completion has no matching extraction")
-                        })?;
-                        if context.call_reuse {
-                            index::body_reuse::finish(connection, context.id)?;
-                        }
-                        if resolution == Resolution::Selected
-                            && !context.preserves_definitions()
-                            && !index::invalidation::safe_file(connection, context.id)?
-                        {
-                            resolution.reset_all(connection)?;
-                        }
-                        connection.execute(
-                            "UPDATE files SET facts_hash=?1,environment_hash=?2 WHERE id=?3",
-                            params![
-                                &index::hash_bytes(&fingerprints.all)?[..],
-                                &index::hash_bytes(&fingerprints.environment)?[..],
-                                context.id
-                            ],
-                        )?;
-                        parsed += 1;
-                        progress(&Progress {
-                            phase: "parse",
-                            completed_files: parsed + reused,
-                            source_bytes: 0,
-                        })?;
-                    }
-                    Event::UnchangedFacts {
-                        record,
-                        span,
-                        scope_ends,
-                    } => {
-                        connection.execute(
-                            "INSERT OR IGNORE INTO seen_files VALUES(?1)",
-                            [path_bytes(&record.path)],
-                        )?;
-                        record.refresh_unchanged(connection, span, &scope_ends)?;
-                        changed = true;
-                        parsed += 1;
-                        progress(&Progress {
-                            phase: "parse",
-                            completed_files: parsed + reused,
-                            source_bytes: 0,
-                        })?;
-                    }
-                    Event::Reuse { record, update } => {
-                        connection.execute(
-                            "INSERT OR IGNORE INTO seen_files VALUES(?1)",
-                            [path_bytes(&record.path)],
-                        )?;
-                        if update {
-                            record.refresh_metadata(connection)?;
-                        }
-                        reused += 1;
-                    }
-                    Event::Skip { record, reason } => {
-                        connection.execute(
-                            "INSERT OR IGNORE INTO seen_files VALUES(?1)",
-                            [path_bytes(&record.path)],
-                        )?;
-                        if index::inert_inputs::unchanged_kind(connection, &record)? {
-                            record.refresh_metadata(connection)?;
-                            changed = true;
-                            return Ok(());
-                        }
-                        resolution.reset_all(connection)?;
-                        let id = record.persist(connection)?;
-                        index::clear_file(connection, id)?;
-                        connection.execute(
-                            "INSERT INTO diagnostics(file_id,code,message) VALUES(?1,?2,?3)",
-                            params![id, reason, reason],
-                        )?;
-                        changed = true;
-                    }
-                }
+                writer.accept(message.event, cancel, progress)?;
                 Ok(())
             })();
             if let Err(error) = result {
@@ -250,7 +164,7 @@ pub(super) fn run(
             .take();
         if let Some(error) = failure.or(worker_error) {
             Err(error)
-        } else if !files.is_empty() {
+        } else if writer.unfinished() {
             Err(Error::operation("analysis ended with unfinished files"))
         } else {
             let inventory =
@@ -261,7 +175,12 @@ pub(super) fn run(
                     SELECT id FROM files WHERE path NOT IN (SELECT path FROM seen_files);",
                 )?;
             }
-            Ok((changed, parsed, reused + inventory.retained, resolution))
+            Ok((
+                writer.changed,
+                writer.parsed,
+                writer.reused + inventory.retained,
+                writer.resolution,
+            ))
         }
     })
 }

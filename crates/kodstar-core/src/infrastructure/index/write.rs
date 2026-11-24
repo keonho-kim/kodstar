@@ -15,7 +15,7 @@ pub(crate) struct FileRecord {
     pub language: String,
     pub module: String,
     pub package: String,
-    pub content_hash: String,
+    pub content_hash: [u8; 32],
     pub size: u64,
     pub status: &'static str,
 }
@@ -27,16 +27,11 @@ impl FileRecord {
             + self.language.capacity()
             + self.module.capacity()
             + self.package.capacity()
-            + self.content_hash.capacity()
     }
     pub(crate) fn refresh_metadata(&self, connection: &Connection) -> Result<()> {
         connection.execute(
             "UPDATE files_rows SET content_hash=?1,size=?2 WHERE path=?3",
-            params![
-                &super::hash_bytes(&self.content_hash)?[..],
-                self.size,
-                path_bytes(&self.path)
-            ],
+            params![self.content_hash, self.size, path_bytes(&self.path)],
         )?;
         Ok(())
     }
@@ -73,7 +68,7 @@ impl FileRecord {
 
     pub(crate) fn persist(&self, connection: &super::cached::Sql<'_>) -> Result<i64> {
         connection.cached_execute("INSERT INTO files(path,language,module,package,content_hash,size,status,path_module,path_package) VALUES(?1,?2,?3,?4,?5,?6,?7,?3,?4)",
-            params![path_bytes(&self.path), self.language, self.module, self.package, &super::hash_bytes(&self.content_hash)?[..], self.size, self.status])?;
+            params![path_bytes(&self.path), self.language, self.module, self.package, self.content_hash, self.size, self.status])?;
         Ok(connection.cached_row(
             "SELECT id FROM files WHERE path=?1",
             [path_bytes(&self.path)],
@@ -83,7 +78,8 @@ impl FileRecord {
 }
 
 pub(crate) fn clear_file(connection: &super::cached::Sql<'_>, id: i64) -> Result<()> {
-    connection.cached_execute("DELETE FROM lookup_rows WHERE file_id=?1", [id])?;
+    super::native::replace(connection, id, None)?;
+    super::dependencies::clear_file(connection, id)?;
     connection.cached_execute("DELETE FROM relation_blocks WHERE file_id=?1", [id])?;
     connection.cached_execute(
         "UPDATE files SET module=path_module,declared_module='',facts_hash=X'',environment_hash=X'' WHERE id=?1",

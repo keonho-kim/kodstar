@@ -1,0 +1,96 @@
+---
+source: crates/kodstar-cli/tests/startup.rs
+expression: stdout
+---
+Show relationships in both directions by default, preserving incoming versus outgoing labels. Default depth is 1. Transitive both-direction queries combine separate incoming and outgoing reachability rather than changing direction at each step.
+
+Current-state queries preserve observed source changes as checkpoints and synchronize analysis before reading. --no-refresh skips those checks. --rev reads preserved source at a checkpoint without switching files or capturing current edits; analysis for that checkpoint may be built unless --no-refresh is used.
+
+Usage: kodstar related [OPTIONS] <file> <name>
+
+Arguments:
+  <file>
+          Source file inside the selected project, relative to the current directory or absolute
+
+  <name>
+          Original symbol name or owner-qualified name in the selected file, for example Service::run. If several definitions match, select a qualified name or its definition position with --at.
+
+Options:
+      --rev <rev>
+          Analyze preserved sources at this checkpoint without changing working files or the current branch. Uses current engine settings, not a historical toolchain. With --no-refresh, compatible cached analysis for this checkpoint must already exist. Conflicts with impact --since.
+
+      --verbose <true|false>
+          Enable or disable routine progress, stage timings and result counts on stderr. Defaults to true; pass --verbose false to suppress them. Errors and analysis warnings remain visible. This option does not change result output or structured stdio progress frames, and may appear before or after a command.
+          
+          [default: true]
+          [possible values: true, false]
+
+      --config <config>
+          Read this TOML file after ~/.kodstar/config.toml; command-line settings override both. Relative paths are resolved from the current directory. This explicitly selected file must exist.
+
+      --root <root>
+          Select an absolute project directory or a path relative to the current directory. Otherwise project commands discover a registered ancestor root. File arguments remain relative to the current directory, not this option.
+
+      --jobs <jobs>
+          Maximum analysis worker count, from 1 to 64. Built-in default: 2; TOML configuration can override it. Memory settings cover inputs, queued work, and worker stacks. One worker owns C/C++ semantic work with a 16MiB stack; other workers use 2MiB stacks for syntax analysis.
+
+      --memory-budget <memory-budget>
+          Concurrent scheduling memory envelope in bytes or B, KB, KiB, MB, MiB, GB, or GiB. Built-in default: 268435456 bytes; TOML configuration can override it. Each phase owns its buffers and reserves worker stacks before native processing. Work limits reset per file. Clang memory is observed, but untracked allocator overhead remains; this is not an OS-enforced RSS limit.
+
+      --max-file-bytes <max-file-bytes>
+          Positive analysis input limit in bytes per file. Built-in default: 2097152; TOML configuration can override it. Larger inputs are reported as skipped in analysis coverage; this does not discard preserved source history.
+
+      --no-refresh
+          Read saved results without checking source changes, creating automatic checkpoints, or updating analysis. Freshness is reported as not_checked. Analysis queries need a compatible committed cache. Conflicts with --verify.
+
+      --verify
+          Check tracked file content hashes during current-state synchronization instead of relying only on metadata. This can capture changes and update analysis before the result is read. Conflicts with --no-refresh. Explicit checkpoint comparisons and --rev queries read stored sources instead of checking working files.
+
+      --limit <limit>
+          Positive output row limit. Built-in default: 200; TOML configuration can override it. Reaching a result limit is reported as truncation with exit code 3. This is separate from traversal depth and --max-nodes.
+
+      --all
+          Remove only the output row limit. Traversal depth, visited-node, input, and memory limits still apply. Conflicts with --limit.
+
+      --format <format>
+          Choose text, JSON, newline-delimited JSON, or tab-separated values for results on stdout. Progress and diagnostics go to stderr. The stdio session has its own protocol envelope.
+          
+          [default: text]
+          [possible values: text, json, jsonl, tsv]
+
+      --at <at>
+          Disambiguate a symbol by its definition start, for example 24:1. Lines and UTF-8 byte columns start at 1; columns are not character counts or UTF-16 units. impact requires a symbol name when --at is used.
+
+      --members
+          Include members owned by the selected type or class as additional relationship seeds. Without this flag, start from the selected symbol alone.
+
+      --direction <direction>
+          Relationship direction: in, out, or both (default)
+
+      --relation <relation>
+          Include the union of the requested relationship kinds. Available kinds: calls, indirect_call, references, uses_type, imports, reexports, includes, inherits, mixes_in, implements, overrides, dispatch_candidate, defines, contains, template_include, template_extends, depends_on, event_handler, http_request, handles, renders. Omit this option to use the command's default relationship selection.
+
+      --include-candidates
+          Include candidate and ambiguous relationships alongside resolved ones. Default relationship queries select resolved results. This does not turn candidates into confirmed targets; use explain to inspect unresolved evidence.
+
+      --include-external
+          Include external package, module, or symbol targets where the query supports them. Default relationship queries select internal targets. Resolution filters still apply.
+
+      --depth <depth>
+          Maximum relationship depth from the selected seeds. Default for this command: 1. This does not replace output-row or visited-node limits. Conflicts with --transitive.
+
+      --transitive
+          Remove the depth bound while retaining the output-row and visited-node limits. Conflicts with --depth.
+
+      --max-nodes <max-nodes>
+          Limit visited objects separately from output rows and depth. Built-in default: 100000; TOML configuration can override it. A value of 0 removes this bound; traversal still uses its remaining limits.
+
+      --sites
+          Show individual use locations
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  kodstar related src/api.rs caller
+  kodstar related src/api.rs Service --members --depth 3

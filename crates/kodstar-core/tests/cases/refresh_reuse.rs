@@ -40,6 +40,9 @@ fn metadata_reuse_preserves_coverage_and_still_captures_source_changes() -> Test
             ..InitOptions::default()
         },
     )?;
+    assert!(!verified.changed);
+    assert_eq!(verified.generation, initial.generation);
+    assert_eq!(verified.parsed_files, 0);
     assert_eq!(
         serde_json::to_value(&verified.coverage)?,
         serde_json::to_value(&reused.coverage)?

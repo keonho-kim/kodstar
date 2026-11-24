@@ -13,8 +13,8 @@ const FIELDS: &str = "f.file_id,f.source_id,f.scope_id,f.expression,f.relation,c
 
 pub(crate) fn prepare(c: &Connection, file: i64, budget: usize) -> Result<bool> {
     c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS body_original(
-        file_id INTEGER,digest BLOB,fact_id INTEGER,PRIMARY KEY(file_id,digest,fact_id)) WITHOUT ROWID;")?;
-    let limit = budget / 128;
+        file_id INTEGER,digest BLOB,fact_id INTEGER,native_module INTEGER,PRIMARY KEY(file_id,digest,fact_id)) WITHOUT ROWID;")?;
+    let limit = budget / 144;
     let count: usize = c.query_row(
         "SELECT count(*) FROM (SELECT 1 FROM facts_rows WHERE file_id=?1
         AND relation IN (SELECT id FROM atoms WHERE value IN ('calls','references')) LIMIT ?2)",
@@ -25,16 +25,17 @@ pub(crate) fn prepare(c: &Connection, file: i64, budget: usize) -> Result<bool> 
         return Ok(false);
     }
     let mut select = c.prepare(&format!(
-        "SELECT f.id,{FIELDS} FROM facts_rows f WHERE f.file_id=?1
+        "SELECT f.id,{FIELDS},COALESCE((SELECT b.module_name FROM bindings_rows b WHERE b.file_id=f.file_id AND b.scope_id=f.scope_id AND b.name_key=(SELECT id FROM atoms WHERE value='@clang_call') AND b.start_byte=f.start_byte AND b.end_byte=f.end_byte LIMIT 1),0) FROM facts_rows f WHERE f.file_id=?1
         AND f.relation IN (SELECT id FROM atoms WHERE value IN ('calls','references'))"
     ))?;
     let mut rows = select.query([file])?;
-    let mut insert = c.prepare("INSERT INTO body_original VALUES(?1,?2,?3)")?;
+    let mut insert = c.prepare("INSERT INTO body_original VALUES(?1,?2,?3,?4)")?;
     while let Some(row) = rows.next()? {
         insert.execute(params![
             file,
             digest(&fields(row, 1)?).as_bytes(),
-            row.get::<_, i64>(0)?
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(15)?
         ])?;
     }
     Ok(true)
@@ -69,17 +70,17 @@ pub(crate) fn clear(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn fields(row: &Row<'_>, start: usize) -> rusqlite::Result<[i64; 14]> {
-    let mut values = [0; 14];
+fn fields(row: &Row<'_>, start: usize) -> rusqlite::Result<[i64; 15]> {
+    let mut values = [0; 15];
     for (offset, value) in values.iter_mut().enumerate() {
         *value = row.get(start + offset)?;
     }
     Ok(values)
 }
 
-fn digest(values: &[i64; 14]) -> blake3::Hash {
+fn digest(values: &[i64; 15]) -> blake3::Hash {
     let mut hash = blake3::Hasher::new();
-    hash.update(b"kodstar-body-fact-v1");
+    hash.update(b"kodstar-body-fact-v2");
     for value in values {
         hash.update(&value.to_le_bytes());
     }

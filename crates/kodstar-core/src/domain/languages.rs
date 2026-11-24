@@ -31,7 +31,7 @@ pub enum Language {
     Elixir,
     Erlang,
     CommonLisp,
-    Pascal,
+    Html,
     Vue,
     Svelte,
     Astro,
@@ -60,7 +60,7 @@ impl Language {
         Self::Elixir,
         Self::Erlang,
         Self::CommonLisp,
-        Self::Pascal,
+        Self::Html,
         Self::Vue,
         Self::Svelte,
         Self::Astro,
@@ -89,7 +89,7 @@ impl Language {
             Self::Elixir => "elixir",
             Self::Erlang => "erlang",
             Self::CommonLisp => "commonlisp",
-            Self::Pascal => "pascal",
+            Self::Html => "html",
             Self::Vue => "vue",
             Self::Svelte => "svelte",
             Self::Astro => "astro",
@@ -102,7 +102,13 @@ impl Language {
     pub const fn is_component(self) -> bool {
         matches!(
             self,
-            Self::Vue | Self::Svelte | Self::Astro | Self::Ejs | Self::Blade | Self::Razor
+            Self::Html
+                | Self::Vue
+                | Self::Svelte
+                | Self::Astro
+                | Self::Ejs
+                | Self::Blade
+                | Self::Razor
         )
     }
 
@@ -126,7 +132,7 @@ impl Language {
             Self::Elixir => &["ex", "exs"],
             Self::Erlang => &["erl", "hrl", "escript"],
             Self::CommonLisp => &["lisp", "cl", "lsp", "asd"],
-            Self::Pascal => &["pas", "pp", "dpr", "dpk", "lpr", "inc"],
+            Self::Html => &["html", "htm"],
             Self::Vue => &["vue"],
             Self::Svelte => &["svelte"],
             Self::Astro => &["astro"],
@@ -136,10 +142,6 @@ impl Language {
         }
     }
 
-    pub const fn case_sensitive(self) -> bool {
-        !matches!(self, Self::Pascal)
-    }
-
     pub(crate) fn lookup_key(self, name: &str) -> String {
         if self == Self::CommonLisp {
             super::resolve::lisp::key(name)
@@ -147,10 +149,8 @@ impl Language {
             name.replace("r#", "")
         } else if self == Self::Kotlin {
             name.replace('`', "")
-        } else if self.case_sensitive() {
-            name.to_owned()
         } else {
-            name.to_ascii_lowercase()
+            name.to_owned()
         }
     }
 }

@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [
     ROOT.joinpath("install.sh"),
     *ROOT.joinpath("crates").rglob("*.rs"),
+    *ROOT.joinpath("crates").rglob("*.cpp"),
+    *ROOT.joinpath("crates").rglob("*.h"),
     *ROOT.joinpath("crates").rglob("*.sql"),
     *ROOT.joinpath("scripts").rglob("*.py"),
 ]

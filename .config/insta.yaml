@@ -1,0 +1,8 @@
+# Purpose: Keep approved snapshots read-only during ordinary test execution.
+# Pattern: Snapshot Policy.
+# Usage: insta discovers this configuration from the Cargo workspace.
+# Related: crates/kodstar-cli/tests/startup.rs, docs/development.md.
+
+behavior:
+  update: "no"
+  force_pass: false

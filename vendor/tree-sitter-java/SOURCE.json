@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "upstream_repository": "https://github.com/tree-sitter/tree-sitter-java",
+  "upstream_revision": "94703d5a6bed02b98e438d7cad1136c01a60ba2c",
+  "generator": "0.26.10",
+  "abi": 15,
+  "targets": [
+    "."
+  ],
+  "inputs": [
+    {
+      "path": "Cargo.toml",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/Cargo.toml",
+      "sha256": "695636a6a3e4b2db2117221574989ef1378646e766340224600a615daabc606f"
+    },
+    {
+      "path": "grammar.js",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/grammar.js",
+      "sha256": "b89ada7566bda16a8d7a710755c27824d6097e44b8d3b1dafbb749f3c34d13e0"
+    },
+    {
+      "path": "tree-sitter.json",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/tree-sitter.json",
+      "sha256": "5b8f0cb5514a4a04720beba0e5991c48837844fe0ce2ba2d02ec7e6a44a344d8"
+    },
+    {
+      "path": "bindings/rust/lib.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/bindings/rust/lib.rs",
+      "sha256": "447525e5afdc29d94ad4014c525a43c04d4193de2f4131d774ad41ac51600218"
+    },
+    {
+      "path": "bindings/rust/build.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/bindings/rust/build.rs",
+      "sha256": "f0bb2a9bab500d44db01ae3a0537c648aba9f5a2b6cda39ea22f2897e2a38441"
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/LICENSE",
+      "sha256": "52ed137b039cd9c46409bc22e89938af911c95b157feae2d040b51e6084369a7"
+    },
+    {
+      "path": "queries/highlights.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/queries/highlights.scm",
+      "sha256": "576c0df8df0b116cd642140ddc508c01f9d3283582afd8581c1f35caf4d71386"
+    },
+    {
+      "path": "queries/tags.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-java/94703d5a6bed02b98e438d7cad1136c01a60ba2c/queries/tags.scm",
+      "sha256": "bcb22147b8582d92743fc973864cefb894a4c12b3957f16f3d472b2ec7cd4c49"
+    }
+  ],
+  "dependencies": [],
+  "files": {
+    "Cargo.toml": "fbd177b2d30514835bc550a6c2a05100ab3227b36b398e0876936e7eeef5b9f3",
+    "LICENSE": "52ed137b039cd9c46409bc22e89938af911c95b157feae2d040b51e6084369a7",
+    "bindings/rust/build.rs": "f0bb2a9bab500d44db01ae3a0537c648aba9f5a2b6cda39ea22f2897e2a38441",
+    "bindings/rust/lib.rs": "447525e5afdc29d94ad4014c525a43c04d4193de2f4131d774ad41ac51600218",
+    "grammar.js": "3a48c182d663bf934b769c6fcff11005643a33a8a51fe715b3185342f27e3178",
+    "queries/highlights.scm": "576c0df8df0b116cd642140ddc508c01f9d3283582afd8581c1f35caf4d71386",
+    "queries/tags.scm": "bcb22147b8582d92743fc973864cefb894a4c12b3957f16f3d472b2ec7cd4c49",
+    "src/grammar.json": "18e6a959116db0b46519fbfb1bf75ec254bf87d8ed62cafb3075285fa0a49e71",
+    "src/node-types.json": "3679e747ff592624e6cf2475af7bf5b3554175c40142dbd6717fa84a4e4ec1a0",
+    "src/parser.c": "1dc54deb956e915f98bfa5c2d608091cf5f0e7ee711232ab5d8dcdb134419260",
+    "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+    "src/tree_sitter/array.h": "31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c",
+    "src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+    "tree-sitter.json": "5b8f0cb5514a4a04720beba0e5991c48837844fe0ce2ba2d02ec7e6a44a344d8",
+    "patch.json": "80bb266073ce55b229b65aeb4173889ab560e187ce3d3224007ec0a29047d62b"
+  },
+  "manifest_adjustment": "Omit the unused upstream README reference."
+}

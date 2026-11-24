@@ -7,7 +7,7 @@ pub(super) mod targets;
 #[cfg(test)]
 mod tests;
 use crate::infrastructure::index::packed::codec::{self, Input};
-use rusqlite::{Connection, Result, Statement, functions::FunctionFlags, params};
+use rusqlite::{Connection, Result, Statement, params};
 
 pub(super) struct Writer<'a> {
     insert: Statement<'a>,
@@ -39,12 +39,12 @@ impl<'a> Writer<'a> {
 }
 
 pub(super) fn register(c: &Connection) -> Result<()> {
-    let flags = FunctionFlags::SQLITE_UTF8
-        | FunctionFlags::SQLITE_DETERMINISTIC
-        | FunctionFlags::SQLITE_INNOCUOUS;
-    c.create_scalar_function("kodstar_relation_sets", 2, flags, |ctx| {
-        let ids = super::groups::references(ctx.get_raw(0).as_blob()?, ctx.get(1)?)?;
-        serde_json::to_string(&ids).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+    super::super::packed::expansion::register(c, c"kodstar_relation_set_rows", |bytes, count| {
+        let count = usize::try_from(count).map_err(|_| codec::invalid())?;
+        Ok(super::groups::references(bytes, count)?
+            .into_iter()
+            .map(|id| [id, 0])
+            .collect())
     })
 }
 

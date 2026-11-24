@@ -34,7 +34,6 @@ impl Extractor<'_> {
                 | "property_promotion_parameter"
                 | "field_definition"
                 | "property_signature"
-                | "declField"
         ) {
             let ty = node
                 .child_by_field_name("type")
@@ -50,6 +49,20 @@ impl Extractor<'_> {
             if name.is_named() {
                 self.field_definition(name, ty, owner, context)?;
                 found = true;
+            }
+        }
+        if !found
+            && matches!(
+                self.language,
+                crate::domain::languages::Language::C | crate::domain::languages::Language::Cpp
+            )
+        {
+            let mut cursor = declaration.walk();
+            for declarator in declaration.children_by_field_name("declarator", &mut cursor) {
+                if let Some(name) = super::cxx::declarators::value_name(declarator) {
+                    self.field_definition(name, ty, owner, context)?;
+                    found = true;
+                }
             }
         }
         if !found
@@ -110,12 +123,8 @@ impl Extractor<'_> {
             signature: String::new(),
             condition: context.condition.as_deref().map(str::to_owned),
             span: span(name),
-            exported: if self.language == crate::domain::languages::Language::Pascal {
-                self.definition_exported(name, &spelling)
-            } else {
-                self.language != crate::domain::languages::Language::Go
-                    || spelling.chars().next().is_some_and(char::is_uppercase)
-            },
+            exported: self.language != crate::domain::languages::Language::Go
+                || spelling.chars().next().is_some_and(char::is_uppercase),
         });
         if fact.owned_bytes() > self.fact_limit {
             return Err(Error::new(

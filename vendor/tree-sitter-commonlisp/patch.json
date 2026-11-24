@@ -1,0 +1,17 @@
+{
+  "reason": "Treat Common Lisp strings as reader strings; FORMAT directives are runtime semantics and must not reject valid string contents.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "                prec(PREC.SPECIAL, $.loop_macro),\n",
+      "after": "",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "        str_lit: $ =>\n            seq(\n                '\"',\n                repeat(choice(\n                    token.immediate(prec(1, /[^\\\\~\"]+/)),\n                    token.immediate(seq(/\\\\./)),\n                    $.format_specifier,\n                )),\n                optional('~'),\n                '\"',\n            ),\n",
+      "after": "        str_lit: $ => seq(\n            '\"',\n            repeat(choice(token.immediate(/[^\\\\\"]/), token.immediate(/\\\\[\\s\\S]/))),\n            '\"',\n        ),\n",
+      "occurrences": 1
+    }
+  ]
+}

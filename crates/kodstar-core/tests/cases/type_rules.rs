@@ -88,12 +88,6 @@ fn enum_members_keep_original_names_and_explicit_owners() -> TestResult {
             "Color",
             "Red",
         ),
-        (
-            "main.pas",
-            "unit Main; interface type TColor = (Red, Green); implementation end.",
-            "TColor",
-            "Red",
-        ),
     ] {
         let project = Project::new()?;
         project.write(file, source)?;

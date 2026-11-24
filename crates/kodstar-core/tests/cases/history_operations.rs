@@ -115,11 +115,11 @@ fn past_query_does_not_change_files_or_capture_current_edits() -> TestResult {
 }
 
 #[test]
-fn analysis_failure_does_not_block_saved_history() -> TestResult {
+fn partial_analysis_does_not_block_saved_history() -> TestResult {
     let p = Project::new()?;
     p.write("main.ts", "export function valid() {}")?;
     p.write("tsconfig.json", "{ broken configuration")?;
-    assert!(p.build(false).is_err());
+    assert_eq!(p.build(false)?.coverage.failed_files, 1);
     let list = p.history(HistoryRequest::List {
         refresh: Refresh::None,
     })?;

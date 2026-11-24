@@ -14,6 +14,8 @@ use crate::infrastructure::cache::paths::{encoding, path_from_bytes};
 
 use super::{reached, traversal::setup};
 
+const PREFETCH_AFTER: u64 = 128;
+
 pub(super) fn stream_relationships(
     connection: &Connection,
     sites: bool,
@@ -27,26 +29,47 @@ pub(super) fn stream_relationships(
     } else {
         "r.source_id,r.target_id,r.external_key,f.relation,r.resolution,q.direction,f.condition,f.type_only,r.rule"
     };
-    let mut statement=connection.prepare(&format!("SELECT MIN(r.id),q.direction,MIN(q.depth),COUNT(*) FROM q_edges q JOIN relationships r ON r.id=q.id JOIN facts f ON f.id=r.fact_id JOIN symbols s ON s.id=r.source_id JOIN files sf ON sf.id=s.file_id LEFT JOIN symbols t ON t.id=r.target_id LEFT JOIN files tf ON tf.id=t.file_id GROUP BY {grouping} ORDER BY MIN(q.depth),f.relation,COALESCE(tf.path,sf.path),COALESCE(t.line,s.line),COALESCE(t.qualified_name,s.qualified_name),q.direction,MIN(f.start_byte) LIMIT ?1"))?;
+    let mut statement=connection.prepare(&format!("SELECT MIN(r.id),q.direction,MIN(q.depth),COUNT(*) FROM q_edges q JOIN relationships r ON r.id=q.id JOIN facts f ON f.id=r.fact_id JOIN query_nodes s ON s.id=r.source_id LEFT JOIN query_nodes t ON t.id=r.target_id GROUP BY {grouping} ORDER BY MIN(q.depth),f.relation,COALESCE(t.path,s.path),COALESCE(t.line,s.line),COALESCE(t.qualified_name,s.qualified_name),q.direction,MIN(f.start_byte) LIMIT ?1"))?;
     let mut reader = super::relationship_rows::Reader::new(connection)?;
     let mut rows = statement.query([super::sql_limit(limit)])?;
-    while let Some(row) = rows.next()? {
-        cancel.check()?;
-        if reached(limit, summary) {
+    let mut batch = Vec::with_capacity(32);
+    loop {
+        if limit.is_some_and(|limit| summary.result_count >= limit as u64) {
+            if rows.next()?.is_some() {
+                cancel.check()?;
+                reached(limit, summary);
+            }
             break;
         }
-        let id: i64 = row.get(0)?;
-        let direction: String = row.get(1)?;
-        let depth: usize = row.get(2)?;
-        let count: u64 = row.get(3)?;
-        let relationship = reader.read(
-            id,
-            if direction == "in" { "in" } else { "out" },
-            depth,
-            count,
-        )?;
-        sink.row(&QueryRow::Relationship(Box::new(relationship)))?;
-        summary.result_count += 1;
+        batch.clear();
+        let remaining = limit.map_or(32, |limit| {
+            limit.saturating_sub(summary.result_count as usize).min(32)
+        });
+        for _ in 0..remaining {
+            let Some(row) = rows.next()? else { break };
+            cancel.check()?;
+            let direction: String = row.get(1)?;
+            batch.push((
+                row.get::<_, i64>(0)?,
+                if direction == "in" { "in" } else { "out" },
+                row.get::<_, usize>(2)?,
+                row.get::<_, u64>(3)?,
+            ));
+        }
+        if batch.is_empty() {
+            break;
+        }
+        // Amortize batch statement preparation only after a sufficiently long stream.
+        if summary.result_count >= PREFETCH_AFTER {
+            let ids: Vec<_> = batch.iter().map(|row| row.0).collect();
+            reader.prefetch(&ids, cancel)?;
+        }
+        for &(id, direction, depth, count) in &batch {
+            cancel.check()?;
+            let relationship = reader.read(id, direction, depth, count)?;
+            sink.row(&QueryRow::Relationship(Box::new(relationship)))?;
+            summary.result_count += 1;
+        }
     }
     Ok(())
 }
@@ -64,7 +87,7 @@ pub(super) fn files(
     let direction = match options.direction.unwrap_or(Direction::Both) {
         Direction::Out => "out",
         Direction::In => "in",
-        Direction::Both => "both",
+        Direction::Both | Direction::Undirected => "both",
     };
     let mut statement = connection.prepare(
         "SELECT other.display_path,other.path,f.relation,'out' AS direction,COUNT(DISTINCT r.id)

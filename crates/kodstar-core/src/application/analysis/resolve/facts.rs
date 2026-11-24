@@ -14,7 +14,11 @@ pub(super) fn run<'conn>(
     prepared: &prepared::Prepared<'conn>,
     merged: bool,
     selected_only: bool,
+    progress: &mut dyn FnMut(&crate::domain::results::Progress) -> Result<()>,
 ) -> Result<()> {
+    let _span = tracing::info_span!("resolve_facts").entered();
+    prepared.reuse.borrow_mut().enable();
+    let mut processed = 0u64;
     let mut current_context: Option<FileContext> = None;
     let filter = if selected_only {
         "id IN (SELECT id FROM affected_facts) AND "
@@ -37,6 +41,7 @@ pub(super) fn run<'conn>(
                 break;
             }
             for item in batch {
+                processed += 1;
                 cancel.check()?;
                 let super::fact_batch::Input {
                     fact,
@@ -51,6 +56,11 @@ pub(super) fn run<'conn>(
                 after = fact;
                 let language = Some(language);
                 let relation = relation.as_str();
+                if relation == "references"
+                    && crate::domain::resolve::documentation::reference(&expression).is_some()
+                {
+                    continue;
+                }
                 if current_context
                     .as_ref()
                     .is_none_or(|c| c.id != file || Some(c.language) != language)
@@ -60,31 +70,16 @@ pub(super) fn run<'conn>(
                 let Some(context) = current_context.as_ref() else {
                     continue;
                 };
-                connection.cached_execute("DELETE FROM resolution_candidates", [])?;
-                connection.cached_execute("DELETE FROM resolution_externals", [])?;
-                let mut lookup = Lookup {
+                prepared.clear()?;
+                let mut lookup = Lookup::new(
                     connection,
-                    fact: Some(fact),
-                    relation,
-                    external_scope_id: 0,
-                    scope_sequence: 0,
-                    external_present: false,
-                    reason: None,
-                    rule: "lexical_binding",
-                    source_override: None,
-                    member_depth: 0,
-                    candidate_only: false,
-                    language: context.language,
-                    namespace: crate::domain::resolve::namespaces::Namespace::usage(
-                        context.language,
-                        relation,
-                        &expression,
-                    ),
-                    receiver: false,
-                    ruby_side_checked: false,
-                    ruby_side: None,
                     prepared,
-                };
+                    context,
+                    Some(source),
+                    Some(fact),
+                    relation,
+                    &expression,
+                );
                 lookup.ejs_context(context, scope)?;
                 let value_origin = lookup.callable_value_origin(context, scope, position)?;
                 if value_origin == callable_values::ValueOrigin::Unproven {
@@ -111,9 +106,23 @@ pub(super) fn run<'conn>(
                 lookup.ruby_dispatch()?;
                 lookup.publish(context, scope, source, &expression, merged)?;
             }
+            if let Some(context) = &current_context {
+                prepared.flush_dependencies()?;
+                progress(&crate::domain::results::Progress::task(
+                    "resolve",
+                    context.path.to_string_lossy().into_owned(),
+                    Some(format!("{processed} facts checked")),
+                ))?;
+            }
         }
         drop(facts);
     }
 
+    let reuse = prepared.reuse.borrow();
+    tracing::info!(
+        binding_hits = reuse.hits,
+        binding_misses = reuse.misses,
+        "binding reuse"
+    );
     Ok(())
 }

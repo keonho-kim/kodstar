@@ -3,7 +3,6 @@
 // Usage: 공식 JSON grammar로 파싱한 설정 트리를 전달.
 // Related: crates/kodstar-core/src/infrastructure/formats/auxiliary/mod.rs, crates/kodstar-core/src/application/analysis/resolve/javascript/mod.rs.
 
-use super::json::{json_string as string, property};
 use super::{jsonc, usage};
 use crate::domain::cancellation::Cancellation;
 use crate::domain::diagnostics::{Error, Result};
@@ -30,6 +29,22 @@ pub(crate) fn extract(
     cancel: &Cancellation,
     emit: &mut dyn FnMut(Language, Fact) -> Result<()>,
 ) -> Result<()> {
+    let result = extract_checked(parser, path, source, cancel, emit);
+    result.map_err(|mut error| {
+        if let Some(issue) = &mut error.input {
+            issue.code = "configuration_invalid";
+        }
+        error
+    })
+}
+
+fn extract_checked(
+    parser: &mut ParseSession,
+    path: &Path,
+    source: &[u8],
+    cancel: &Cancellation,
+    emit: &mut dyn FnMut(Language, Fact) -> Result<()>,
+) -> Result<()> {
     let masked = jsonc::input(source)?;
     let tree = parser.parse_tree(&tree_sitter_json::LANGUAGE.into(), path, &masked, cancel)?;
     let mut cursor = tree.root_node().walk();
@@ -40,11 +55,9 @@ pub(crate) fn extract(
     let root = values
         .next()
         .filter(|n| n.kind() == "object")
-        .ok_or_else(|| Error::operation("configuration must be a JSON object"))?;
+        .ok_or_else(|| invalid("configuration must be a JSON object"))?;
     if values.next().is_some() {
-        return Err(Error::operation(
-            "configuration must contain one JSON object",
-        ));
+        return Err(invalid("configuration must contain one JSON object"));
     }
     let emit = &mut |fact| emit(Language::TypeScript, fact);
     file_root(path, source, emit)?;
@@ -91,7 +104,7 @@ pub(crate) fn extract(
                 let pattern = string(key, source)?;
                 binding("path_alias_start", &pattern, None, None, pair, emit)?;
                 if value.kind() != "array" {
-                    return Err(Error::operation(
+                    return Err(invalid(
                         "configuration paths must contain arrays of strings",
                     ));
                 }
@@ -124,9 +137,7 @@ pub(crate) fn extract(
                 link("extends", target, source, emit)?;
             }
         } else {
-            return Err(Error::operation(
-                "configuration extends must be a string or array",
-            ));
+            return Err(invalid("configuration extends must be a string or array"));
         }
     }
     if let Some(references) = property(root, "references", source)? {
@@ -140,6 +151,18 @@ pub(crate) fn extract(
         }
     }
     Ok(())
+}
+
+fn invalid(message: impl Into<String>) -> Error {
+    Error::input("configuration_invalid", message, None)
+}
+
+fn string(node: Node<'_>, source: &[u8]) -> Result<String> {
+    super::json::json_string(node, source).map_err(|error| invalid(error.to_string()))
+}
+
+fn property<'tree>(node: Node<'tree>, name: &str, source: &[u8]) -> Result<Option<Node<'tree>>> {
+    super::json::property(node, name, source).map_err(|error| invalid(error.to_string()))
 }
 
 fn link(

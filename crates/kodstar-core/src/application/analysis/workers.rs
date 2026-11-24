@@ -3,116 +3,78 @@
 // Usage: pipeline이 scoped thread로 실행하고 종료를 기다림.
 // Related: crates/kodstar-core/src/application/analysis/pipeline.rs, crates/kodstar-core/src/application/analysis/batches.rs.
 
-use super::events::{Event, Events, Work};
-use crate::domain::diagnostics::{Error, Result};
-use crate::domain::facts::{Fact, Fingerprinter};
-use crate::domain::source::SourceSpan;
+use super::events::{Event, Events};
+use crate::domain::diagnostics::Error;
 use crate::infrastructure::parse::ParseSession;
 use crossbeam_channel as channel;
-use std::sync::Arc;
-use std::time::Duration;
 
-pub(super) fn run(receiver: channel::Receiver<Work>, events: Events, fact_limit: usize) {
+mod extraction;
+
+pub(super) fn run(
+    mut receiver: super::routing::Inbox,
+    events: Events,
+    fact_limit: usize,
+    resources: super::resources::Resources,
+) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut parser = None;
         loop {
             if events.cancel.is_cancelled() {
                 break;
             }
-            let work = receiver.recv_timeout(Duration::from_millis(25));
+            let work = receiver.receive();
             let work = match work {
                 Ok(work) => work,
                 Err(channel::RecvTimeoutError::Timeout) => continue,
                 Err(channel::RecvTimeoutError::Disconnected) => break,
             };
-            let parser = parser.get_or_insert_with(|| ParseSession::new(fact_limit));
-            parser.begin_file(work.previous.is_some());
-            let result = extract(parser, work, &events, fact_limit);
+            let parser = parser.get_or_insert_with(|| {
+                let mut parser = ParseSession::new(fact_limit);
+                if receiver.native_owner()
+                    && let Some(native) = &resources.native
+                {
+                    parser.configure_native(native.clone());
+                }
+                parser
+            });
+            if work.kind.is_native() {
+                if !receiver.native_owner() {
+                    return Err(Error::operation("native input reached a general worker"));
+                }
+                let task = work.record.path.to_string_lossy().into_owned();
+                events.send(Event::Progress(crate::domain::results::Progress::task(
+                    "native",
+                    task,
+                    Some(format!(
+                        "file workspace: {} MiB; worker stack: {} MiB",
+                        resources.bytes / (1024 * 1024),
+                        super::resources::WORKER_STACK_BYTES / (1024 * 1024)
+                    )),
+                )))?;
+            }
+            parser.begin_file(true);
+            let result = extraction::run(parser, &work, &events, fact_limit);
+            let native = parser.native_report();
             parser.end_file();
             if let Err(error) = result {
-                events.fail(error);
-                break;
+                if let Some(issue) = error.input.clone() {
+                    events.send(Event::Failed {
+                        record: work.record,
+                        issue,
+                        message: error.to_string(),
+                        native,
+                    })?;
+                } else {
+                    events.fail(error);
+                    break;
+                }
             }
         }
+        Ok::<(), Error>(())
     }));
-    if outcome.is_err() {
-        events.fail(Error::operation("analysis worker panicked"));
+    match outcome {
+        Err(_) => events.fail(Error::operation("analysis worker panicked")),
+        Ok(Err(error)) => events.fail(error),
+        Ok(Ok(())) => {}
     }
-}
-
-fn extract(
-    parser: &mut ParseSession,
-    work: Work,
-    events: &Events,
-    fact_limit: usize,
-) -> Result<()> {
-    let path = Arc::new(work.record.path.clone());
-    let mut preserve = false;
-    let ready = if let Some(previous) = &work.previous {
-        let mut fingerprint = Fingerprinter::default();
-        let window = fact_limit.min(65536);
-        let mut positions = super::positions::ScopeEnds::new(window / 4);
-        let mut replay = super::replay::Replay::new(window - window / 4);
-        super::extraction::run(
-            parser,
-            &path,
-            &work.source,
-            work.kind,
-            &events.cancel,
-            &mut |language, mut fact: Fact| {
-                fingerprint.push(language, &mut fact);
-                positions.push(&fact);
-                replay.push(language, fact);
-                Ok(())
-            },
-        )?;
-        let next = fingerprint.finish();
-        if next.all == previous.all
-            && let Some(scope_ends) = positions.finish()
-        {
-            return events.send(Event::UnchangedFacts {
-                record: work.record,
-                span: SourceSpan::at(&work.source, 0, work.source.len()),
-                scope_ends,
-            });
-        }
-        preserve = next.environment == previous.environment;
-        Some((next, replay.finish()))
-    } else {
-        None
-    };
-    if !matches!(ready, Some((_, Some(_)))) {
-        parser.replay();
-    }
-    events.send(Event::Begin {
-        record: work.record,
-        preserve,
-    })?;
-    if let Some((fingerprints, Some(facts))) = ready {
-        if !facts.is_empty() {
-            events.send(Event::Facts {
-                path: Arc::clone(&path),
-                facts,
-            })?;
-        }
-        return events.send(Event::End { path, fingerprints });
-    }
-    let mut fingerprint = Fingerprinter::default();
-    let mut batch = super::batches::BatchSender::new(events, Arc::clone(&path), fact_limit);
-    super::extraction::run(
-        parser,
-        &path,
-        &work.source,
-        work.kind,
-        &events.cancel,
-        &mut |language, mut fact| {
-            fingerprint.push(language, &mut fact);
-            batch.push(language, fact)
-        },
-    )?;
-    batch.finish()?;
-    events.send(Event::End {
-        path,
-        fingerprints: fingerprint.finish(),
-    })
 }

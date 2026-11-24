@@ -153,13 +153,13 @@ fn kotlin_local_receivers_shadow_package_paths_and_malformed_members_still_fail(
         rows.rows
     );
     p.write("Main.kt", "class Item { fun broken( { } }")?;
-    assert!(p.build(false).is_err());
+    assert_eq!(p.build(false)?.coverage.partial_files, 1);
     let stale = p.query(Query::Symbols {
         file: "Main.kt".into(),
     })?;
     assert_eq!(
         stale.metadata.ok_or("metadata")?.generation,
-        Some(initial.generation)
+        Some(initial.generation + 1)
     );
     Ok(())
 }

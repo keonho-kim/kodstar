@@ -57,6 +57,19 @@ pub(super) fn select(
     source: i64,
     filters: &[Filter],
 ) -> Result<Vec<Relation>> {
+    project(c, bytes, count, source, filters, u64::MAX)
+}
+
+// Only the SQL cursor consumes projections; unrequested text fields are placeholders.
+// Persisted rows use decode/select, and every path still validates the complete block.
+pub(super) fn project(
+    c: &Connection,
+    bytes: &[u8],
+    count: usize,
+    source: i64,
+    filters: &[Filter],
+    columns: u64,
+) -> Result<Vec<Relation>> {
     let mut rows = Vec::with_capacity(if filters.is_empty() {
         count.min(128)
     } else {
@@ -67,7 +80,7 @@ pub(super) fn select(
             .iter()
             .all(|(column, value)| super::super::packed::matches(row.value(*column), value))
         {
-            rows.push(row.into_owned());
+            rows.push(row.into_owned(columns));
         }
         Ok(())
     })?;

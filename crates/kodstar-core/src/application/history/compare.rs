@@ -13,17 +13,14 @@ use crate::infrastructure::{
     cache::paths::{encoding, path_from_bytes},
     history::{Repository, changes, checkpoints},
 };
-use rusqlite::OptionalExtension;
+use rusqlite::{Connection, OptionalExtension};
 
-pub(super) fn run(
+pub(super) fn checkpoints(
     repository: &Repository,
     head: i64,
     from: Option<&str>,
     to: Option<&str>,
-    limit: usize,
-    cancel: &Cancellation,
-    sink: &mut dyn QuerySink,
-) -> Result<u64> {
+) -> Result<(Option<i64>, i64)> {
     let connection = &repository.connection;
     let to = to
         .map(|s| checkpoints::resolve(connection, s))
@@ -39,6 +36,16 @@ pub(super) fn run(
             .optional()?
             .flatten()
     };
+    Ok((from, to))
+}
+
+pub(super) fn run(
+    connection: &Connection,
+    (from, to): (Option<i64>, i64),
+    limit: usize,
+    cancel: &Cancellation,
+    sink: &mut dyn QuerySink,
+) -> Result<u64> {
     changes::prepare(connection, from, to, cancel)?;
     let mut statement=connection.prepare("SELECT c.path,c.before_blob,c.after_blob,
         CASE WHEN x.hash IS NOT NULL THEN lower(hex(x.hash)) END,

@@ -1,0 +1,153 @@
+{
+  "reason": "Preserve current Swift syntax, lifetime attributes and identifier spelling; keep literal text opaque before comment/operator scanning.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "alias($.for_statement_await, $.await_expression),",
+      "after": "alias($.for_statement_await, $.await_expression),\n        alias($.for_statement_try, $.try_expression),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    for_statement_await: ($) => seq($._await_operator, $._expression),",
+      "after": "    for_statement_await: ($) => seq($._await_operator, $._expression),\n    for_statement_try: ($) => seq($.try_operator, $._for_statement_collection),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    type_modifiers: ($) => repeat1($.attribute),",
+      "after": "    type_modifiers: ($) => repeat1(choice($.attribute, $.isolation_modifier)),\n    isolation_modifier: ($) => seq(\"nonisolated\", \"(\", choice(\"unsafe\", \"nonsending\"), \")\"),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "        $.property_behavior_modifier\n",
+      "after": "        $.property_behavior_modifier,\n        $.isolation_modifier\n",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "          seq(\"targetEnvironment\", \"(\", $.simple_identifier, \")\"),",
+      "after": "          seq(\"targetEnvironment\", \"(\", $.simple_identifier, \")\"),\n          seq(\"_runtime\", \"(\", $.simple_identifier, \")\"),",
+      "occurrences": 1
+    },
+    {
+      "before": "    [$.modifiers],",
+      "after": "    [$.modifiers],\n    [$.isolation_modifier, $.member_modifier],\n    [$.tuple_expression, $.switch_pattern, $._binding_pattern_with_expr],",
+      "occurrences": 1
+    },
+    {
+      "before": "    switch_pattern: ($) => alias($._binding_pattern_with_expr, $.pattern),",
+      "after": "    switch_pattern: ($) => alias(choice($._binding_pattern_with_expr, prec(1, seq(\"(\", $._expression, \")\", $._three_dot_operator))), $.pattern),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "choice($._type_level_declaration, $.directive)",
+      "after": "choice($._type_level_declaration, $.directive, $.diagnostic)",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    _type_level_declaration: ($) =>\n      choice(",
+      "after": "    _type_level_declaration: ($) =>\n      choice(\n        $.macro_invocation,",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    tuple_expression: ($) =>\n      prec.right(\n        PRECS.tuple,\n        seq(\n          \"(\",\n          sep1Opt(\n            seq(\n              optional(seq(field(\"name\", $.simple_identifier), \":\")),\n              field(\"value\", $._expression)\n            ),\n            \",\"\n          ),\n          \")\"\n        )\n      ),\n",
+      "after": "    tuple_expression: ($) =>\n      prec.right(\n        PRECS.tuple,\n        seq(\n          \"(\",\n          optional(sep1Opt(\n            seq(\n              optional(seq(field(\"name\", $.simple_identifier), \":\")),\n              field(\"value\", $._expression)\n            ),\n            \",\"\n          )),\n          \")\"\n        )\n      ),\n",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "[_\\p{XID_Continue}",
+      "after": "[_$\\p{XID_Continue}",
+      "occurrences": 2
+    },
+    {
+      "file": "grammar.js",
+      "before": "        // Version restrictions (iOS 3.4.5, Swift 5.0.0)",
+      "after": "        // Lifetime dependencies name an ownership convention and its scope.\n        seq(choice(\"borrow\", \"copy\", \"take\", \"inout\"), choice($.simple_identifier, \"self\")),\n        // Version restrictions (iOS 3.4.5, Swift 5.0.0)",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "    if (lexer->lookahead != '/') {\n        return CONTINUE_PARSING_NOTHING_FOUND;\n    }",
+      "after": "    if (!valid_symbols[BLOCK_COMMENT] || lexer->lookahead != '/') {\n        return CONTINUE_PARSING_NOTHING_FOUND;\n    }",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "  conflicts: ($) => [",
+      "after": "  conflicts: ($) => [\n    [$._contextual_simple_identifier, $._consume_operator, $._attribute_argument],\n        [$._consume_operator, $._attribute_argument],",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    line_string_literal: ($) =>\n      seq(\n        '\"',\n        repeat(choice(field(\"text\", $._line_string_content), $._interpolation)),\n        '\"'\n      ),\n",
+      "after": "    line_string_literal: ($) =>\n      seq(\n        '\"',\n        repeat(choice(field(\"text\", $._line_string_content), $._interpolation)),\n        token.immediate('\"')\n      ),\n",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    multi_line_string_literal: ($) =>\n      seq(\n        '\"\"\"',\n        repeat(\n          choice(field(\"text\", $._multi_line_string_content), $._interpolation)\n        ),\n        '\"\"\"'\n      ),\n",
+      "after": "    multi_line_string_literal: ($) =>\n      seq(\n        '\"\"\"',\n        repeat(\n          choice(field(\"text\", $._multi_line_string_content), $._interpolation)\n        ),\n        token.immediate('\"\"\"')\n      ),\n",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    _escaped_identifier: ($) => /\\\\[0\\\\tnr\"'\\n]/,",
+      "after": "    _escaped_identifier: ($) => token.immediate(/\\\\[0\\\\tnr\"'\\n]/),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    _uni_character_literal: ($) => seq(\"\\\\\", \"u\", /\\{[0-9a-fA-F]+\\}/),",
+      "after": "    _uni_character_literal: ($) => token.immediate(seq(\"\\\\\", \"u\", /\\{[0-9a-fA-F]+\\}/)),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    _interpolation: ($) => seq(\"\\\\(\", $._interpolation_contents, \")\"),",
+      "after": "    _interpolation: ($) => seq(token.immediate(\"\\\\(\"), $._interpolation_contents, \")\"),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "      choice($.multi_line_str_text, $.str_escaped_char, '\"'),",
+      "after": "      choice($.multi_line_str_text, $.str_escaped_char, token.immediate('\"')),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    line_str_text: ($) => /[^\\\\\"]+/,\n",
+      "after": "",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    multi_line_str_text: ($) => /[^\\\\\"]+/,\n",
+      "after": "",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    $.multiline_comment,\n    $.raw_str_part,",
+      "after": "    $.multiline_comment,\n    $._literal_error_sentinel,\n    $.line_str_text,\n    $.multi_line_str_text,\n    $.raw_str_part,",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "    BLOCK_COMMENT,",
+      "after": "    BLOCK_COMMENT,\n    LITERAL_ERROR_SENTINEL,\n    LINE_STR_TEXT,\n    MULTI_LINE_STR_TEXT,",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "    // Figure out our scanner state",
+      "after": "    // All external symbols are valid during recovery; do not consume code as literal text.\n    if (valid_symbols[LITERAL_ERROR_SENTINEL]) return false;\n    // Literal content takes priority over comment/operator extras, including after interpolation.\n    if (valid_symbols[LINE_STR_TEXT] || valid_symbols[MULTI_LINE_STR_TEXT]) {\n        const bool multiline = valid_symbols[MULTI_LINE_STR_TEXT];\n        bool consumed = false;\n        while (!lexer->eof(lexer) && lexer->lookahead != '\"' && lexer->lookahead != '\\\\') {\n            if (!multiline && (lexer->lookahead == '\\n' || lexer->lookahead == '\\r')) break;\n            advance(lexer);\n            consumed = true;\n        }\n        if (!consumed) return false;\n        lexer->mark_end(lexer);\n        lexer->result_symbol = multiline ? MULTI_LINE_STR_TEXT : LINE_STR_TEXT;\n        return true;\n    }\n    // Figure out our scanner state",
+      "occurrences": 1
+    }
+  ]
+}

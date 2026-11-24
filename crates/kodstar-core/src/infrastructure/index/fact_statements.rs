@@ -1,4 +1,4 @@
-// Purpose: fact 저장에 필요한 고정 SQL 11개의 메모리·binding 수명 소유.
+// Purpose: fact 저장에 필요한 고정 SQL과 native 본문 근거의 메모리·binding 수명 소유.
 // Pattern: Prepared Statements.
 // Usage: FactWriter가 transaction 동안 하나를 소유하고 파일들에서 재사용.
 // Related: crates/kodstar-core/src/infrastructure/index/facts.rs.
@@ -18,17 +18,22 @@ pub(super) enum Write {
     Module,
     UpdateScope,
     UpdateDefinition,
-    UpdateFunctionEnd,
+    UpdateCallableSpan,
+    NativeCallModule,
+    MoveBinding,
+    MoveUsage,
 }
 
+const STATEMENT_COUNT: usize = 14;
+
 pub(super) struct Statements<'conn> {
-    statements: [Statement<'conn>; 11],
+    statements: [Statement<'conn>; STATEMENT_COUNT],
     bytes: usize,
     limit: usize,
 }
 impl<'conn> Statements<'conn> {
     pub(super) fn new(connection: &'conn Connection) -> Result<Self> {
-        let mut statements = Vec::with_capacity(11);
+        let mut statements = Vec::with_capacity(STATEMENT_COUNT);
         for sql in [
             "INSERT INTO scopes(file_id,local_id,parent,start_byte,end_byte)
             VALUES(?1,?2,?3,?4,?5)",
@@ -48,7 +53,11 @@ impl<'conn> Statements<'conn> {
             WHERE id=?2",
             "UPDATE scopes SET start_byte=?1,end_byte=?2 WHERE file_id=?3 AND local_id=?4",
             "UPDATE symbols_rows SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND local_id=?8",
-            "UPDATE bindings_rows SET end_byte=?1 WHERE file_id=?2 AND target_local=?3 AND kind IN (SELECT id FROM atoms WHERE value IN ('function','go_signature'))",
+            "UPDATE bindings_rows SET start_byte=?1,end_byte=?2 WHERE file_id=?3 AND target_local=?4
+             AND kind=(SELECT id FROM atoms WHERE value=?5)",
+            "SELECT COALESCE((SELECT module_name FROM bindings_rows WHERE file_id=?1 AND scope_id=?2 AND name_key=(SELECT id FROM atoms WHERE value='@clang_call') AND start_byte=?3 AND end_byte=?4 LIMIT 1),0)",
+            "UPDATE bindings_rows SET start_byte=?1,end_byte=?2 WHERE file_id=?3 AND id<=?4 AND start_byte=?5 AND end_byte=?6",
+            "UPDATE facts_rows SET start_byte=?1,end_byte=?2,line=?3,column_byte=?4,end_line=?5,end_column_byte=?6 WHERE file_id=?7 AND id<=?8 AND start_byte=?9 AND end_byte=?10",
         ] {
             statements.push(connection.prepare(sql)?);
         }

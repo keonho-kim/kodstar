@@ -14,7 +14,6 @@ use crate::domain::{
     query::{Limit, Query, QueryOptions},
     results::{QueryMetadata, QueryRow, QuerySink, QuerySummary},
 };
-use crate::infrastructure::index;
 use rusqlite::Connection;
 use std::num::NonZeroUsize;
 
@@ -48,7 +47,7 @@ impl<'a> Output<'a> {
     }
     pub fn emit(
         &mut self,
-        connection: &mut Connection,
+        connection: &Connection,
         selected: &SelectedProject,
         checkpoint: &str,
     ) -> Result<()> {
@@ -74,27 +73,24 @@ impl<'a> Output<'a> {
             .nodes
             .and_then(|v| NonZeroUsize::new(v - self.summary.visited_count as usize))
             .map_or(Limit::Unlimited, Limit::Count);
-        index::limit_reads(connection, selected.settings.memory_budget)?;
-        index::observe_cancellation(connection, self.cancel)?;
-        let transaction = connection.transaction()?;
         let mut relay = Relay {
             checkpoint,
             sink: self.sink,
         };
-        let result = query::run(
-            &transaction,
-            selected,
+        let summary = query::run(
+            connection,
+            query::ReadScope {
+                selected,
+                maintenance: None,
+                repository: None,
+            },
             &Query::Changes {
                 since: "comparison".into(),
             },
             &options,
             self.cancel,
             &mut relay,
-            None,
-        );
-        index::stop_observing(&transaction)?;
-        transaction.finish()?;
-        let summary = result?;
+        )?;
         self.summary.result_count += summary.result_count;
         self.summary.visited_count += summary.visited_count;
         self.summary.unresolved_count += summary.unresolved_count;

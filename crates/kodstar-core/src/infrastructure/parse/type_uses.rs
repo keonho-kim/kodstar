@@ -10,9 +10,14 @@ use crate::infrastructure::parse::{Context, Extractor, child_kind, span, text};
 use tree_sitter::Node;
 
 impl Extractor<'_> {
-    pub(super) fn type_use(&mut self, node: Node<'_>, context: &Context) -> Result<()> {
+    pub(super) fn type_use(
+        &mut self,
+        node: Node<'_>,
+        context: &Context,
+        parent: Option<Node<'_>>,
+    ) -> Result<()> {
         let declared = context.declaration_name == Some((node.start_byte(), node.end_byte()))
-            || node.parent().is_some_and(|p| {
+            || parent.is_some_and(|p| {
                 matches!(p.kind(), "type_parameter" | "type_parameter_declaration")
                     && p.child_by_field_name("name")
                         .is_some_and(|n| n.id() == node.id())
@@ -25,24 +30,20 @@ impl Extractor<'_> {
         }
         let qualified = matches!(
             node.kind(),
-            "scoped_type_identifier" | "qualified_type" | "named_type" | "typeref" | "user_type"
+            "scoped_type_identifier" | "qualified_type" | "named_type" | "user_type"
         ) || node.kind() == "qualified_identifier"
             && crate::infrastructure::parse::cxx::declarators::leaf(node).kind()
                 == "type_identifier";
-        let part_of_type = node.parent().is_some_and(|p| {
+        let part_of_type = parent.is_some_and(|p| {
             matches!(
                 p.kind(),
-                "scoped_type_identifier"
-                    | "qualified_type"
-                    | "named_type"
-                    | "typeref"
-                    | "user_type"
+                "scoped_type_identifier" | "qualified_type" | "named_type" | "user_type"
             ) || p.kind() == "qualified_identifier"
                 && crate::infrastructure::parse::cxx::declarators::leaf(p).kind()
                     == "type_identifier"
         });
         let identifier_type = node.kind() == "identifier"
-            && node.parent().is_some_and(|p| {
+            && parent.is_some_and(|p| {
                 p.child_by_field_name("type")
                     .is_some_and(|n| n.id() == node.id())
                     || matches!(

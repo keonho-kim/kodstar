@@ -1,0 +1,17 @@
+{
+  "reason": "Preserve current valid source forms using pinned official grammar inputs and reproducible generation.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "    _body_expr: $ =>\n      seq(\n        '=',\n        field('body',\n          choice(\n            $._arg,",
+      "after": "    _body_expr: $ =>\n      seq(\n        '=',\n        field('body',\n          choice(\n            $._arg,\n            alias($.command_call, $.call),\n            alias($.command_call_with_block, $.call),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "  inline: $ => [$._arg_rhs, $._call_operator],",
+      "after": "  inline: $ => [$._arg_rhs, $._call_operator],\n  conflicts: $ => [[$._array_pattern_n, $.as_pattern, $._find_pattern_body], [$._pattern_range], [$.alternative_pattern], [$._pattern_expr_alt, $.alternative_pattern], [$._body_expr, $._chained_command_call], [$._expression, $._chained_command_call]],",
+      "occurrences": 1
+    }
+  ]
+}

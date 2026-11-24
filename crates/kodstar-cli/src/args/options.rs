@@ -46,16 +46,18 @@ pub(super) fn project(command: Command, analysis: bool) -> Command {
                 .value_parser(positive)
                 .help("Analysis worker count (1-64)")
                 .long_help(format!("Maximum analysis worker count, from 1 to 64. Built-in default: {}; TOML configuration can \
-                    override it. Memory settings must cover all worker inputs and queued work.", defaults.jobs)),
+                    override it. Memory settings cover inputs, queued work, and worker stacks. One worker owns \
+                    C/C++ semantic work with a 16MiB stack; other workers use 2MiB stacks for syntax analysis.", defaults.jobs)),
         )
         .arg(
             Arg::new("memory-budget")
                 .long("memory-budget")
                 .value_parser(size)
                 .help("Scheduling memory budget, for example 256MiB")
-                .long_help(format!("Scheduling budget in bytes or B, KB, KiB, MB, MiB, GB, or GiB. Built-in default: {} bytes; TOML \
-                    configuration can override it. This must cover configured workers, buffers, and DB caches. AST \
-                    and allocator overhead are additional; this is not an OS-enforced RSS limit.", defaults.memory_budget)),
+                .long_help(format!("Concurrent scheduling memory envelope in bytes or B, KB, KiB, MB, MiB, GB, or GiB. \
+                    Built-in default: {} bytes; TOML configuration can override it. Each phase owns its buffers \
+                    and reserves worker stacks before native processing. Work limits reset per file. Clang memory \
+                    is observed, but untracked allocator overhead remains; this is not an OS-enforced RSS limit.", defaults.memory_budget)),
         )
         .arg(
             Arg::new("max-file-bytes")

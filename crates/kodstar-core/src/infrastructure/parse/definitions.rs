@@ -38,6 +38,7 @@ impl Extractor<'_> {
             arrow: is_arrow,
             special,
         } = declaration;
+        let declaration_source = context.source;
         let node_kind = node.kind();
         let mut name = special.as_ref().map(|(name, _)| name.clone());
         if name.is_none() {
@@ -45,7 +46,8 @@ impl Extractor<'_> {
                 .map(|name| self.bounded_text(text(name, self.source)))
                 .transpose()?;
         }
-        if is_arrow && name.is_none() {
+        let class_expression = self.class_expression(node);
+        if (is_arrow || class_expression) && name.is_none() {
             name = node
                 .parent()
                 .and_then(|parent| {
@@ -92,9 +94,14 @@ impl Extractor<'_> {
         } else {
             String::new()
         };
-        let condition = self
-            .condition(node)?
-            .or_else(|| context.condition.as_deref().map(str::to_owned));
+        let own_condition = self.condition(node)?;
+        let condition = match (own_condition, context.condition.as_deref()) {
+            (Some(own), Some(parent)) if self.projection.is_some() && own != parent => {
+                Some(self.bounded_text(&format!("({parent}) && ({own})"))?)
+            }
+            (Some(own), _) => Some(own),
+            (None, parent) => parent.map(str::to_owned),
+        };
         let payload = std::mem::size_of::<Fact>()
             .saturating_add(name.len())
             .saturating_add(qualified.capacity())
@@ -119,6 +126,9 @@ impl Extractor<'_> {
             span: span(node),
             exported,
         }))?;
+        if class_expression {
+            self.class_assignment(node, id, parent_scope)?;
+        }
         if !(function
             && context.member_scope
             && matches!(
@@ -145,7 +155,7 @@ impl Extractor<'_> {
             };
             let local_definition = self.lisp_local_definition(node).is_some();
             (self.emit)(Fact::Binding(Binding {
-                scope: parent_scope,
+                scope: if class_expression { id } else { parent_scope },
                 name: binding_name,
                 target: (!external_module).then_some(id),
                 module: module.clone(),
@@ -178,7 +188,11 @@ impl Extractor<'_> {
                 } else if self.language == Language::Scala
                     && matches!(node.kind(), "object_definition" | "given_definition")
                 {
-                    "value_object"
+                    if node.kind() == "object_definition" {
+                        "scala_object"
+                    } else {
+                        "scala_given"
+                    }
                 } else if matches!(self.language, Language::Rust | Language::Erlang)
                     && kind == SymbolKind::Macro
                 {
@@ -207,6 +221,9 @@ impl Extractor<'_> {
                     type_only: false,
                 }))?;
             }
+        }
+        if function || is_arrow {
+            self.hono_handler(node, id, parent_scope, declaration_source)?;
         }
         if function && context.member_scope {
             self.owner_hint(id, node, &context)?;
@@ -244,12 +261,10 @@ impl Extractor<'_> {
             self.python_callable(node, &context)?;
             self.php_callable(node, &context)?;
             self.native_return(node, &context)?;
+            self.java_method_parameters(node, &context)?;
             self.kotlin_callable(node, &context)?;
             self.swift_callable(node, &context)?;
             self.scala_callable(node, &context)?;
-            if self.language == Language::Pascal {
-                self.pascal_callable(node, &context)?;
-            }
             self.elixir_callable(node, parent_scope, &context)?;
             self.cxx_callable(node, &context)?;
         }

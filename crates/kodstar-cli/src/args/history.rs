@@ -49,8 +49,14 @@ pub(super) fn commands() -> [Command; 2] {
                 parent; the first checkpoint is compared with an empty tracked state. --no-refresh skips \
                 capture.\n\nProvide --from and --to together to compare two stored checkpoint IDs or names \
                 without capturing current changes. Report added, modified, or deleted files and bounded text \
-                differences; binary or oversized text has an omission reason. Working files are not changed.")
-            .after_long_help("Examples:\n  kodstar history diff\n  kodstar history diff --from baseline --to after-edit")
+                differences; binary or oversized text has an omission reason. --graph compares relationship \
+                evidence and builds past analysis as needed. Working files are not changed.")
+            .after_long_help("Examples:\n  kodstar history diff\n  kodstar history diff --graph --from baseline --to after-edit")
+            .arg(options::flag("graph", "Compare relationship evidence between checkpoints"))
+            .arg(Arg::new("limit").long("limit").requires("graph").conflicts_with("all")
+                .value_parser(clap::value_parser!(std::num::NonZeroUsize))
+                .help("Maximum graph change rows"))
+            .arg(options::flag("all", "Remove the graph output row limit").requires("graph"))
             .arg(Arg::new("from").long("from").requires("to")
                 .help("Before checkpoint ID or saved name; requires --to"))
             .arg(Arg::new("to").long("to").requires("from")

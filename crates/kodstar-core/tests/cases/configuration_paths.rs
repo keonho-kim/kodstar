@@ -66,7 +66,7 @@ fn removing_references_retires_only_owned_configuration_facts() -> TestResult {
 }
 
 #[test]
-fn excessive_configuration_nesting_rolls_back_the_previous_generation() -> TestResult {
+fn excessive_configuration_nesting_isolated_without_losing_valid_source_results() -> TestResult {
     let project = Project::new()?;
     project.write("tsconfig.json", "{}")?;
     project.write("main.ts", "function target() {}")?;
@@ -75,17 +75,18 @@ fn excessive_configuration_nesting_rolls_back_the_previous_generation() -> TestR
         "tsconfig.json",
         &format!("{{\"ignored\":{}0{}}}", "[".repeat(513), "]".repeat(513)),
     )?;
-    assert_eq!(
-        project.build(false).err().ok_or("limit")?.kind,
-        ErrorKind::Limit
-    );
+    let partial = project.build(false)?;
+    assert!(partial.generation > first.generation);
+    assert_eq!(partial.coverage.failed_files, 1);
+    assert_eq!(partial.coverage.configuration_incomplete_files, 1);
     let cached = project.query(Query::Symbols {
         file: "main.ts".into(),
     })?;
     assert_eq!(
         cached.metadata.ok_or("metadata")?.generation,
-        Some(first.generation)
+        Some(partial.generation)
     );
+    assert!(!cached.summary.ok_or("summary")?.complete);
     Ok(())
 }
 

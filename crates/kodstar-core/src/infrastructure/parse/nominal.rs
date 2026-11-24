@@ -16,8 +16,8 @@ impl Extractor<'_> {
     ) -> Result<Option<(String, SymbolKind)>> {
         if matches!(
             self.language,
-            Language::Go | Language::Swift | Language::Kotlin | Language::Pascal
-        ) && matches!(node.kind(), "type_spec" | "class_declaration" | "declType")
+            Language::Go | Language::Swift | Language::Kotlin
+        ) && matches!(node.kind(), "type_spec" | "class_declaration")
             && let Some(name) = name_node(node)
         {
             let mut cursor = node.walk();
@@ -28,20 +28,17 @@ impl Extractor<'_> {
             let kind = if token.is_some_and(|n| n.kind() == "enum")
                 || child_kind(node, &["modifiers"])
                     .is_some_and(|n| text(n, self.source).split_whitespace().any(|s| s == "enum"))
-                || ty.is_some_and(|n| child_kind(n, &["declEnum"]).is_some())
             {
                 SymbolKind::Enum
             } else if token.is_some_and(|n| n.kind() == "interface")
-                || ty.is_some_and(|n| matches!(n.kind(), "interface_type" | "declIntf"))
+                || ty.is_some_and(|n| n.kind() == "interface_type")
             {
                 SymbolKind::Interface
             } else if token.is_some_and(|n| n.kind() == "struct")
                 || ty.is_some_and(|n| n.kind() == "struct_type")
             {
                 SymbolKind::Struct
-            } else if self.language == Language::Go
-                || self.language == Language::Pascal && ty.is_none_or(|n| n.kind() != "declClass")
-            {
+            } else if self.language == Language::Go {
                 SymbolKind::Type
             } else {
                 SymbolKind::Class

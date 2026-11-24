@@ -74,8 +74,6 @@ impl Lookup<'_, '_> {
                     return Ok(Location::Project);
                 }
             } else {
-                self.connection
-                    .cached_execute("DELETE FROM resolution_modules WHERE depth=?1", [depth + 1])?;
                 let location = self.module_files(context, scope, &target, depth + 1)?;
                 if native {
                     self.platform_candidate();

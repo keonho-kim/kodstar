@@ -3,7 +3,7 @@
 // Usage: Invocation이 history·branch 입력을 전달.
 // Related: crates/kodstar-cli/src/args/history.rs.
 
-use super::{refresh, required, value};
+use super::{flag, refresh, required, value};
 use clap::ArgMatches;
 use kodstar_core::{Error, HistoryRequest, Result};
 
@@ -15,6 +15,16 @@ pub(super) fn parse(name: &str, outer: &ArgMatches, args: &ArgMatches) -> Result
         },
         ("history", Some("save")) => HistoryRequest::Save {
             name: required(args, "name")?,
+        },
+        ("history", Some("diff")) if flag(args, "graph") => HistoryRequest::GraphDiff {
+            from: value(args, "from"),
+            to: value(args, "to"),
+            refresh: refresh(args),
+            limit: if flag(args, "all") {
+                Some(0)
+            } else {
+                value::<std::num::NonZeroUsize>(args, "limit").map(|limit| limit.get())
+            },
         },
         ("history", Some("diff")) => HistoryRequest::Diff {
             from: value(args, "from"),

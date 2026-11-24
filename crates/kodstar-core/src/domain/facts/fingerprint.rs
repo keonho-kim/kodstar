@@ -11,8 +11,8 @@ use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Fingerprints {
-    pub all: String,
-    pub environment: String,
+    pub all: [u8; 32],
+    pub environment: [u8; 32],
 }
 
 struct Digest(blake3::Hasher);
@@ -51,7 +51,7 @@ impl Fingerprinter {
                 Some(original)
             }
             Fact::Scope(_) | Fact::Definition(super::Definition { local_id: 0, .. }) => {
-                replace_span(fact)
+                replace_span(fact, language)
             }
             _ => None,
         };
@@ -61,8 +61,9 @@ impl Fingerprinter {
         fact.hash(&mut self.all);
         restore_span(fact, original);
         if !matches!(fact, Fact::Use(u) if matches!(u.relation, RelationKind::Calls | RelationKind::References))
+            && !matches!(fact, Fact::Binding(b) if b.kind == "clang_call")
         {
-            let position = replace_span(fact);
+            let position = replace_span(fact, language);
             language.as_str().hash(&mut self.environment);
             fact.hash(&mut self.environment);
             restore_span(fact, position);
@@ -71,17 +72,21 @@ impl Fingerprinter {
 
     pub(crate) fn finish(self) -> Fingerprints {
         Fingerprints {
-            all: self.all.0.finalize().to_hex().to_string(),
-            environment: self.environment.0.finalize().to_hex().to_string(),
+            all: *self.all.0.finalize().as_bytes(),
+            environment: *self.environment.0.finalize().as_bytes(),
         }
     }
 }
 
-fn replace_span(fact: &mut Fact) -> Option<SourceSpan> {
+fn replace_span(fact: &mut Fact, language: Language) -> Option<SourceSpan> {
     let span = match fact {
         Fact::Scope(s) => &mut s.span,
         Fact::Definition(d) => &mut d.span,
         Fact::Binding(b) if matches!(b.kind, "function" | "go_signature") => {
+            if language == Language::Go {
+                // Package functions are visible independently of their source order.
+                return Some(std::mem::replace(&mut b.span, ZERO_SPAN));
+            }
             let original = b.span;
             b.span.end_byte = b.span.start_byte;
             b.span.end_line = b.span.line;
@@ -90,18 +95,17 @@ fn replace_span(fact: &mut Fact) -> Option<SourceSpan> {
         }
         _ => return None,
     };
-    Some(std::mem::replace(
-        span,
-        SourceSpan {
-            start_byte: 0,
-            end_byte: 0,
-            line: 1,
-            column: 1,
-            end_line: 1,
-            end_column: 1,
-        },
-    ))
+    Some(std::mem::replace(span, ZERO_SPAN))
 }
+
+const ZERO_SPAN: SourceSpan = SourceSpan {
+    start_byte: 0,
+    end_byte: 0,
+    line: 1,
+    column: 1,
+    end_line: 1,
+    end_column: 1,
+};
 
 fn restore_span(fact: &mut Fact, original: Option<SourceSpan>) {
     if let Some(original) = original {

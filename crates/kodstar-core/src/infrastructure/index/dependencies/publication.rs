@@ -54,24 +54,30 @@ pub(crate) fn publish(c: &Connection) -> Result<()> {
 fn fresh(c: &Connection) -> Result<()> {
     let mut select = c.prepare("SELECT k.key_id,f.file_id,d.fact_id,d.found
         FROM resolution_dependencies d JOIN dictionary_pending k ON k.kind=d.kind AND k.lookup_key=d.lookup_key
-        JOIN facts f ON f.id=d.fact_id ORDER BY k.key_id,f.file_id,d.fact_id")?;
-    let mut rows = select.query([])?;
-    let mut insert = c.prepare(
-        "INSERT INTO lookup_rows(key_id,file_id,part,count,payload) VALUES(?1,?2,?3,?4,?5)",
-    )?;
+        JOIN facts f ON f.id=d.fact_id ORDER BY f.file_id,(k.key_id-1)/128,k.key_id,d.fact_id")?;
+    let mut input = select.query([])?;
+    let mut writer = super::pages::publication::Writer::new(c);
     let (mut group, mut part, mut count, mut previous) = (None, 0, 0, 0);
     let mut bytes = Vec::with_capacity(codec::MAX_COUNT * 2);
-    while let Some(row) = rows.next()? {
+    while let Some(row) = input.next()? {
         let current = (row.get::<_, i64>(0)?, row.get::<_, i64>(1)?);
         if group != Some(current) || count == codec::MAX_COUNT {
             if let Some((key, file)) = group {
-                insert.execute(params![key, file, part, count, bytes])?;
+                writer.push(
+                    file,
+                    super::pages::Row {
+                        slot: 0,
+                        key,
+                        part,
+                        count,
+                        payload: std::mem::take(&mut bytes),
+                    },
+                )?;
             }
             part = if group == Some(current) { part + 1 } else { 0 };
             group = Some(current);
             count = 0;
             previous = 0;
-            bytes.clear();
         }
         let fact = row.get(2)?;
         codec::push(&mut bytes, fact, previous, row.get(3)?)?;
@@ -79,7 +85,17 @@ fn fresh(c: &Connection) -> Result<()> {
         count += 1;
     }
     if let Some((key, file)) = group {
-        insert.execute(params![key, file, part, count, bytes])?;
+        writer.push(
+            file,
+            super::pages::Row {
+                slot: 0,
+                key,
+                part,
+                count,
+                payload: bytes,
+            },
+        )?;
     }
+    writer.flush()?;
     Ok(())
 }

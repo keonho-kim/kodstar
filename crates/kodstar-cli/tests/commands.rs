@@ -8,6 +8,63 @@ use serde_json::Value;
 use support::*;
 
 #[test]
+fn partial_lookup_replacement_and_deletion_release_database_handles() -> TestResult {
+    fn check_wal(directory: &std::path::Path) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                check_wal(&entry.path())?;
+            } else if entry.file_name().to_string_lossy().ends_with("-wal") {
+                assert_eq!(
+                    entry.metadata()?.len(),
+                    0,
+                    "unclosed writer: {}",
+                    entry.path().display()
+                );
+            }
+        }
+        Ok(())
+    }
+    let project = Project::new()?;
+    std::fs::write(
+        project.root.join("go.mod"),
+        "module example.test/fixture\n\ngo 1.24\n",
+    )?;
+    std::fs::write(
+        project.root.join("target.go"),
+        "package fixture\nfunc Target() {}\n",
+    )?;
+    std::fs::write(
+        project.root.join("caller.go"),
+        "package fixture\nfunc Caller() { Target() }\n",
+    )?;
+    assert!(project.run(&["init", "--jobs", "1"])?.status.success());
+    for definition in [
+        "package fixture\nfunc Target() {}\nfunc Added() {}\n",
+        "package fixture\n",
+    ] {
+        std::fs::write(project.root.join("target.go"), definition)?;
+        let output = project.run(&[
+            "symbols",
+            "caller.go",
+            "--all",
+            "--jobs",
+            "1",
+            "--format",
+            "json",
+        ])?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        check_wal(&project.home)?;
+        check_wal(&project.root.join(".kodstar"))?;
+    }
+    Ok(())
+}
+
+#[test]
 fn initialization_and_queries_stream_structured_results_and_refresh() -> TestResult {
     let project = Project::new()?;
     project.write("fn target() {}\nfn caller() { target(); }\n")?;

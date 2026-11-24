@@ -20,15 +20,35 @@ impl Extractor<'_> {
         Ok(self.next)
     }
 
-    pub(super) fn enter(&mut self, node: Node<'_>, mut context: Context) -> Result<Context> {
+    pub(super) fn enter(
+        &mut self,
+        node: Node<'_>,
+        mut context: Context,
+        parent: Option<Node<'_>>,
+        top_level: bool,
+    ) -> Result<Context> {
         let node_kind = node.kind();
         if !node.is_named() {
             return Ok(context);
         }
+        if parent.is_some()
+            && let Some(projection) = self.projection
+            && let Some(condition) = projection.at(node.start_byte(), self.fact_limit)?
+            && context.projection_guard.as_deref() != Some(condition.as_str())
+        {
+            context.projection_guard = Some(Arc::from(condition.as_str()));
+            context.condition = Some(Arc::from(match context.condition.as_deref() {
+                Some(parent) if parent != condition => {
+                    self.bounded_text(&format!("({parent}) && ({condition})"))?
+                }
+                _ => condition,
+            }));
+        }
         if !self.language_context(node, &mut context)? {
             return Ok(context);
         }
-        self.namespace_context(node, &mut context)?;
+        self.htmx_context(node, &mut context)?;
+        self.namespace_context(node, &mut context, top_level)?;
         self.lisp_package_context(node, &mut context)?;
         self.enum_member(node, &context)?;
         self.field(node, &context)?;
@@ -71,7 +91,6 @@ impl Extractor<'_> {
         }
         self.implementation(node, &mut context)?;
         self.cxx_owner(node, &mut context)?;
-        self.pascal_owner(node, &mut context)?;
         let special = self.special_definition(node)?;
         let function = self.config.functions.contains(&node_kind)
             || special.as_ref().is_some_and(|(_, kind)| {
@@ -97,14 +116,9 @@ impl Extractor<'_> {
             self.language,
             Language::JavaScript | Language::TypeScript | Language::Php
         );
-        let duplicate_header = self.language == Language::Pascal
-            && node_kind == "declProc"
-            && node
-                .parent()
-                .is_some_and(|parent| parent.kind() == "defProc");
         let extension = self.language == Language::Swift
             && crate::infrastructure::parse::ownership::extension(node);
-        if (function || class || is_arrow) && !duplicate_header && !extension {
+        if (function || class || is_arrow) && !extension {
             context = self.define(
                 node,
                 context,
@@ -119,11 +133,7 @@ impl Extractor<'_> {
             "statement_block" | "block" | "compound_statement"
         ) && !matches!(
             self.language,
-            Language::Python
-                | Language::Ruby
-                | Language::Elixir
-                | Language::CommonLisp
-                | Language::Pascal
+            Language::Python | Language::Ruby | Language::Elixir | Language::CommonLisp
         ) {
             let id = self.allocate()?;
             (self.emit)(Fact::Scope(Scope {
@@ -133,7 +143,7 @@ impl Extractor<'_> {
             }))?;
             context.scope = id;
         }
-        self.references(node, &context)?;
+        self.references(node, &context, parent)?;
         Ok(context)
     }
 }

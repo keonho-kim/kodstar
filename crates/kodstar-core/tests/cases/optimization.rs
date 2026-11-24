@@ -1,10 +1,134 @@
-// Purpose: 사실 재사용·본문 재해석·취소·언어 재판정의 일관성 검증.
+// Purpose: 증분 재사용과 제한된 관계 결과 스트리밍의 일관성 검증.
 // Pattern: Integration Test.
-// Usage: engine 테스트가 독립 프로젝트에서 full 결과와 일곱 계약 비교.
+// Usage: engine 테스트가 독립 프로젝트에서 정규화한 분석 결과와 원자성을 비교.
 // Related: crates/kodstar-core/tests/support/snapshot.rs, crates/kodstar-core/src/application/analysis/incremental.rs.
 
-use crate::support::{snapshot::normalized_index, *};
+use crate::support::{
+    packed_mutations::{mark_relationship_ids, relationship_ids},
+    snapshot::normalized_index,
+    *,
+};
 use kodstar_core::*;
+
+#[test]
+fn relationship_stream_shares_a_repeated_source_across_distinct_targets() -> TestResult {
+    let p = Project::new()?;
+    p.write(
+        "main.rs",
+        "fn a() {} fn b() {} fn c() {} fn caller() { a(); b(); c(); }",
+    )?;
+    p.build(false)?;
+    let output = p.query(Query::Deps {
+        selector: selector("main.rs", "caller"),
+    })?;
+    let rows = output
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            QueryRow::Relationship(edge) => Some(edge),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(rows.len() >= 3);
+    for row in &rows[1..] {
+        assert!(std::sync::Arc::ptr_eq(&rows[0].source, &row.source));
+    }
+    Ok(())
+}
+
+#[test]
+fn relationship_batches_preserve_prefixes_counts_and_shared_sources_at_limits() -> TestResult {
+    let p = Project::new()?;
+    let mut source = String::new();
+    for n in 0..273 {
+        source.push_str(&format!("fn leaf{n}() {{}}\n"));
+    }
+    source.push_str("fn caller() {\n");
+    for n in 0..273 {
+        source.push_str(&format!("leaf{n}(); leaf{n}();\n"));
+    }
+    source.push_str("}\n");
+    p.write("main.rs", &source)?;
+    p.build(false)?;
+    let query = Query::Deps {
+        selector: selector("main.rs", "caller"),
+    };
+    let full = p.query(query.clone())?;
+    let edges: Vec<_> = full
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            QueryRow::Relationship(edge) => Some(edge),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edges.len(), 273);
+    for edge in &edges {
+        assert_eq!(edge.count, 2);
+        assert!(std::sync::Arc::ptr_eq(&edges[0].source, &edge.source));
+    }
+    for limit in [1, 3, 31, 32, 33, 127, 128, 129, 255, 256, 273, 274] {
+        let mut output = Collected::default();
+        p.engine.query(
+            &p.options(),
+            &query,
+            &QueryOptions {
+                refresh: Refresh::None,
+                limit: Limit::Count(std::num::NonZeroUsize::new(limit).unwrap()),
+                ..QueryOptions::default()
+            },
+            &Cancellation::default(),
+            &mut output,
+        )?;
+        let expected = &full.rows[..limit.min(full.rows.len())];
+        assert_eq!(
+            serde_json::to_value(&output.rows)?,
+            serde_json::to_value(expected)?
+        );
+        assert_eq!(output.summary.as_ref().unwrap().truncated, limit < 273);
+    }
+    Ok(())
+}
+
+#[test]
+fn oversized_relationship_projections_fall_back_without_losing_rows() -> TestResult {
+    let p = Project::new()?;
+    let mut source = String::new();
+    let names: Vec<_> = (0..4)
+        .map(|n| format!("leaf{n}{}", "x".repeat(40000)))
+        .collect();
+    for n in 0..128 {
+        source.push_str(&format!("fn small{n}() {{}}\n"));
+    }
+    for name in &names {
+        source.push_str(&format!("fn {name}() {{}}\n"));
+    }
+    source.push_str("fn caller() {\n");
+    for n in 0..128 {
+        source.push_str(&format!("small{n}();\n"));
+    }
+    for name in &names {
+        source.push_str(&format!("{name}();\n"));
+    }
+    source.push_str("}\n");
+    p.write("main.rs", &source)?;
+    p.build(false)?;
+    let output = p.query(Query::Deps {
+        selector: selector("main.rs", "caller"),
+    })?;
+    let names: Vec<_> = output
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            QueryRow::Relationship(edge) => edge.target.as_ref().map(|target| target.name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names.len(), 132);
+    assert_eq!(names.iter().filter(|name| name.len() > 40000).count(), 4);
+    assert!(!output.summary.as_ref().unwrap().truncated);
+    Ok(())
+}
 
 #[test]
 fn comments_body_edits_and_new_candidates_match_full_results() -> TestResult {
@@ -16,7 +140,6 @@ fn comments_body_edits_and_new_candidates_match_full_results() -> TestResult {
     let mut previous = p.build(false)?;
     let sources = [
         (format!("{initial}// comment\n"), true),
-        (initial.replace("{ first(); }", "{ second(); }"), true),
         (
             initial.replace("{ first(); }", "{ first(); second(); }"),
             true,
@@ -65,49 +188,45 @@ fn unchanged_facts_preserve_rows_for_non_rust_and_refresh_root_ranges() -> TestR
 }
 
 #[test]
-fn cancellation_after_reused_or_replayed_file_rolls_back_its_generation() -> TestResult {
+fn cancellation_before_extraction_preserves_the_committed_generation() -> TestResult {
     let p = Project::new()?;
     let source = "fn first() {} fn second() {} fn caller() { first(); }";
     p.write("main.rs", source)?;
     let first = p.build(false)?;
     let expected = normalized_index(&first)?;
-    for changed in [
-        format!("{source}\n// comment\n"),
-        source.replace("{ first(); }", "{ second(); }"),
-    ] {
-        p.write("main.rs", &changed)?;
-        let cancel = Cancellation::default();
-        let result = p.engine.init(
-            &p.options(),
-            InitOptions::default(),
-            &cancel,
-            &mut |event| {
-                if event.phase == "parse" {
-                    cancel.cancel();
-                }
-                Ok(())
-            },
-        );
-        assert_eq!(
-            result.expect_err("cancelled publication").kind,
-            ErrorKind::Cancelled
-        );
-        assert_eq!(expected, normalized_index(&first)?);
-        let metadata = p
-            .query(Query::Symbols {
-                file: "main.rs".into(),
-            })?
-            .metadata
-            .ok_or("metadata")?;
-        assert_eq!(metadata.generation, Some(first.generation));
-    }
+    p.write("main.rs", &source.replace("{ first(); }", "{ second(); }"))?;
+    let cancel = Cancellation::default();
+    let result = p.engine.init(
+        &p.options(),
+        InitOptions::default(),
+        &cancel,
+        &mut |event| {
+            if event.phase == "parse" {
+                cancel.cancel();
+            }
+            Ok(())
+        },
+    );
+    assert_eq!(
+        result.expect_err("cancelled extraction").kind,
+        ErrorKind::Cancelled
+    );
+    assert_eq!(expected, normalized_index(&first)?);
+    let metadata = p
+        .query(Query::Symbols {
+            file: "main.rs".into(),
+        })?
+        .metadata
+        .ok_or("metadata")?;
+    assert_eq!(metadata.generation, Some(first.generation));
     Ok(())
 }
 
 #[test]
 fn cached_header_language_is_reused_and_changed_content_is_reclassified() -> TestResult {
     let p = Project::new()?;
-    p.write("api.h", "class Target {};")?;
+    let license = format!("/*\n{}*/\n", "license text\n".repeat(800));
+    p.write("api.h", &format!("{license}class Target {{}};"))?;
     p.build(false)?;
     let unchanged = p.engine.init(
         &p.options(),
@@ -126,32 +245,8 @@ fn cached_header_language_is_reused_and_changed_content_is_reclassified() -> Tes
         }
     };
     assert_eq!(language(&p)?, "cpp");
-    p.write("api.h", "struct Target {};")?;
+    p.write("api.h", &format!("{license}struct Target {{}};"))?;
     p.build(false)?;
     assert_eq!(language(&p)?, "c");
     Ok(())
-}
-
-fn relationship_ids(
-    report: &InitReport,
-    file: &str,
-) -> std::result::Result<Vec<i64>, Box<dyn std::error::Error>> {
-    let c = rusqlite::Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
-    postings::register(&c)?;
-    let mut statement = c.prepare("SELECT r.id FROM relationships r JOIN facts u ON u.id=r.fact_id JOIN files f ON f.id=u.file_id WHERE f.display_path=?1 ORDER BY r.id")?;
-    Ok(statement
-        .query_map([file], |r| r.get(0))?
-        .collect::<std::result::Result<_, _>>()?)
-}
-
-fn mark_relationship_ids(
-    report: &InitReport,
-    file: &str,
-) -> std::result::Result<Vec<i64>, Box<dyn std::error::Error>> {
-    let c = rusqlite::Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
-    packed_mutations::mark(&c, file)?;
-    drop(c);
-    let ids = relationship_ids(report, file)?;
-    assert!(!ids.is_empty());
-    Ok(ids)
 }

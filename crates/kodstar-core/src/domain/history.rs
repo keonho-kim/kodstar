@@ -25,6 +25,15 @@ pub enum HistoryRequest {
         #[serde(default)]
         refresh: Refresh,
     },
+    /// Compare relationship evidence at two checkpoints using the current analyzer.
+    GraphDiff {
+        from: Option<String>,
+        to: Option<String>,
+        #[serde(default)]
+        refresh: Refresh,
+        /// Zero removes the output row limit.
+        limit: Option<usize>,
+    },
     Restore {
         revision: String,
         path: Option<PathBuf>,
@@ -67,6 +76,11 @@ pub struct Comparison {
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HistoryRow {
+    GraphChange {
+        change: String,
+        before: Option<Box<GraphEvidence>>,
+        after: Option<Box<GraphEvidence>>,
+    },
     Impact {
         checkpoint: String,
         relationship: Box<super::results::Relationship>,
@@ -113,6 +127,28 @@ pub enum HistoryRow {
         branch: String,
         changed_files: u64,
     },
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct GraphEvidence {
+    pub source: String,
+    pub target: Option<GraphTarget>,
+    pub external: Option<String>,
+    pub relation: String,
+    pub expression: String,
+    pub resolution: String,
+    pub rule: String,
+    pub condition: Option<String>,
+    pub type_only: bool,
+    pub count: u64,
+    pub site: super::results::UseSite,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct GraphTarget {
+    pub name: String,
+    pub file: String,
+    pub path_encoding: Option<PathEncoding>,
 }
 
 pub(crate) fn validate_name(value: &str) -> Result<()> {

@@ -1,0 +1,29 @@
+{
+  "reason": "Keep macro-provided control-flow headers opaque while preserving ordinary clauses and original byte positions.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "            $.case_expr,",
+      "after": "            $.case_expr,\n            $.macro_case_expr,",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "        case_expr: $ => seq(",
+      "after": "        macro_case_expr: $ => seq($.macro_call_expr, $._cr_clauses, 'end'),\n\n        case_expr: $ => seq(",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "        _catch_clauses: $ => sepBy1(';', field(\"catch\", $.catch_clause)),",
+      "after": "        _catch_clauses: $ => sepBy1(';', field(\"catch\", choice($.catch_clause, $.macro_catch_clause))),\n\n        macro_catch_clause: $ => seq($.macro_call_expr, sepBy1(',', field(\"exprs\", $._expr))),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    conflicts: $ => [",
+      "after": "    conflicts: $ => [\n        [$._function_or_macro_clause, $.macro_case_expr, $._macro_body_expr],\n        [$.macro_case_expr, $._macro_body_expr],\n        [$.macro_case_expr, $.macro_catch_clause, $._macro_body_expr],\n        [$.macro_case_expr, $._cr_clause_or_macro],\n        [$._cr_clause_or_macro, $._macro_body_expr],",
+      "occurrences": 1
+    }
+  ]
+}

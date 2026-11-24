@@ -16,7 +16,6 @@ pub(crate) enum PathKind {
     Ruby,
     Zig,
     ErlangInclude,
-    Pascal,
 }
 
 pub(crate) fn normalize(parent: &Path, raw: &str) -> Option<PathBuf> {
@@ -91,7 +90,6 @@ impl Lookup<'_, '_> {
             PathKind::Ruby => (&["rb"], "'ruby'"),
             PathKind::Zig => (&[], "'zig'"),
             PathKind::ErlangInclude => (&[], "'erlang'"),
-            PathKind::Pascal => (&["pas", "pp"], "'pascal'"),
         };
         let extensions = if path.extension().is_none()
             || matches!(

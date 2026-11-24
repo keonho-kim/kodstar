@@ -15,10 +15,13 @@ use tree_sitter::{ParseOptions, Parser};
 mod tests;
 
 pub(crate) struct ParseSession {
+    pub(super) native: Option<crate::infrastructure::clang::Session>,
     parser: Parser,
     pub(super) fact_limit: usize,
     replay: Replay,
     tree: Option<(tree_sitter::Language, blake3::Hash, tree_sitter::Tree)>,
+    pub(crate) fragments: Vec<usize>,
+    pub(crate) partial: Option<crate::domain::source::SourceSpan>,
 }
 
 enum Replay {
@@ -28,6 +31,7 @@ enum Replay {
     Ready,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct ParseSyntax<'a> {
     pub language: Language,
     pub jsx: bool,
@@ -37,17 +41,29 @@ pub(crate) struct ParseSyntax<'a> {
 }
 
 impl ParseSession {
+    pub(crate) fn fact_limit(&self) -> usize {
+        self.fact_limit
+    }
+
+    pub(crate) fn native_report(&self) -> Option<std::sync::Arc<crate::domain::native::Report>> {
+        self.native.as_ref().and_then(|s| s.report())
+    }
     pub(crate) fn new(fact_limit: usize) -> Self {
         Self {
+            native: None,
             parser: Parser::new(),
             // Embedded adapters remove a short synthetic qualifier before applying the final fact budget.
             fact_limit: fact_limit.saturating_add(128),
             replay: Replay::Disabled,
             tree: None,
+            fragments: Vec::new(),
+            partial: None,
         }
     }
 
     pub(crate) fn begin_file(&mut self, replay: bool) {
+        self.fragments.clear();
+        self.partial = None;
         self.tree = None;
         self.replay = if replay {
             Replay::Remember
@@ -65,11 +81,37 @@ impl ParseSession {
     }
 
     pub(crate) fn end_file(&mut self) {
+        if let Some(native) = &mut self.native {
+            native.clear();
+        }
+        self.reset_syntax();
+    }
+
+    pub(super) fn reset_syntax(&mut self) {
         self.tree = None;
         self.replay = Replay::Disabled;
     }
 
+    pub(crate) fn configure_native(
+        &mut self,
+        configuration: crate::infrastructure::clang::Configuration,
+    ) {
+        self.native = Some(crate::infrastructure::clang::Session::new(configuration));
+    }
+
     pub(crate) fn parse_tree(
+        &mut self,
+        grammar: &tree_sitter::Language,
+        path: &Path,
+        source: &[u8],
+        cancel: &Cancellation,
+    ) -> Result<tree_sitter::Tree> {
+        let tree = self.parse_candidate(grammar, path, source, cancel)?;
+        validation::validate(&tree, path, cancel)?;
+        Ok(tree)
+    }
+
+    pub(super) fn parse_candidate(
         &mut self,
         grammar: &tree_sitter::Language,
         path: &Path,
@@ -93,10 +135,14 @@ impl ParseSession {
         }
         // A second AST in the preliminary pass disables retention before parsing it.
         if matches!(self.replay, Replay::Recorded) {
-            self.end_file();
+            self.reset_syntax();
         }
-        std::str::from_utf8(source).map_err(|error| {
-            Error::caused_by(format!("non-UTF-8 source {}", path.display()), error)
+        simdutf8::compat::from_utf8(source).map_err(|error| {
+            Error::input(
+                "source_encoding_error",
+                format!("non-UTF-8 source {}: {error}", path.display()),
+                None,
+            )
         })?;
         self.parser
             .set_language(grammar)
@@ -116,8 +162,7 @@ impl ParseSession {
         cancel.check()?;
         let tree = tree
             .ok_or_else(|| Error::operation(format!("parser did not finish {}", path.display())))?;
-        validation::validate(&tree, path, cancel)?;
-        if matches!(self.replay, Replay::Remember) {
+        if matches!(self.replay, Replay::Remember) && !tree.root_node().has_error() {
             self.tree = Some((
                 grammar.clone(),
                 digest.ok_or_else(|| Error::operation("missing replay digest"))?,

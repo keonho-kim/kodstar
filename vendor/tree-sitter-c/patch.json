@@ -1,0 +1,82 @@
+{
+  "reason": "Calling-convention macro tokens in pointer declarators and standard va_arg type operands are syntax, not expression errors.",
+  "replacements": [
+    {
+      "before": "      optional($.ms_call_modifier),\n      $._declarator,",
+      "after": "      choice(seq(repeat1(alias($.identifier, $.type_qualifier)), $.pointer_declarator), seq(optional($.ms_call_modifier), $._declarator)),",
+      "occurrences": 1
+    },
+    {
+      "before": "      optional($.ms_call_modifier),\n      $._field_declarator,",
+      "after": "      choice(seq(repeat1(alias($.identifier, $.type_qualifier)), alias($.pointer_field_declarator, $.pointer_declarator)), seq(optional($.ms_call_modifier), $._field_declarator)),",
+      "occurrences": 1
+    },
+    {
+      "before": "      optional($.ms_call_modifier),\n      $._type_declarator,",
+      "after": "      choice(seq(repeat1(alias($.identifier, $.type_qualifier)), alias($.pointer_type_declarator, $.pointer_declarator)), seq(optional($.ms_call_modifier), $._type_declarator)),",
+      "occurrences": 1
+    },
+    {
+      "before": "    call_expression: $ => prec(PREC.CALL, seq(\n      field('function', $.expression),\n      field('arguments', $.argument_list),\n    )),",
+      "after": "    call_expression: $ => prec(PREC.CALL, choice(seq(\n      field('function', $.expression),\n      field('arguments', $.argument_list),\n    ), seq(\n      field('function', alias(choice('va_arg', '__builtin_va_arg'), $.identifier)),\n      field('arguments', alias($._type_argument_list, $.argument_list)),\n    ))),\n    _type_argument_list: $ => seq('(', $.expression, ',', $.type_descriptor, ')'),",
+      "occurrences": 1
+    },
+    {
+      "before": "  conflicts: $ => [",
+      "after": "  conflicts: $ => [\n    [$.parenthesized_declarator, $.type_specifier],",
+      "occurrences": 1
+    },
+    {
+      "before": "    _top_level_item: $ => choice(",
+      "after": "    _top_level_item: $ => choice(\n      $.macro_declaration,\n      $.macro_block,",
+      "occurrences": 1
+    },
+    {
+      "before": "    _non_case_statement: $ => choice(",
+      "after": "    _non_case_statement: $ => choice(\n      $.macro_block,\n      $.macro_statement,",
+      "occurrences": 1
+    },
+    {
+      "before": "    translation_unit: $ => repeat($._top_level_item),",
+      "after": "    translation_unit: $ => repeat($._top_level_item),\n    modifier_identifier: _ => /\\x1f[A-Za-z0-9_]+/,\n    macro_identifier: _ => /@[A-Za-z0-9_]+/,\n    macro_declaration: $ => prec.right(2, seq(\n      field('name', alias($.macro_identifier, $.identifier)),\n      optional(field('arguments', alias($.macro_arguments, $.argument_list))),\n    )),\n    macro_block: $ => prec(3, seq(\n      field('function', alias($.macro_identifier, $.identifier)),\n      optional(field('arguments', alias($.macro_arguments, $.argument_list))),\n      field('body', $.compound_statement),\n    )),\n    macro_statement: $ => prec.right(2, seq(field('name', alias($.macro_identifier, $.identifier)), optional(field('arguments', alias($.macro_arguments, $.argument_list))))),\n    macro_arguments: $ => prec(4, seq('(', repeat($._macro_token), ')')),\n    macro_brackets: $ => seq('[', repeat($._macro_token), ']'),\n    macro_braces: $ => seq('{', repeat($._macro_token), '}'),\n    _macro_token: $ => choice($.string_literal, $.char_literal, $.macro_arguments, $.macro_brackets, $.macro_braces, token(prec(1, /[^(){}\\[\\]\"']+/))),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "commaSep($._preproc_expression)",
+      "after": "commaSep(choice($._preproc_expression, $.system_lib_string))",
+      "occurrences": 1
+    },
+    {
+      "before": "    type_qualifier: $ => choice(",
+      "after": "    type_qualifier: $ => choice(\n      alias($.modifier_identifier, $.type_qualifier),",
+      "occurrences": 1
+    },
+    {
+      "before": "    _field_declaration_list_item: $ => choice(",
+      "after": "    _field_declaration_list_item: $ => choice(\n      $.macro_declaration,",
+      "occurrences": 1
+    },
+    {
+      "before": "      field('declarator', $._declarator),\n      field('body', $.compound_statement),",
+      "after": "      field('declarator', $._declarator),\n      field('body', choice($.compound_statement, $.macro_statement)),",
+      "occurrences": 1
+    },
+    {
+      "before": "        $._abstract_declarator,\n      ))),\n      repeat($.attribute_specifier),",
+      "after": "        $._abstract_declarator,\n      ))),\n      repeat(choice($.attribute_specifier, alias($.modifier_identifier, $.type_qualifier))),",
+      "occurrences": 1
+    },
+    {
+      "before": "    preproc_arg: _ => token(prec(-1, /\\S([^/\\n]|\\/[^*]|\\\\\\r?\\n)*/)),",
+      "after": "    preproc_arg: _ => token(prec(-1, /\\S([^/\\n]|\\/[^*]|\\/\\*([^*]|\\*+[^*/])*\\*+\\/|\\\\\\r?\\n)*/)),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    expression: $ => choice(\n      $._expression_not_binary,",
+      "after": "    availability_expression: $ => seq(\n      \"__builtin_available\", \"(\",\n      commaSep1(choice(seq($.availability_platform, $.availability_version), \"*\")), \")\",\n    ),\n    availability_platform: _ => /[A-Za-z_][A-Za-z_0-9]*/,\n    availability_version: _ => /[0-9]+(\\.[0-9]+)*/,\n\n    expression: $ => choice(\n      $.availability_expression,\n      $._expression_not_binary,",
+      "occurrences": 1
+    }
+  ]
+}

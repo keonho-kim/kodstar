@@ -1,4 +1,4 @@
-// Purpose: 이력 명령의 공통 실행기 연결과 분석 독립 준비 정책.
+// Purpose: 이력 명령의 공통 실행기 연결과 자체 자원 준비 경계.
 // Pattern: Command Handler.
 // Usage: Engine::history가 공유 validate·cancel 경계를 사용.
 // Related: crates/kodstar-core/src/application/history/mod.rs.

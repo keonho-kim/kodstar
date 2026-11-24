@@ -57,6 +57,17 @@ pub(in crate::infrastructure::formats::components) fn extract(
             },
         )?;
     }
+    if memchr::memmem::find(source, b"hx-").is_some() {
+        regions::exclude_tags(source, &mut mask, cancel)?;
+        crate::infrastructure::formats::components::references::template_references(
+            Language::Ejs,
+            source,
+            Language::JavaScript,
+            &mask,
+            cancel,
+            emit,
+        )?;
+    }
     if crate::infrastructure::formats::components::regions::find_ascii_case(source, 0, b"<script")
         .is_none()
     {
@@ -110,7 +121,8 @@ pub(in crate::infrastructure::formats::components) fn extract(
             }),
         )?;
         let offset = maximum;
-        parser.extract_with_syntax(
+        let earlier = parser.partial.take();
+        let result = parser.extract_with_syntax(
             ParseSyntax {
                 language: script.language,
                 jsx: script.jsx,
@@ -128,13 +140,21 @@ pub(in crate::infrastructure::formats::components) fn extract(
             },
         ).map_err(|error| {
             let kind = error.kind;
+            let mut input = error.input.clone();
+            if let Some(issue) = &mut input { issue.line = issue.line.map(|line| origin.line + line.saturating_sub(1)); }
             let mut wrapped = Error::caused_by(format!(
                 "client script starting at {}:{}:{} (parser positions relative to this body)",
                 path.display(), origin.line, origin.column
             ), error);
             wrapped.kind = kind;
+            wrapped.input = input;
             wrapped
-        })?;
+        });
+        parser.remap_partial(earlier, |mut span| {
+            script_facts::position(&mut span, origin);
+            span
+        });
+        result?;
     }
     Ok(())
 }

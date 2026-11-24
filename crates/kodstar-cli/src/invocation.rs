@@ -147,10 +147,18 @@ fn query(name: &str, args: &ArgMatches) -> Result<Query> {
         });
     }
     if name == "search" {
+        if flag(args, "ranked") {
+            return Ok(Query::RankedSearch {
+                text: required(args, "name")?,
+            });
+        }
         return Ok(Query::Search {
             name: required(args, "name")?,
             prefix: flag(args, "prefix"),
         });
+    }
+    if name == "overview" {
+        return Ok(Query::Overview);
     }
     let file: PathBuf = required(args, "file")?;
     match name {
@@ -183,7 +191,11 @@ fn query_options(args: &ArgMatches) -> QueryOptions {
     QueryOptions {
         revision: value(args, "rev"),
         refresh: refresh(args),
-        direction: value::<Direction>(args, "direction"),
+        direction: if flag(args, "undirected") {
+            Some(Direction::Undirected)
+        } else {
+            value::<Direction>(args, "direction")
+        },
         relations: args
             .try_get_many::<RelationKind>("relation")
             .ok()

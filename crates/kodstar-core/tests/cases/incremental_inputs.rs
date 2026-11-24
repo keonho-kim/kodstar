@@ -86,23 +86,14 @@ fn snapshot_normalization_preserves_lookup_meaning_across_file_id_allocation() -
         UPDATE scopes SET file_id=file_id+1000;
         UPDATE bindings SET file_id=file_id+1000;
         UPDATE facts SET file_id=file_id+1000;
-        UPDATE lookup_blocks SET file_id=file_id+1000;
+        UPDATE lookup_pages SET file_id=file_id+1000;
         UPDATE relation_blocks SET file_id=file_id+1000;
         UPDATE diagnostics SET file_id=file_id+1000;
         COMMIT;",
     )?;
     packed_mutations::remap_scopes(&database)?;
     assert_eq!(before, normalized_index(&first)?);
-    let (key, file, part, mut payload): (i64, i64, i64, Vec<u8>) = database.query_row(
-        "SELECT key_id,file_id,part,payload FROM lookup_blocks LIMIT 1",
-        [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-    )?;
-    payload[0] ^= 1;
-    database.execute(
-        "UPDATE lookup_blocks SET payload=?4 WHERE key_id=?1 AND file_id=?2 AND part=?3",
-        rusqlite::params![key, file, part, payload],
-    )?;
+    postings::lookup_pages::change_first(&database, None)?;
     assert_ne!(before, normalized_index(&first)?);
     Ok(())
 }
@@ -117,7 +108,7 @@ fn doctor_checks_fact_ownership_inside_compressed_lookup_blocks() -> TestResult 
     postings::register(&database)?;
     // A valid integer block referring to an absent fact bypasses ordinary SQLite foreign keys.
     let payload = [254u8, 255, 255, 255, 255, 255, 255, 255, 255, 1];
-    database.execute("UPDATE lookup_blocks SET count=1,payload=?1 WHERE (key_id,file_id,part)=(SELECT key_id,file_id,part FROM lookup_blocks LIMIT 1)",[payload.as_slice()])?;
+    postings::lookup_pages::change_first(&database, Some(&payload))?;
     let error = p
         .engine
         .status(

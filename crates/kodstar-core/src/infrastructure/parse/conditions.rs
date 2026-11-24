@@ -10,6 +10,9 @@ use tree_sitter::Node;
 
 impl Extractor<'_> {
     pub(super) fn native_condition(&self, node: Node<'_>) -> Result<Option<String>> {
+        if let Some(projection) = self.projection {
+            return projection.condition(node, self.fact_limit);
+        }
         if self.language == Language::Go {
             for line in std::str::from_utf8(self.source).unwrap_or("").lines() {
                 let line = line.trim();

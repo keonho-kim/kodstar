@@ -4,7 +4,6 @@
 // Related: crates/kodstar-cli/src/main.rs, crates/kodstar-cli/tests/support/mod.rs.
 
 mod support;
-use std::process::Command;
 use support::{Project, TestResult};
 
 const COMMANDS: &[&[&str]] = &[
@@ -16,6 +15,7 @@ const COMMANDS: &[&[&str]] = &[
     &["symbols"],
     &["list"],
     &["search"],
+    &["overview"],
     &["related"],
     &["deps"],
     &["refs"],
@@ -56,6 +56,20 @@ fn every_command_has_short_and_detailed_help_without_creating_state() -> TestRes
             assert!(stdout.contains("Usage: kodstar"), "{args:?}");
             assert!(!stdout.starts_with("Usage:"), "missing summary: {args:?}");
             assert_eq!(stdout.contains("Examples:"), flag == "--help", "{args:?}");
+            if flag == "--help" {
+                let snapshot = match *command {
+                    [] => Some("help_root"),
+                    ["init"] => Some("help_init"),
+                    ["related"] => Some("help_related"),
+                    _ => None,
+                };
+                if let Some(name) = snapshot {
+                    insta::assert_snapshot!(name, stdout);
+                }
+            }
+            if command.is_empty() {
+                assert!(stdout.contains("--version"), "{args:?}");
+            }
         }
     }
     assert!(std::fs::read_dir(&project.home)?.next().is_none());
@@ -68,27 +82,10 @@ fn every_command_has_short_and_detailed_help_without_creating_state() -> TestRes
 }
 
 #[test]
-fn help_succeeds_on_stdout() -> Result<(), Box<dyn std::error::Error>> {
-    for flag in ["--help", "-h"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_kodstar"))
-            .arg(flag)
-            .output()?;
-
-        assert!(output.status.success());
-        assert!(output.stderr.is_empty());
-        let stdout = String::from_utf8(output.stdout)?;
-        assert!(stdout.contains("Usage: kodstar"));
-        assert!(stdout.contains("--version"));
-    }
-    Ok(())
-}
-
-#[test]
-fn version_reports_cli_and_engine_versions() -> Result<(), Box<dyn std::error::Error>> {
+fn version_reports_cli_and_engine_versions() -> TestResult {
+    let project = Project::new()?;
     for flag in ["--version", "-V"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_kodstar"))
-            .arg(flag)
-            .output()?;
+        let output = project.run(&[flag])?;
 
         assert!(output.status.success());
         assert!(output.stderr.is_empty());
@@ -105,25 +102,43 @@ fn version_reports_cli_and_engine_versions() -> Result<(), Box<dyn std::error::E
 }
 
 #[test]
-fn invalid_arguments_fail_on_stderr() -> Result<(), Box<dyn std::error::Error>> {
-    for argument in ["--unknown", "unknown-command"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_kodstar"))
-            .arg(argument)
-            .output()?;
-
-        assert_eq!(output.status.code(), Some(2));
-        assert!(output.stdout.is_empty());
-        assert!(!output.stderr.is_empty());
+fn bundled_license_notices_are_available_without_initializing_a_project() -> TestResult {
+    let project = Project::new()?;
+    let cases: &[&[&str]] = &[&["--licenses"], &["--verbose", "false", "--licenses"]];
+    for arguments in cases {
+        let output = project.run(arguments)?;
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout)?;
+        assert!(text.contains("LLVM 23.1.4") && text.contains("html-escape 0.3.0"));
+        let mut expected = b"Third-party notices\n\n".to_vec();
+        expected.extend_from_slice(include_bytes!("../../../LICENSES/third-party-notices.txt"));
+        expected.extend(zstd::stream::decode_all(
+            kodstar_clang::HEADER_NOTICES_ZSTD,
+        )?);
+        assert_eq!(text.as_bytes(), expected);
     }
+    assert!(!project.root.join(".kodstar").exists());
     Ok(())
 }
 
 #[test]
-fn missing_command_displays_usage_and_fails() -> Result<(), Box<dyn std::error::Error>> {
-    let output = Command::new(env!("CARGO_BIN_EXE_kodstar")).output()?;
-
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    assert!(String::from_utf8(output.stderr)?.contains("Usage: kodstar"));
+fn invalid_or_missing_arguments_fail_on_stderr() -> TestResult {
+    let project = Project::new()?;
+    let cases: &[&[&str]] = &[
+        &["--unknown"],
+        &["unknown-command"],
+        &[],
+        &["--licenses", "init"],
+    ];
+    for arguments in cases {
+        let output = project.run(arguments)?;
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(output.stdout.is_empty(), "{arguments:?}");
+        assert!(!output.stderr.is_empty(), "{arguments:?}");
+        if arguments.is_empty() {
+            assert!(String::from_utf8(output.stderr)?.contains("Usage: kodstar"));
+        }
+    }
     Ok(())
 }

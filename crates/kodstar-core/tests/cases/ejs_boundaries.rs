@@ -175,19 +175,15 @@ fn runtime_generated_client_identifiers_do_not_publish_fabricated_names() -> Tes
         "Main.ejs",
         "<script>function generated<%= suffix %>(){}</script>",
     )?;
-    assert!(p.build(false).is_err());
+    assert_eq!(p.build(false)?.coverage.failed_files, 1);
     let rows = p.query(Query::Symbols {
         file: "Main.ejs".into(),
     })?;
     assert_eq!(
         rows.metadata.as_ref().ok_or("metadata")?.generation,
-        Some(before.generation)
+        Some(before.generation + 1)
     );
-    assert!(
-        rows.rows
-            .iter()
-            .any(|r| matches!(r,QueryRow::Symbol(s)if s.name=="stable"))
-    );
+    assert!(rows.rows.is_empty());
     Ok(())
 }
 

@@ -95,7 +95,7 @@ pub(crate) fn remove_targets(c: &Connection, file: Option<i64>) -> Result<()> {
         SELECT r.block FROM relation_removed_targets t CROSS JOIN relation_routes r ON r.kind=3 AND r.entity=t.id;")?;
     let mut after = 0;
     let mut writer = Writer::new(c)?;
-    let mut targets = c.prepare("SELECT json_extract(r.value,'$[1]') FROM relation_blocks b,json_each(kodstar_relation_pairs(b.routes)) r JOIN relation_removed_targets t ON t.id=json_extract(r.value,'$[1]') WHERE b.id=?1 AND json_extract(r.value,'$[0]')=3")?;
+    let mut targets = c.prepare("SELECT r.second FROM relation_blocks b,kodstar_relation_pair_rows(b.routes,0) r JOIN relation_removed_targets t ON t.id=r.second WHERE b.id=?1 AND r.first=3")?;
     loop {
         let block: Option<i64> = c
             .query_row(

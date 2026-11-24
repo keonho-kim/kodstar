@@ -15,6 +15,9 @@ pub(super) const MANAGED_FILES: &[&str] = &[
     "past.sqlite",
     "past.sqlite-wal",
     "past.sqlite-shm",
+    "graph-diff.sqlite",
+    "graph-diff.sqlite-wal",
+    "graph-diff.sqlite-shm",
     "writer.lock",
     "lease.lock",
 ];

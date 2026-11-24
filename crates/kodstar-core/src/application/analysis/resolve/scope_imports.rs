@@ -24,8 +24,6 @@ impl Lookup<'_, '_> {
                 let mut present = false;
                 for module in defaults {
                     let module = module?;
-                    self.connection
-                        .cached_execute("DELETE FROM resolution_modules WHERE depth=64", [])?;
                     self.module_files(context, scope, &module, 64)?;
                     let matches:bool=self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM files f JOIN resolution_modules m ON m.id=f.id WHERE m.depth=64 AND f.declared_module=?1)",[name],|r|r.get(0))?;
                     if matches {
@@ -92,8 +90,6 @@ impl Lookup<'_, '_> {
         module: &str,
         name: &str,
     ) -> Result<bool> {
-        self.connection
-            .cached_execute("DELETE FROM resolution_modules WHERE depth=64", [])?;
         self.module_files(context, 0, module, 64)?;
         Ok(self.connection.cached_row("SELECT NOT EXISTS(SELECT 1 FROM resolution_modules WHERE depth=64) OR EXISTS(SELECT 1 FROM files f JOIN resolution_modules m ON m.id=f.id WHERE m.depth=64 AND f.declared_module=?1)",[name],|r|r.get(0))?)
     }

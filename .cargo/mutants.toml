@@ -1,0 +1,10 @@
+# Purpose: Check the integer codec's rejection and encoding contracts with mutations.
+# Pattern: Mutation Test Policy.
+# Usage: cargo mutants --output <temporary-directory>.
+# Related: crates/kodstar-core/src/infrastructure/index/packed/codec.rs.
+
+examine_globs = ["crates/kodstar-core/src/infrastructure/index/packed/codec.rs"]
+exclude_re = ["replace invalid ->"]
+additional_cargo_test_args = ["--lib", "infrastructure::index::packed::codec::tests"]
+timeout_multiplier = 3.0
+minimum_test_timeout = 10.0

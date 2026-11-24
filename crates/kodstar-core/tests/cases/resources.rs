@@ -98,7 +98,12 @@ fn panicking_progress_rolls_back_and_joins_owned_workers() -> TestResult {
             &project.options(),
             InitOptions::default(),
             &Cancellation::default(),
-            &mut |_| -> Result<()> { panic!("consumer progress failure") },
+            &mut |event| -> Result<()> {
+                if event.phase == "parse" && event.completed_files > 0 {
+                    panic!("consumer progress failure")
+                }
+                Ok(())
+            },
         )
     }));
     assert!(outcome.is_err());

@@ -23,9 +23,6 @@ impl Extractor<'_> {
         if self.ruby_binding(node, context)? {
             return Ok(());
         }
-        if self.pascal_binding(node, context)? {
-            return Ok(());
-        }
         if self.kotlin_binding(node, context)? {
             return Ok(());
         }

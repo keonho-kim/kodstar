@@ -14,15 +14,26 @@ pub(super) fn run<'conn>(
     connection: &Connection<'conn>,
     cancel: &Cancellation,
     prepared: &crate::application::analysis::resolve::prepared::Prepared<'conn>,
+    added: bool,
 ) -> Result<()> {
+    let subset = if added {
+        " AND symbols.id IN (SELECT id FROM append_symbols)"
+    } else {
+        ""
+    };
     // Owners are derived state: remove stale cross-file owners before resolving changed imports.
-    connection.cached_execute("UPDATE symbols SET owner_id=(SELECT id FROM symbols f WHERE f.file_id=symbols.file_id AND f.local_id=0) WHERE EXISTS(SELECT 1 FROM bindings b WHERE b.kind='owner_hint' AND b.file_id=symbols.file_id AND b.target_local=symbols.local_id)", [])?;
-    connection.cached_execute("UPDATE symbols SET resolved_kind=NULLIF('function',syntax_kind) WHERE language='cpp' AND EXISTS(SELECT 1 FROM bindings b WHERE b.kind='owner_hint' AND b.file_id=symbols.file_id AND b.target_local=symbols.local_id)",[])?;
-    let mut hints = connection.cached_prepare(
+    connection.cached_execute(&format!("UPDATE symbols SET owner_id=(SELECT id FROM symbols f WHERE f.file_id=symbols.file_id AND f.local_id=0) WHERE EXISTS(SELECT 1 FROM bindings b WHERE b.kind='owner_hint' AND b.file_id=symbols.file_id AND b.target_local=symbols.local_id){subset}"), [])?;
+    connection.cached_execute(&format!("UPDATE symbols SET resolved_kind=NULLIF('function',syntax_kind) WHERE language='cpp' AND EXISTS(SELECT 1 FROM bindings b WHERE b.kind='owner_hint' AND b.file_id=symbols.file_id AND b.target_local=symbols.local_id){subset}"),[])?;
+    let hints_subset = if added {
+        " AND m.id IN (SELECT id FROM append_symbols)"
+    } else {
+        ""
+    };
+    let mut hints = connection.cached_prepare(&format!(
         "SELECT b.file_id,b.scope_id,b.imported_name,m.id,b.start_byte
          FROM bindings b JOIN symbols m ON m.file_id=b.file_id AND m.local_id=b.target_local
-         WHERE b.kind='owner_hint' ORDER BY b.id",
-    )?;
+         WHERE b.kind='owner_hint'{hints_subset} ORDER BY b.id"
+    ))?;
     let mut hints = hints.query([])?;
     while let Some(hint) = hints.next()? {
         cancel.check()?;
@@ -39,6 +50,7 @@ pub(super) fn run<'conn>(
         let mut lookup = Lookup {
             connection,
             fact: None,
+            source: None,
             relation: "uses_type",
             external_scope_id: 0,
             scope_sequence: 0,
@@ -80,7 +92,7 @@ pub(super) fn run<'conn>(
                 connection.cached_execute("UPDATE bindings SET type_name=(SELECT qualified_name FROM symbols WHERE id=?1) WHERE file_id=?2 AND scope_id=(SELECT local_id FROM symbols WHERE id=?3) AND name='this' AND kind='parameter'",params![owner,file,method])?;
             }
         }
-        if matches!(context.language, Language::Ruby | Language::Pascal)
+        if context.language == Language::Ruby
             && let Some(owner) = owner
         {
             connection.cached_execute("UPDATE symbols SET resolved_kind=NULLIF(CASE WHEN syntax_kind='constructor' THEN 'constructor' ELSE 'method' END,syntax_kind),resolved_qualified_name=NULLIF((SELECT qualified_name FROM symbols WHERE id=?1)||'::'||name,syntax_qualified_name) WHERE id=?2",params![owner,method])?;

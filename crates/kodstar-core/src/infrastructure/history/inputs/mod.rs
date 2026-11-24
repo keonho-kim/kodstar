@@ -4,6 +4,7 @@
 // Related: crates/kodstar-core/src/infrastructure/history/inputs/entry.rs.
 
 mod entry;
+pub(crate) use super::content::chunk_read::ReadWorkspace;
 use crate::domain::{
     cancellation::Cancellation,
     diagnostics::{Error, Result},
@@ -32,11 +33,11 @@ pub(crate) fn walk(
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| Error::caused_by("compile snapshot exclusions", e))?;
     let source = if changed_only {
-        "snapshot_changes delta CROSS JOIN snapshot_files f ON f.path=delta.path"
+        "snapshot_files f JOIN (SELECT path FROM snapshot_changes UNION SELECT path FROM analysis_extra_inputs) delta ON f.path=delta.path"
     } else {
         "snapshot_files f"
     };
-    let mut statement = connection.prepare(&format!("SELECT f.path,f.blob,b.size,lower(hex(b.hash)) FROM {source} JOIN blobs b ON b.id=f.blob WHERE f.kind='file' ORDER BY f.path"))?;
+    let mut statement = connection.prepare(&format!("SELECT f.path,f.blob,b.size,b.hash FROM {source} JOIN blobs b ON b.id=f.blob WHERE f.kind='file' ORDER BY f.path"))?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         cancel.check()?;
@@ -74,17 +75,17 @@ pub(crate) fn walk(
 
 pub(crate) struct Reader<'conn> {
     connection: &'conn Rc<rusqlite::Connection>,
-    statement: rusqlite::Statement<'conn>,
+    statement: rusqlite::CachedStatement<'conn>,
 }
 
 impl<'conn> Reader<'conn> {
     pub(crate) fn new(connection: &'conn Rc<rusqlite::Connection>) -> Result<Self> {
-        Ok(Self { connection, statement: connection.prepare("SELECT f.blob,b.size,lower(hex(b.hash)) FROM snapshot_files f JOIN blobs b ON b.id=f.blob WHERE f.path=?1 AND f.kind='file'")? })
+        Ok(Self { connection, statement: connection.prepare_cached("SELECT f.blob,b.size,b.hash FROM snapshot_files f JOIN blobs b ON b.id=f.blob WHERE f.path=?1 AND f.kind='file'")? })
     }
 
     pub(crate) fn get(&mut self, path: &Path) -> Result<Entry> {
         super::paths::relative(path)?;
-        let row: Option<(i64, u64, String)> = self
+        let row: Option<(i64, u64, [u8; 32])> = self
             .statement
             .query_row([path_bytes(path)], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))

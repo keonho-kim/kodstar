@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 use super::diagnostics::{Error, Result};
 
-pub const RELATION_REGISTRY_VERSION: u32 = 2;
+pub const RELATION_REGISTRY_VERSION: u32 = 3;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -33,10 +33,13 @@ pub enum RelationKind {
     TemplateExtends,
     DependsOn,
     EventHandler,
+    HttpRequest,
+    Handles,
+    Renders,
 }
 
 impl RelationKind {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 21] = [
         Self::Calls,
         Self::IndirectCall,
         Self::References,
@@ -55,6 +58,9 @@ impl RelationKind {
         Self::TemplateExtends,
         Self::DependsOn,
         Self::EventHandler,
+        Self::HttpRequest,
+        Self::Handles,
+        Self::Renders,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -77,6 +83,9 @@ impl RelationKind {
             Self::TemplateExtends => "template_extends",
             Self::DependsOn => "depends_on",
             Self::EventHandler => "event_handler",
+            Self::HttpRequest => "http_request",
+            Self::Handles => "handles",
+            Self::Renders => "renders",
         }
     }
 
@@ -108,6 +117,8 @@ pub enum Direction {
     Out,
     #[default]
     Both,
+    /// Follow incoming and outgoing edges at each step of a Path query.
+    Undirected,
 }
 
 impl FromStr for Direction {
@@ -118,6 +129,7 @@ impl FromStr for Direction {
             "in" => Ok(Self::In),
             "out" => Ok(Self::Out),
             "both" => Ok(Self::Both),
+            "undirected" => Ok(Self::Undirected),
             _ => Err(Error::argument(format!("unknown direction: {value}"))),
         }
     }

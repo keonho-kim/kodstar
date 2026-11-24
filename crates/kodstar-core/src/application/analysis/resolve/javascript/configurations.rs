@@ -38,7 +38,7 @@ impl Lookup<'_, '_> {
                 "jsconfig.json",
                 "jsconfig.jsonc",
             ] {
-                selected=self.connection.cached_row("SELECT f.id FROM files f WHERE f.path=?1 AND f.status='auxiliary' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='configuration')",[path_bytes(&directory.join(name))],|r|r.get(0)).optional()?;
+                selected=self.connection.cached_row("SELECT f.id FROM files f WHERE f.path=?1 AND (f.status='skipped' OR (f.status='auxiliary' AND EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='configuration')))",[path_bytes(&directory.join(name))],|r|r.get(0)).optional()?;
                 if selected.is_some() {
                     break;
                 }
@@ -65,6 +65,10 @@ impl Lookup<'_, '_> {
             params![root, id],
         )? == 0
         {
+            return Ok(());
+        }
+        let unavailable: bool = self.connection.cached_row("SELECT status='skipped' OR EXISTS(SELECT 1 FROM diagnostics d WHERE d.file_id=?1 AND d.code IN ('configuration_incomplete','external_configuration')) FROM files WHERE id=?1", [id], |r|r.get(0))?;
+        if unavailable {
             return Ok(());
         }
         if depth >= 32 {

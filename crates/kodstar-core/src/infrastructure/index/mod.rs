@@ -5,6 +5,8 @@
 
 //! SQLite resource ownership. Writers publish facts and relationships in one transaction.
 
+pub(crate) mod adjacency;
+pub(crate) mod append_reuse;
 pub(crate) mod atoms;
 pub(crate) mod body_reuse;
 pub(crate) mod cached;
@@ -14,11 +16,14 @@ pub(crate) mod dictionary;
 mod display_path;
 mod fact_statements;
 mod facts;
+pub(crate) mod failures;
 pub(crate) mod inert_inputs;
 pub(crate) mod invalidation;
 mod lisp_metadata;
+pub(crate) mod native;
 mod packed;
 mod previous;
+pub(crate) mod ranked_terms;
 mod reader;
 mod records;
 pub(crate) mod relations;
@@ -39,13 +44,13 @@ use crate::infrastructure::cache::paths::{encoding, path_bytes, path_from_bytes}
 
 pub(crate) use facts::{FactWriter, FileFacts};
 pub(crate) use previous::PreviousFiles;
-pub(crate) use reader::{SymbolReader, symbol};
+pub(crate) use reader::{BATCH_IDS, SymbolReader, symbol};
 pub(crate) use runtime::{limit_reads, observe_cancellation, stop_observing};
 pub(crate) use statistics::Update as CoverageUpdate;
 pub(crate) use write::{FileRecord, clear_file};
 
-pub(crate) const STORAGE_VERSION: u32 = 16;
-pub(crate) const EXTRACTION_VERSION: u32 = 47;
+pub(crate) const STORAGE_VERSION: u32 = 19;
+pub(crate) const EXTRACTION_VERSION: u32 = 61;
 pub(crate) fn require_history(
     connection: &Connection,
     repository: &str,
@@ -148,6 +153,7 @@ fn open_mode(
         transaction.execute_batch(dictionary::SCHEMA)?;
         transaction.execute_batch(include_str!("schema.sql"))?;
         records::create(&transaction)?;
+        transaction.execute_batch(ranked_terms::SCHEMA)?;
         transaction.execute_batch(include_str!("dependencies/schema.sql"))?;
         transaction.execute_batch(relations::SCHEMA)?;
         transaction.execute("INSERT INTO metadata(singleton,root,engine_version,extraction_version,relation_registry_version) VALUES(1,?1,?2,?3,?4)",
@@ -174,8 +180,14 @@ fn open_mode(
         connection.pragma_update(None, "synchronous", "FULL")?;
         connection.execute_batch(
             "CREATE TEMP TABLE dictionary_retirements(id INTEGER PRIMARY KEY);
-            CREATE TEMP TRIGGER dictionary_retire_lookup BEFORE DELETE ON main.lookup_rows BEGIN
-            INSERT OR IGNORE INTO dictionary_retirements VALUES(OLD.key_id); END;",
+            CREATE TEMP TRIGGER dictionary_retire_lookup BEFORE DELETE ON main.lookup_pages BEGIN
+                INSERT OR IGNORE INTO dictionary_retirements SELECT first FROM kodstar_lookup_page_keys(OLD.payload,OLD.group_id*128+OLD.count-1);
+            END;
+            CREATE TEMP TRIGGER dictionary_retire_lookup_update BEFORE UPDATE OF payload ON main.lookup_pages WHEN OLD.payload<>NEW.payload BEGIN
+                INSERT OR IGNORE INTO dictionary_retirements
+                    SELECT first FROM kodstar_lookup_page_keys(OLD.payload,OLD.group_id*128+OLD.count-1)
+                    EXCEPT SELECT first FROM kodstar_lookup_page_keys(NEW.payload,NEW.group_id*128+NEW.count-1);
+            END;",
         )?;
     }
     Ok(connection)

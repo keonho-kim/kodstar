@@ -63,12 +63,6 @@ fn explicit_inheritance_lists_are_not_lost_in_grammar_wrappers() -> TestResult {
             "Derived",
             "Base",
         ),
-        (
-            "main.pas",
-            "unit Main; interface type TBase = class end; TDerived = class(TBase) end; implementation end.",
-            "TDerived",
-            "TBase",
-        ),
     ] {
         let project = Project::new()?;
         project.write(file, source)?;

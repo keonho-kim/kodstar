@@ -28,17 +28,14 @@ pub(crate) fn register(c: &Connection) -> Result<()> {
     c.create_scalar_function("kodstar_route_at", 2, flags, |ctx| {
         codec::at(ctx.get_raw(0).as_blob()?, ctx.get(1)?)
     })?;
-    c.create_scalar_function("kodstar_routes", 1, flags, |ctx| {
-        let page = codec::decode(ctx.get_raw(0).as_blob()?)?;
-        let rows = page
-            .iter()
+    super::super::packed::expansion::register(c, c"kodstar_dictionary_route_rows", |bytes, _| {
+        Ok(codec::decode(bytes)?
+            .into_iter()
             .enumerate()
-            .filter(|(_, n)| **n > 0)
-            .map(|(i, n)| (i, *n))
-            .collect::<Vec<_>>();
-        serde_json::to_string(&rows).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
-    })?;
-    Ok(())
+            .filter(|(_, block)| *block > 0)
+            .map(|(slot, block)| [slot as i64, block])
+            .collect())
+    })
 }
 
 pub(super) fn find(c: &Connection, id: i64) -> Result<Option<i64>> {
@@ -99,7 +96,7 @@ pub(super) fn update(c: &Connection, block: i64, old: &[i64], new: &[i64]) -> Re
 }
 
 pub(crate) fn collect(c: &Connection) -> Result<()> {
-    let invalid:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM dictionary_dirty_routes d JOIN dictionary_routes p ON p.id=d.id CROSS JOIN lookup_rows l ON l.key_id BETWEEN p.id*128+1 AND min(p.id*128+128,9223372036854775807) LEFT JOIN dictionary_blocks b ON b.id=kodstar_route_at(p.payload,(l.key_id-1)%128) WHERE b.id IS NULL)",[],|r|r.get(0))?;
+    let invalid:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM dictionary_dirty_routes d JOIN dictionary_routes p ON p.id=d.id CROSS JOIN lookup_rows l ON l.route_group=p.id LEFT JOIN dictionary_blocks b ON b.id=kodstar_route_at(p.payload,(l.key_id-1)%128) WHERE b.id IS NULL)",[],|r|r.get(0))?;
     if invalid {
         return Err(rusqlite::Error::ModuleError(
             "live lookup lost its dictionary route".into(),

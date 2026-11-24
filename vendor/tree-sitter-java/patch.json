@@ -1,0 +1,11 @@
+{
+  "reason": "Preserve current valid source forms using pinned official grammar inputs and reproducible generation.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "      $._unannotated_type,\n      '...',",
+      "after": "      $._unannotated_type,\n      repeat($._annotation),\n      '...',",
+      "occurrences": 1
+    }
+  ]
+}

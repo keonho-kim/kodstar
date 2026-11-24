@@ -117,13 +117,14 @@ fn every_selected_language_extracts_real_definitions_and_calls() -> TestResult {
             "target",
             "caller",
         ),
-        (
-            "sample.pas",
-            "program Sample;\nprocedure target; begin end;\nprocedure caller; begin target(); end;\nbegin end.\n",
-            "target",
-            "caller",
-        ),
     ];
+    assert_eq!(
+        cases.len(),
+        Language::ALL
+            .iter()
+            .filter(|language| !language.is_component())
+            .count()
+    );
     for (file, source, target, caller) in cases {
         let project = Project::new()?;
         project.write(file, source)?;

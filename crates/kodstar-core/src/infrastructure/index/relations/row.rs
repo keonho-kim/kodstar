@@ -10,7 +10,7 @@ use rusqlite::{
     types::{Value, ValueRef},
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Relation {
     pub id: i64,
     pub fact: i64,

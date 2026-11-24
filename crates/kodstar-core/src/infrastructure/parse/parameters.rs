@@ -81,7 +81,6 @@ impl Extractor<'_> {
         if let Some(type_name) = &context.type_name {
             let names: &[&str] = match self.language {
                 Language::Python | Language::Rust | Language::Ruby | Language::Swift => &["self"],
-                Language::Pascal => &["Self"],
                 Language::JavaScript
                 | Language::TypeScript
                 | Language::Java
@@ -124,9 +123,6 @@ impl Extractor<'_> {
                     span: span(node),
                 }))?;
             }
-        }
-        if self.language == Language::Pascal {
-            return self.pascal_parameters(node, context);
         }
         if self.language == Language::Scala {
             return self.scala_parameters(node, context);

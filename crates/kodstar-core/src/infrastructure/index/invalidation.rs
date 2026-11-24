@@ -55,7 +55,7 @@ pub(crate) fn only_go(connection: &Connection) -> Result<bool> {
     )?)
 }
 
-pub(crate) fn capture(connection: &Connection, record: &FileRecord) -> Result<()> {
+fn capture_keys(connection: &Connection, record: &FileRecord) -> Result<()> {
     if record.language == "go" {
         let prefix = format!("{}:{}:", record.package, record.module);
         // Record the provider selected by go.work/replace, including empty package lookups.
@@ -70,18 +70,28 @@ pub(crate) fn capture(connection: &Connection, record: &FileRecord) -> Result<()
     } else {
         static_modules::capture(connection, record)?;
     }
+    let key = blake3::hash(&path_bytes(&record.path)).to_hex().to_string();
+    connection.execute(
+        "INSERT OR IGNORE INTO pending_lookup_keys
+        SELECT id FROM lookup_keys k WHERE k.kind='file' AND k.lookup_key=?1",
+        [&key],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn capture_imports(connection: &Connection, record: &FileRecord) -> Result<()> {
+    capture_keys(connection, record)?;
+    super::dependencies::affect_imports(connection)
+}
+
+pub(crate) fn capture(connection: &Connection, record: &FileRecord) -> Result<()> {
+    capture_keys(connection, record)?;
     connection.execute(
         "INSERT OR IGNORE INTO affected_facts
         SELECT r.fact_id FROM relationships r
         JOIN symbols target ON target.id=r.target_id JOIN files f ON f.id=target.file_id
         WHERE f.path=?1",
         [path_bytes(&record.path)],
-    )?;
-    let key = blake3::hash(&path_bytes(&record.path)).to_hex().to_string();
-    connection.execute(
-        "INSERT OR IGNORE INTO pending_lookup_keys
-        SELECT id FROM lookup_keys k WHERE k.kind='file' AND k.lookup_key=?1",
-        [&key],
     )?;
     super::dependencies::affect(connection)?;
     include_dispatch(connection)?;
@@ -91,7 +101,7 @@ pub(crate) fn capture(connection: &Connection, record: &FileRecord) -> Result<()
 
 pub(crate) fn capture_deleted(connection: &Connection) -> Result<bool> {
     let mut statement = connection.prepare(
-        "SELECT id,path,language,module,package,lower(hex(content_hash)),size,status FROM files
+        "SELECT id,path,language,module,package,content_hash,size,status FROM files
         WHERE id IN (SELECT id FROM deleted_files)",
     )?;
     let mut rows = statement.query([])?;
@@ -136,6 +146,7 @@ pub(crate) fn prepare_partial(connection: &Connection) -> Result<()> {
         INSERT OR IGNORE INTO dependent_files SELECT file_id FROM facts WHERE id IN (SELECT id FROM affected_facts);
         INSERT OR IGNORE INTO dependent_files SELECT id FROM body_files;")?;
     include_dispatch(connection)?;
+    super::statistics::delta::remember_selected(connection)?;
     super::relations::partial(connection)?;
     super::dependencies::prepare_selected(connection)?;
     connection.execute_batch(

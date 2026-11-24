@@ -55,10 +55,10 @@ fn net_reverts_skip_extraction_from_the_last_analyzed_checkpoint() -> TestResult
 }
 
 #[test]
-fn failed_analysis_does_not_advance_the_delta_baseline() -> TestResult {
+fn partial_analysis_and_unanalysed_checkpoints_keep_a_consistent_delta_baseline() -> TestResult {
     let p = fixture()?;
     p.write("file0.go", "package api\nfunc broken( {\n")?;
-    assert!(refresh(&p).is_err());
+    assert_eq!(refresh(&p)?.coverage.partial_files, 1);
     p.write("file1.go", "package api\nfunc F1() { Added() }\n")?;
     p.history(HistoryRequest::Save {
         name: "unanalysed".into(),

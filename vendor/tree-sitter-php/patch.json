@@ -1,0 +1,17 @@
+{
+  "reason": "Preserve class-name aliases and literal NUL bytes inside quoted strings.",
+  "replacements": [
+    {
+      "file": "common/define-grammar.js",
+      "before": "      _name: $ => choice(",
+      "after": "      _name: $ => choice(\n        ...['binary', 'boolean', 'double', 'real'].map(name => alias(keyword(name, false), $.name)),",
+      "occurrences": 1
+    },
+    {
+      "file": "common/define-grammar.js",
+      "before": "          $.string_content,\n        )),",
+      "after": "          $.string_content,\n          alias(token.immediate('\\0'), $.string_content),\n        )),",
+      "occurrences": 1
+    }
+  ]
+}

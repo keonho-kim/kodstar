@@ -11,7 +11,7 @@ pub(super) const RANGES: &str = "SELECT min(id) AS first,max(id) AS last FROM (
     FROM jsonb_each(?1)) GROUP BY sequence";
 
 pub(super) fn find(c: &Connection, id: &Value, after: i64) -> Result<Option<i64>> {
-    c.query_row("SELECT block FROM relation_id_ranges
+    super::super::packed::statements::row(c,"SELECT block FROM relation_id_ranges
         WHERE first=(SELECT first FROM relation_id_ranges WHERE first<=?1 ORDER BY first DESC LIMIT 1)
           AND last>=?1 AND block>?2", params![id,after], |r| r.get(0)).optional()
 }

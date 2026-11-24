@@ -9,6 +9,9 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::path::Path;
 
+mod input;
+pub(crate) use input::InputIssue;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,6 +40,7 @@ pub struct Error {
     message: String,
     source: Option<Box<dyn StdError + Send + Sync>>,
     private_source: bool,
+    pub(crate) input: Option<InputIssue>,
 }
 
 impl Error {
@@ -46,6 +50,7 @@ impl Error {
             message: message.into(),
             source: None,
             private_source: false,
+            input: None,
         }
     }
 
@@ -70,6 +75,7 @@ impl Error {
             message: message.into(),
             source: Some(Box::new(source)),
             private_source: false,
+            input: None,
         }
     }
 
@@ -124,12 +130,22 @@ impl StdError for Error {
     }
 }
 
-#[derive(serde::Serialize, Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct Coverage {
     pub scanned_files: u64,
     pub analyzed_files: u64,
     pub reused_files: u64,
     pub skipped_files: u64,
+    /// Files rejected during extraction; included in skipped_files.
+    pub failed_files: u64,
+    /// Files with recovered syntax; reliable declarations remain searchable.
+    pub partial_files: u64,
+    /// Valid preprocessing fragments without a standalone expression context.
+    pub fragment_files: u64,
+    /// Configuration files with unavailable inherited or referenced settings.
+    pub configuration_incomplete_files: u64,
+    pub native_incomplete_files: u64,
+    pub native_limited_files: u64,
     pub unsupported_files: u64,
     pub source_bytes: u64,
     pub symbols: u64,

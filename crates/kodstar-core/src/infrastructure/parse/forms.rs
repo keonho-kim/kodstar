@@ -18,7 +18,10 @@ impl Extractor<'_> {
         match self.language {
             Language::Python => self.python_comprehension(node, context)?,
             Language::Swift => self.swift_package(node)?,
-            Language::C | Language::Cpp => self.cxx_header_guard(node)?,
+            Language::C | Language::Cpp => {
+                self.cxx_header_guard(node)?;
+                self.cxx_macro(node, context)?;
+            }
             Language::CommonLisp => {
                 if !self.lisp_region(node, context)? {
                     return Ok(false);
@@ -26,7 +29,6 @@ impl Extractor<'_> {
                 self.lisp_scope(node, context)?;
             }
             Language::Ruby => self.ruby_context(node, context)?,
-            Language::Pascal => self.pascal_module_form(node)?,
             _ => {}
         }
         Ok(true)
@@ -39,7 +41,6 @@ impl Extractor<'_> {
         let definition = match self.language {
             Language::Php => self.php_definition(node)?,
             Language::Ruby => self.ruby_definition(node)?,
-            Language::Pascal => self.pascal_definition(node)?,
             Language::Kotlin => self.kotlin_definition(node)?,
             Language::Swift => self.swift_definition(node)?,
             Language::Scala => self.scala_definition(node)?,
@@ -65,9 +66,7 @@ impl Extractor<'_> {
         match self.language {
             Language::Rust => self.rust_definition(node),
             Language::C | Language::Cpp => self.cxx_definition(node),
-            Language::Go | Language::Swift | Language::Kotlin | Language::Pascal => {
-                self.nominal_definition(node)
-            }
+            Language::Go | Language::Swift | Language::Kotlin => self.nominal_definition(node),
             Language::Zig => self.zig_definition(node),
             Language::Elixir => self.elixir_definition(node),
             Language::Erlang => self.erlang_function_definition(node),

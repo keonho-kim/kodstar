@@ -48,7 +48,7 @@ impl Write for TextCheck {
             self.pending = 0;
         }
         if !self.binary
-            && let Err(error) = std::str::from_utf8(bytes)
+            && let Err(error) = simdutf8::compat::from_utf8(bytes)
         {
             if error.error_len().is_some() {
                 self.binary = true;

@@ -19,6 +19,7 @@ use std::fs::{self, File};
 use std::path::Path;
 
 mod catalog;
+mod seen;
 
 pub(crate) fn run(
     repository: &mut Repository,
@@ -27,6 +28,7 @@ pub(crate) fn run(
     verify: bool,
     cancel: &Cancellation,
 ) -> Result<HistoryState> {
+    let _span = tracing::info_span!("capture", verify).entered();
     let connection = &mut repository.connection;
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -35,6 +37,10 @@ pub(crate) fn run(
         .execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS temp.observed_path ON observed(path);")?;
     let mut contents = blobs::Writer::new(&transaction)?;
     let mut catalog = catalog::Catalog::new(&transaction)?;
+    let previous_count =
+        transaction.query_row("SELECT count(*) FROM working", [], |row| row.get(0))?;
+    let mut seen = seen::Seen::new(settings.memory_budget / 64);
+    let mut tracked = 0u64;
     scan::walk(
         &repository.root,
         cache_home,
@@ -52,18 +58,21 @@ pub(crate) fn run(
                 "file"
             };
             let mode = file_mode(metadata);
-            let old = catalog.previous(&path, kind)?;
-            let previous = old.as_ref().map(|v| v.0);
-            let blob = if !verify
-                && old.as_ref().is_some_and(|(_, size, m, c, permissions)| {
-                    *size == metadata.len()
-                        && m == &modified
-                        && c == &changed
-                        && *permissions == mode
-                }) {
-                old.map(|v| v.0)
-                    .ok_or_else(|| Error::operation("missing previous history input"))?
-            } else {
+            let old = catalog.previous(&path)?;
+            let matching_kind = old.as_ref().filter(|value| value.kind == kind);
+            let previous = matching_kind.map(|value| value.blob);
+            tracked += 1;
+            if !verify
+                && matching_kind.is_some_and(|value| {
+                    value.size == metadata.len()
+                        && value.modified == modified
+                        && value.changed == changed
+                        && value.mode == mode
+                })
+            {
+                return seen.push(&transaction, path, cancel);
+            }
+            let blob = {
                 crate::infrastructure::history::paths::destination(
                     &repository.root,
                     &entry.relative,
@@ -82,7 +91,9 @@ pub(crate) fn run(
                 let blob = if kind == "symlink" {
                     let target = fs::read_link(absolute)
                         .map_err(|e| Error::io("read history symlink", absolute, e))?;
-                    contents.put(std::io::Cursor::new(path_bytes(&target)), previous, cancel)?
+                    let target = path_bytes(&target);
+                    let size = target.len() as u64;
+                    contents.put(std::io::Cursor::new(target), size, previous, cancel)?
                 } else {
                     let file = File::open(absolute)
                         .map_err(|e| Error::io("open history input", absolute, e))?;
@@ -94,7 +105,7 @@ pub(crate) fn run(
                     {
                         return Err(Error::operation("history input changed before capture"));
                     }
-                    contents.put(file, previous, cancel)?
+                    contents.put(file, metadata.len(), previous, cancel)?
                 };
                 let after = fs::symlink_metadata(absolute)
                     .map_err(|e| Error::io("recheck history input", absolute, e))?;
@@ -110,7 +121,7 @@ pub(crate) fn run(
                 blob
             };
             catalog.observe(params![
-                path,
+                &path,
                 blob,
                 mode,
                 kind,
@@ -118,29 +129,41 @@ pub(crate) fn run(
                 modified,
                 changed
             ])?;
+            if old.is_some() {
+                seen.push(&transaction, path, cancel)?;
+            }
             Ok(())
         },
     )?;
     drop(contents);
     drop(catalog);
     let parent = checkpoints::head(&transaction)?;
-    let count: u64 = transaction.query_row("SELECT (SELECT count(*) FROM observed o LEFT JOIN working w ON w.path=o.path WHERE w.path IS NULL OR o.blob<>w.blob OR o.mode<>w.mode OR o.kind<>w.kind) + (SELECT count(*) FROM working w WHERE NOT EXISTS(SELECT 1 FROM observed o WHERE o.path=w.path))", [], |r| r.get(0))?;
+    let deleted = seen.deleted(&transaction, previous_count, cancel)?;
+    let updated: u64 = transaction.query_row("SELECT count(*) FROM observed o LEFT JOIN working w ON w.path=o.path WHERE w.path IS NULL OR o.blob<>w.blob OR o.mode<>w.mode OR o.kind<>w.kind", [], |r| r.get(0))?;
+    let count = updated + deleted;
     let created = count > 0 || parent.is_none();
     if created {
         transaction.execute(
-            "INSERT INTO checkpoints(parent,created_at,changed_files,tracked_files) VALUES(?1,?2,?3,(SELECT count(*) FROM observed))",
-            params![parent, now_seconds()?, count],
+            "INSERT INTO checkpoints(parent,created_at,changed_files,tracked_files) VALUES(?1,?2,?3,?4)",
+            params![parent, now_seconds()?, count, tracked],
         )?;
         let id = transaction.last_insert_rowid();
         transaction.execute("INSERT INTO entries SELECT ?1,o.path,o.blob,o.mode,o.kind FROM observed o LEFT JOIN working w ON w.path=o.path WHERE w.path IS NULL OR o.blob<>w.blob OR o.mode<>w.mode OR o.kind<>w.kind", [id])?;
-        transaction.execute("INSERT INTO entries SELECT ?1,w.path,NULL,w.mode,w.kind FROM working w WHERE NOT EXISTS(SELECT 1 FROM observed o WHERE o.path=w.path)", [id])?;
+        if deleted != 0 {
+            transaction.execute("INSERT INTO entries SELECT ?1,w.path,NULL,w.mode,w.kind FROM deleted_paths d CROSS JOIN working w ON w.path=d.path", [id])?;
+        }
         transaction.execute(
             "UPDATE branches SET checkpoint=?1 WHERE name=(SELECT current_branch FROM repository)",
             [id],
         )?;
     }
-    transaction.execute_batch("DELETE FROM working WHERE NOT EXISTS(SELECT 1 FROM observed o WHERE o.path=working.path);
-        INSERT INTO working SELECT * FROM observed o WHERE NOT EXISTS(SELECT 1 FROM working w WHERE w.path=o.path AND w.blob=o.blob AND w.mode=o.mode AND w.kind=o.kind AND w.size=o.size AND w.modified=o.modified AND w.changed=o.changed)
+    if deleted != 0 {
+        transaction.execute_batch(
+            "DELETE FROM working WHERE path IN (SELECT path FROM deleted_paths);
+                                   DROP TABLE deleted_paths;",
+        )?;
+    }
+    transaction.execute_batch("INSERT INTO working SELECT * FROM observed o WHERE NOT EXISTS(SELECT 1 FROM working w WHERE w.path=o.path AND w.blob=o.blob AND w.mode=o.mode AND w.kind=o.kind AND w.size=o.size AND w.modified=o.modified AND w.changed=o.changed)
         ON CONFLICT(path) DO UPDATE SET blob=excluded.blob,mode=excluded.mode,kind=excluded.kind,size=excluded.size,modified=excluded.modified,changed=excluded.changed;")?;
     cancel.check()?;
     transaction.commit()?;

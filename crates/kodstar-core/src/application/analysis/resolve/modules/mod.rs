@@ -73,8 +73,6 @@ impl Lookup<'_, '_> {
         depth: usize,
         python_star: bool,
     ) -> Result<()> {
-        self.connection
-            .cached_execute("DELETE FROM resolution_modules WHERE depth=?1", [depth])?;
         if matches!(context.language, Language::C | Language::Cpp)
             && module.starts_with("@include:")
         {

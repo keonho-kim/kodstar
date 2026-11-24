@@ -8,6 +8,18 @@ use crate::application::analysis::resolve::{FileContext, Lookup};
 use crate::domain::diagnostics::Result;
 use rusqlite::params;
 
+#[cfg(test)]
+mod tests;
+
+fn candidate_name_guard(language: crate::domain::languages::Language) -> &'static str {
+    use crate::domain::languages::Language;
+    if matches!(language, Language::Rust | Language::C | Language::Cpp) {
+        "s.name_key_id IN (SELECT id FROM atoms WHERE value IN (?1,?4)) AND"
+    } else {
+        ""
+    }
+}
+
 // The nearest declaration owns the export; function-local pub use never escapes its scope.
 const EXPORT_SCOPE: &str = "EXISTS (
     WITH RECURSIVE parents(id,depth) AS (
@@ -53,11 +65,7 @@ impl Lookup<'_, '_> {
         } else {
             (head, None)
         };
-        let name_filter = if context.language == crate::domain::languages::Language::Rust {
-            "s.name_key_id IN (SELECT id FROM atoms WHERE value IN (?1,?4)) AND"
-        } else {
-            ""
-        };
+        let name_filter = candidate_name_guard(context.language);
         self.connection.cached_execute(
             &include_str!("candidates.sql").replace("/* indexed name guard */", name_filter),
             params![
@@ -84,6 +92,10 @@ impl Lookup<'_, '_> {
                 self.members(tail)?;
             }
             return Ok(());
+        }
+        if !self.prepared.module_exports {
+            self.rule = "explicit_module_export";
+            return self.component_default(head, depth);
         }
         // Explicit names win over star exports. Star exports never forward `default`.
         let rust_key = (self.language == crate::domain::languages::Language::Rust)

@@ -4,7 +4,60 @@
 // Related: crates/kodstar-core/src/infrastructure/index/invalidation/static_modules.rs, crates/kodstar-core/tests/support/snapshot.rs.
 
 use crate::support::{snapshot::normalized_index, *};
+use kodstar_core::*;
 use rusqlite::Connection;
+
+#[test]
+fn provider_changes_refresh_aliased_calls_and_match_full_analysis() -> TestResult {
+    let project = Project::new()?;
+    project.write(
+        "caller.ts",
+        "import { target as invoke } from './api'; function caller() { invoke(); }",
+    )?;
+    project.build(false)?;
+    let caller = || selector("caller.ts", "caller");
+    let initial = project.query(Query::Explain { selector: caller() })?;
+    assert!(
+        relationships(&initial)
+            .iter()
+            .any(|edge| edge.resolution == "unresolved")
+    );
+
+    for (source, resolved, compare_full) in [
+        (Some("export function target() {}"), true, true),
+        (Some("export function other() {}"), false, false),
+        (Some("export function target() {}"), true, false),
+        (None, false, true),
+    ] {
+        if let Some(source) = source {
+            project.write("api.ts", source)?;
+        } else {
+            std::fs::remove_file(project.root.join("api.ts"))?;
+        }
+        let updated = project.build(false)?;
+        assert_eq!(updated.parsed_files, u64::from(source.is_some()));
+        assert_eq!(updated.coverage.reused_files, 1);
+        let dependencies = project.query(Query::Deps { selector: caller() })?;
+        assert_eq!(relationships(&dependencies).len(), usize::from(resolved));
+        let explained = project.query(Query::Explain { selector: caller() })?;
+        let calls = relationships(&explained);
+        assert_eq!(calls.len(), 1, "{source:?}: {:?}", explained.rows);
+        assert_eq!(calls[0].expression, "invoke");
+        if resolved {
+            assert_eq!(calls[0].resolution, "resolved");
+            assert_eq!(calls[0].target.as_ref().ok_or("target")?.name, "target");
+        } else {
+            assert_eq!(calls[0].resolution, "unresolved");
+        }
+        if compare_full {
+            assert_eq!(
+                normalized_index(&updated)?,
+                normalized_index(&project.build(true)?)?
+            );
+        }
+    }
+    Ok(())
+}
 
 #[test]
 fn static_module_declarations_preserve_unrelated_files_and_refresh_missing_names() -> TestResult {
@@ -18,14 +71,14 @@ fn static_module_declarations_preserve_unrelated_files_and_refresh_missing_names
         ),
         (
             "js",
-            "export function target() {}",
+            "function target() {}",
             "export function future() {}",
             "import { target, future } from './api.js'; function caller() { target(); future(); }",
             "function local() {} function stable() { local(); }",
         ),
         (
             "ts",
-            "export function target() {}",
+            "function target() {}",
             "export function future() {}",
             "import { target, future } from './api'; function caller() { target(); future(); }",
             "function local() {} function stable() { local(); }",

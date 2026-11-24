@@ -57,6 +57,10 @@ fn initialization_tracks_large_binary_content_and_deduplicates_repeated_queries(
     let state = report.history.ok_or("missing history state")?;
     assert_eq!(state.checkpoint, "c1");
     assert_eq!(state.tracked_files, 2);
+    let preserved = fs::read(project.root.join("asset.bin"))?;
+    assert_eq!(preserved.len(), 3 * 1024 * 1024);
+    assert!(preserved.iter().all(|byte| *byte == 42));
+    drop(preserved);
     let db = rusqlite::Connection::open(project.root.join(".kodstar/repository.sqlite"))?;
     assert_eq!(
         db.query_row("SELECT count(*) FROM checkpoints", [], |r| r
@@ -95,8 +99,8 @@ fn analysis_uses_captured_bytes_when_working_source_changes_during_progress() ->
         &project.options(),
         InitOptions::default(),
         &Cancellation::default(),
-        &mut |_| {
-            if !edited {
+        &mut |event| {
+            if !edited && event.phase == "parse" {
                 fs::write(project.root.join("main.rs"), "fn edited_later() {}")
                     .map_err(|e| Error::caused_by("edit fixture", e))?;
                 edited = true;

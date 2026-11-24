@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) const POOL: &str =
     "(SELECT json_group_object(s.id,json_array(s.count,hex(s.payload))) FROM relation_sets s
-    WHERE s.id IN (SELECT value FROM json_each(kodstar_relation_sets(b.payload,b.count))))";
+    WHERE s.id IN (SELECT first FROM kodstar_relation_set_rows(b.payload,b.count)))";
 
 fn associations(bytes: &mut &[u8], count: usize) -> Result<Vec<(u64, i64)>> {
     if !(1..=128).contains(&count) {
@@ -145,9 +145,19 @@ fn edges(mut bytes: &[u8], count: usize, source: i64, pool: &str) -> Result<Vec<
 }
 
 pub(super) fn register(c: &Connection, flags: FunctionFlags) -> Result<()> {
-    c.create_scalar_function("kodstar_relation_sets", 2, flags, |ctx| {
-        serde_json::to_string(&references(ctx.get_raw(0).as_blob()?, ctx.get(1)?)?)
-            .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+    super::expansion::register(c, c"kodstar_relation_set_rows", |bytes, count| {
+        references(
+            bytes,
+            usize::try_from(count).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        )?
+        .into_iter()
+        .map(|id| {
+            Ok([
+                i64::try_from(id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                0,
+            ])
+        })
+        .collect()
     })?;
     c.create_scalar_function("reference_edges", 4, flags, |ctx| {
         serde_json::to_string(&edges(

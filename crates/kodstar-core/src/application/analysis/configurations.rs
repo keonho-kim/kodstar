@@ -21,8 +21,25 @@ pub(super) fn run(
     progress: &mut dyn FnMut(&Progress) -> Result<()>,
 ) -> Result<(bool, u64)> {
     let connection = &crate::infrastructure::index::cached::Sql::new(connection)?;
+    connection.execute("DELETE FROM diagnostics WHERE code IN ('configuration_incomplete','external_configuration')", [])?;
     connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS configuration_queue(id INTEGER PRIMARY KEY,depth INTEGER,done INTEGER); DELETE FROM configuration_queue;
         INSERT OR IGNORE INTO configuration_queue SELECT file_id,0,0 FROM bindings WHERE kind='configuration' AND name='root';")?;
+    let mut skipped = connection
+        .prepare("SELECT id,path FROM files WHERE status='skipped' AND language='auxiliary'")?;
+    let mut skipped_rows = skipped.query([])?;
+    while let Some(row) = skipped_rows.next()? {
+        cancel.check()?;
+        let id: i64 = row.get(0)?;
+        let path = path_from_bytes(&row.get::<_, Vec<u8>>(1)?)?;
+        if crate::infrastructure::formats::is_configuration(&path) {
+            connection.execute(
+                "INSERT OR IGNORE INTO configuration_queue VALUES(?1,0,0)",
+                [id],
+            )?;
+        }
+    }
+    drop(skipped_rows);
+    drop(skipped);
     let snapshot = selected
         .snapshot
         .as_ref()
@@ -68,6 +85,12 @@ pub(super) fn run(
         let raw_path: Vec<u8> =
             connection.query_row("SELECT path FROM files WHERE id=?1", [id], |r| r.get(0))?;
         let path = path_from_bytes(&raw_path)?;
+        let status: String =
+            connection.query_row("SELECT status FROM files WHERE id=?1", [id], |r| r.get(0))?;
+        if status == "skipped" || (!known && status != "unsupported") {
+            connection.execute("INSERT INTO diagnostics(file_id,code,message) VALUES(?1,'configuration_incomplete','configuration input is unavailable or classified as a different input kind')", [id])?;
+            continue;
+        }
         if !known {
             super::configuration_input::parse(
                 selected,
@@ -81,9 +104,9 @@ pub(super) fn run(
             )?;
             parsed += 1;
             progress(&Progress {
-                phase: "configuration",
                 completed_files: parsed,
                 source_bytes: 0,
+                ..Progress::phase("configuration")
             })?;
         }
         let mut links=connection.prepare("SELECT name,module_name FROM bindings WHERE file_id=?1 AND kind='configuration_link' ORDER BY start_byte,id")?;
@@ -108,10 +131,12 @@ pub(super) fn run(
                     params![target, depth + 1],
                 )?;
             } else if raw.starts_with('.') || raw.starts_with('/') {
-                return Err(Error::operation(format!(
-                    "referenced configuration is outside the indexed inputs or missing: {}",
-                    path.display()
-                )));
+                connection.execute("INSERT INTO diagnostics(file_id,code,message) VALUES(?1,'configuration_incomplete',?2)", params![id, format!("referenced configuration is outside the indexed inputs or missing: {raw}")])?;
+                progress(&Progress::task(
+                    "configuration_incomplete",
+                    path.to_string_lossy().into_owned(),
+                    Some(format!("unavailable configuration: {raw}")),
+                ))?;
             } else {
                 external(connection, id)?;
             }
@@ -126,7 +151,9 @@ pub(super) fn run(
         }
     }
     connection.execute_batch("CREATE TEMP TABLE IF NOT EXISTS configuration_orphans(id INTEGER PRIMARY KEY); DELETE FROM configuration_orphans;
-        INSERT INTO configuration_orphans SELECT f.id FROM files f JOIN bindings b ON b.file_id=f.id WHERE b.kind='configuration' AND b.name='referenced' AND f.id NOT IN (SELECT id FROM configuration_queue);")?;
+        INSERT INTO configuration_orphans SELECT f.id FROM files f WHERE f.id NOT IN (SELECT id FROM configuration_queue) AND
+        (EXISTS(SELECT 1 FROM bindings b WHERE b.file_id=f.id AND b.kind='configuration' AND b.name='referenced')
+        OR EXISTS(SELECT 1 FROM diagnostics d WHERE d.file_id=f.id AND d.code='configuration_invalid'));")?;
     let mut changed = parsed > 0;
     loop {
         cancel.check()?;

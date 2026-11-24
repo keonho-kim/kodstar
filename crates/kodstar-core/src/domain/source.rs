@@ -3,7 +3,9 @@
 // Usage: 구문 사실·객체·결과가 사용.
 // Related: crates/kodstar-core/src/domain/facts.rs, crates/kodstar-core/src/domain/symbols.rs.
 
-//! Original UTF-8 byte positions. Display columns are byte columns, not character counts.
+//! Original source byte positions. Display columns are byte columns, not character counts.
+
+pub(crate) mod lines;
 
 #[derive(serde::Serialize, Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct SourceSpan {

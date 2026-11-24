@@ -69,25 +69,19 @@ impl Lookup<'_, '_> {
                 |r| r.get(0),
             )?;
         }
-        let count: i64 =
-            self.connection
-                .cached_row("SELECT COUNT(*) FROM resolution_candidates", [], |r| {
-                    r.get(0)
-                })?;
-        self.prepared.dependency(params![
+        let (count, external_count) = self.prepared.counts()?;
+        if count > 0 {
+            self.native_macro_candidates(context)?;
+        }
+        self.recovered_source_candidates(context)?;
+        self.prepared.expression(
             fact,
-            "expression",
             format!(
                 "{}:{}:{scope}:{expression}",
                 context.language.as_str(),
                 context.module
             ),
-            count > 0
-        ])?;
-        let external_count: i64 = self.connection.cached_row(
-            "SELECT COUNT(*) FROM resolution_externals WHERE scope=0",
-            [],
-            |r| r.get(0),
+            count > 0,
         )?;
         let ambiguous = count + external_count > 1;
         // Only base relations are consumed during this phase. Other consumers run after flush.

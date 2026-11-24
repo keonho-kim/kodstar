@@ -1,0 +1,75 @@
+{
+  "schema_version": 2,
+  "upstream_repository": "https://github.com/tree-sitter-grammars/tree-sitter-commonlisp",
+  "upstream_revision": "32323509b3d9fe96607d151c2da2c9009eb13a2f",
+  "generator": "0.26.10",
+  "abi": 15,
+  "manifest_adjustment": "Omit the unused upstream README reference.",
+  "inputs": [
+    {
+      "path": "Cargo.toml",
+      "url": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-commonlisp/32323509b3d9fe96607d151c2da2c9009eb13a2f/Cargo.toml",
+      "sha256": "716589771efc0aaa7633fbdc1201fdd9f414b80d560f5e9b6d812a5cd4344960"
+    },
+    {
+      "path": "grammar.js",
+      "url": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-commonlisp/32323509b3d9fe96607d151c2da2c9009eb13a2f/grammar.js",
+      "sha256": "67694aa144004e79088da09c29652bca050b6600097cb79be4e2f164bd5c6882"
+    },
+    {
+      "path": "tree-sitter.json",
+      "url": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-commonlisp/32323509b3d9fe96607d151c2da2c9009eb13a2f/tree-sitter.json",
+      "sha256": "a9d5200b26f48a56cbaec44af5d31c84433f94196a61aab7ddd316322672a140"
+    },
+    {
+      "path": "bindings/rust/lib.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-commonlisp/32323509b3d9fe96607d151c2da2c9009eb13a2f/bindings/rust/lib.rs",
+      "sha256": "e2df82b7b29a55db499a0d3ec0d00f4a59de2deb7e6be052191b47755b0a2841"
+    },
+    {
+      "path": "bindings/rust/build.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-commonlisp/32323509b3d9fe96607d151c2da2c9009eb13a2f/bindings/rust/build.rs",
+      "sha256": "87af5b1b1c0ef9a4ac5ba7537df5d470a32f421ed748fa5e7286256e2a56647d"
+    },
+    {
+      "path": "LICENSE.md",
+      "url": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-commonlisp/32323509b3d9fe96607d151c2da2c9009eb13a2f/LICENSE.md",
+      "sha256": "00bb7f417416e8233ae465209e72eaa6162d53b061add7d9bed0238552a6fa0c"
+    },
+    {
+      "path": "queries/tags.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-commonlisp/32323509b3d9fe96607d151c2da2c9009eb13a2f/queries/tags.scm",
+      "sha256": "6800ea8d8b843730b56d9da5ce73192de212cb541f00385e49ffa2f8c1a6839b"
+    },
+    {
+      "path": "node_modules/tree-sitter-clojure/grammar.js",
+      "url": "https://raw.githubusercontent.com/theHamsta/tree-sitter-clojure/95c7959c461406381b42113dcf4591008c663d21/grammar.js",
+      "sha256": "e342724c7ec05b75bdb37709364265686150dda298ef02e2bfbcc0421126578e",
+      "build_only": true
+    },
+    {
+      "path": "COPYING.clojure.txt",
+      "url": "https://raw.githubusercontent.com/theHamsta/tree-sitter-clojure/95c7959c461406381b42113dcf4591008c663d21/COPYING.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "build_only": false
+    }
+  ],
+  "dependencies": [],
+  "files": {
+    "COPYING.clojure.txt": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "Cargo.toml": "716589771efc0aaa7633fbdc1201fdd9f414b80d560f5e9b6d812a5cd4344960",
+    "LICENSE.md": "00bb7f417416e8233ae465209e72eaa6162d53b061add7d9bed0238552a6fa0c",
+    "bindings/rust/build.rs": "87af5b1b1c0ef9a4ac5ba7537df5d470a32f421ed748fa5e7286256e2a56647d",
+    "bindings/rust/lib.rs": "e2df82b7b29a55db499a0d3ec0d00f4a59de2deb7e6be052191b47755b0a2841",
+    "grammar.js": "6298f6166a32c94a1f4dbefe62c90c5e1d8e3e98fb2277b143530429b5250b1a",
+    "queries/tags.scm": "6800ea8d8b843730b56d9da5ce73192de212cb541f00385e49ffa2f8c1a6839b",
+    "src/grammar.json": "a842acae3f0b01bb2b00d1db4fdd6e8ae78b814c02b28c144f4003bd77176f69",
+    "src/node-types.json": "006ac86a53e062bea78ae5bfd85b060118558722850a481f08a75b26ca0c6aeb",
+    "src/parser.c": "3fdb595565953835105b7d000bc7655ca5b6e077db5d58f695ff1f335ae7eb26",
+    "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+    "src/tree_sitter/array.h": "31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c",
+    "src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+    "tree-sitter.json": "a9d5200b26f48a56cbaec44af5d31c84433f94196a61aab7ddd316322672a140",
+    "patch.json": "1a010b7a89b448878c7df9e189193d6dd2670072b3f83011bc031dd86d7a8ea7"
+  }
+}

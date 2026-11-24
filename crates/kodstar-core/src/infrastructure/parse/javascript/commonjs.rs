@@ -86,7 +86,10 @@ impl Imports<'_> {
                 self.export = true;
                 if right.kind() == "identifier" {
                     self.local_export(exported, text(right, self.source), right)?;
-                } else if matches!(right.kind(), "arrow_function" | "function_expression") {
+                } else if matches!(
+                    right.kind(),
+                    "arrow_function" | "function_expression" | "class"
+                ) {
                     self.local_export(exported, raw, right)?;
                 } else if raw == "module.exports" && right.kind() == "object" {
                     let mut cursor = right.walk();

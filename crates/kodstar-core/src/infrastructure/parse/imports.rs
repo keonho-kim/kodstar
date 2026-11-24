@@ -190,7 +190,6 @@ pub(crate) fn extract(
         Language::C | Language::Cpp => imports.cxx(node),
         Language::Elixir => imports.elixir(node),
         Language::Erlang => imports.erlang(node),
-        Language::Pascal => imports.pascal(node),
         _ => Ok(()),
     }
 }

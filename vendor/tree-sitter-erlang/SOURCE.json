@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "upstream_repository": "https://github.com/WhatsApp/tree-sitter-erlang",
+  "upstream_revision": "0386a11c835950f5e1ebfbcbf49863d8495de4e0",
+  "generator": "0.26.10",
+  "abi": 15,
+  "targets": [
+    "."
+  ],
+  "inputs": [
+    {
+      "path": "Cargo.toml",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/Cargo.toml",
+      "sha256": "77e9d24048ecd19221b1764fa8e221179f3a4f1a9e741b39cd24d4854e625f6d"
+    },
+    {
+      "path": "grammar.js",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/grammar.js",
+      "sha256": "409d86b01ac0fb5672c39a24fcca30731001d8b8efbd5016f038db07f47dd054"
+    },
+    {
+      "path": "tree-sitter.json",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/tree-sitter.json",
+      "sha256": "276274009d48497418d17bb80402c2524ee1a62a8961ac4e6769b7e87d7448fc"
+    },
+    {
+      "path": "bindings/rust/lib.rs",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/bindings/rust/lib.rs",
+      "sha256": "023765edcb10aa08c2aa9b86e81bc0a25db3cd4c73eef411115915e92e16c599"
+    },
+    {
+      "path": "bindings/rust/build.rs",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/bindings/rust/build.rs",
+      "sha256": "f762a7ab420e00451a0aa605db07c6ed9353633091a88f4fc580ce9ebd3809e4"
+    },
+    {
+      "path": "src/scanner.c",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/src/scanner.c",
+      "sha256": "bcb05457c981783245db637ec98a0b47f18e0acfe939efdd69a9da3e26f1b8a6"
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "queries/highlights.scm",
+      "url": "https://raw.githubusercontent.com/WhatsApp/tree-sitter-erlang/0386a11c835950f5e1ebfbcbf49863d8495de4e0/queries/highlights.scm",
+      "sha256": "f2c4bad47cff6f7a714681269ad3d234bc846fb2fffb0c2e407a2484565da26f"
+    }
+  ],
+  "dependencies": [],
+  "files": {
+    "Cargo.toml": "77e9d24048ecd19221b1764fa8e221179f3a4f1a9e741b39cd24d4854e625f6d",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "bindings/rust/build.rs": "f762a7ab420e00451a0aa605db07c6ed9353633091a88f4fc580ce9ebd3809e4",
+    "bindings/rust/lib.rs": "023765edcb10aa08c2aa9b86e81bc0a25db3cd4c73eef411115915e92e16c599",
+    "grammar.js": "d5d6149593929bf64ffc0a15992a0b184f6553fe32c0edc23ba169fb0c818725",
+    "queries/highlights.scm": "f2c4bad47cff6f7a714681269ad3d234bc846fb2fffb0c2e407a2484565da26f",
+    "src/grammar.json": "a1e6be8691c29cf1806228f19d5c0e8f02ca2228c2499445c24852d2cbdf4d59",
+    "src/node-types.json": "95c01b3fafe71cabf32520990351097149fe14064de31d11b39ea59807da225d",
+    "src/parser.c": "cba460499e489421aa68154f60fab59d01c5e00fea466e5e1704f2cd7e734bd8",
+    "src/scanner.c": "bcb05457c981783245db637ec98a0b47f18e0acfe939efdd69a9da3e26f1b8a6",
+    "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+    "src/tree_sitter/array.h": "31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c",
+    "src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+    "tree-sitter.json": "276274009d48497418d17bb80402c2524ee1a62a8961ac4e6769b7e87d7448fc",
+    "patch.json": "5c2336abcd6875bd0bf7cd7c5252b726add9ef07efc8fbd2f0cf4e8668013792"
+  },
+  "manifest_adjustment": "Omit the unused upstream README reference."
+}

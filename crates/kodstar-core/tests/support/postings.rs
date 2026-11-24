@@ -3,6 +3,9 @@
 // Usage: snapshot과 publication rollback 사례가 연결에 등록.
 // Related: scripts/benchmarks/postings.py, crates/kodstar-core/tests/support/snapshot.rs.
 
+#[path = "lookup_pages.rs"]
+pub mod lookup_pages;
+
 pub fn register(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
     super::packed::register(connection)?;
     display_path(connection)?;
@@ -26,36 +29,30 @@ pub fn register(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
             }
         },
     )?;
-    connection.create_scalar_function(
-        "kodstar_postings",
-        2,
-        rusqlite::functions::FunctionFlags::SQLITE_UTF8
-            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-        |context| {
-            let bytes = context.get::<Vec<u8>>(0)?;
-            let count = context.get::<usize>(1)?;
-            let mut pairs = Vec::new();
-            let (mut previous, mut value, mut shift) = (0u64, 0u64, 0);
-            for byte in bytes {
-                if shift > 63 || shift == 63 && byte > 1 {
-                    return Err(rusqlite::Error::InvalidQuery);
-                }
-                value |= u64::from(byte & 127) << shift;
-                if byte & 128 != 0 {
-                    shift += 7;
-                    continue;
-                }
-                previous += value >> 1;
-                pairs.push([previous, value & 1]);
-                (value, shift) = (0, 0);
-            }
-            if shift != 0 || pairs.len() != count {
-                return Err(rusqlite::Error::InvalidQuery);
-            }
-            serde_json::to_string(&pairs)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
-        },
-    )
+    super::packed::expansion::register(connection, c"kodstar_posting_rows", |bytes, count| {
+        let count = usize::try_from(count).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        if !(1..=128).contains(&count) {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        let mut bytes = bytes;
+        let mut pairs = Vec::new();
+        let mut previous = 0i64;
+        for _ in 0..count {
+            let value = super::packed::number(&mut bytes)?;
+            let next = i64::try_from(value >> 1)
+                .ok()
+                .and_then(|gap| previous.checked_add(gap))
+                .filter(|next| *next > previous)
+                .ok_or(rusqlite::Error::InvalidQuery)?;
+            pairs.push([next, (value & 1) as i64]);
+            previous = next;
+        }
+        if !bytes.is_empty() {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        Ok(pairs)
+    })?;
+    lookup_pages::register(connection)
 }
 
 pub fn display_path(connection: &rusqlite::Connection) -> rusqlite::Result<()> {

@@ -48,8 +48,11 @@ pub(crate) fn run(process: &Cancellation) -> Result<()> {
         let worker_output = output.clone();
         let worker_tokens = Arc::clone(&tokens);
         let worker_stop = process.clone();
+        let subscriber = tracing::dispatcher::get_default(Clone::clone);
         let worker = scope.spawn(move || {
-            worker::run(engine, receiver, worker_output, worker_tokens, worker_stop)
+            tracing::dispatcher::with_default(&subscriber, || {
+                worker::run(engine, receiver, worker_output, worker_tokens, worker_stop)
+            })
         });
         let outcome = dispatch(&cwd, &sender, &tokens, &output, process);
         if !matches!(outcome, Ok(End::Eof)) {

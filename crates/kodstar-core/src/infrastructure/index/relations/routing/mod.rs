@@ -57,17 +57,21 @@ pub(super) fn register(c: &Connection) -> Result<()> {
     c.create_scalar_function("kodstar_relation_page", 3, flags, |ctx| {
         codec::change(ctx.get_raw(0).as_blob()?, ctx.get(1)?, ctx.get(2)?)
     })?;
-    c.create_scalar_function("kodstar_relation_postings", 2, flags, |ctx| {
-        let page = ctx.get(1)?;
-        let ids = codec::decode(ctx.get_raw(0).as_blob()?)?
+    super::super::packed::expansion::register(
+        c,
+        c"kodstar_relation_posting_rows",
+        |bytes, page| {
+            codec::decode(bytes)?
+                .into_iter()
+                .map(|slot| Ok([codec::absolute(page, slot)?, 0]))
+                .collect()
+        },
+    )?;
+    super::super::packed::expansion::register(c, c"kodstar_relation_pair_rows", |bytes, _| {
+        Ok(codec::pairs(bytes)?
             .into_iter()
-            .map(|slot| codec::absolute(page, slot))
-            .collect::<Result<Vec<_>>>()?;
-        serde_json::to_string(&ids).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
-    })?;
-    c.create_scalar_function("kodstar_relation_pairs", 1, flags, |ctx| {
-        let pairs = codec::pairs(ctx.get_raw(0).as_blob()?)?;
-        serde_json::to_string(&pairs).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+            .map(|(kind, entity)| [kind, entity])
+            .collect())
     })
 }
 

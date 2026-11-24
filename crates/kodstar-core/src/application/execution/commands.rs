@@ -63,12 +63,13 @@ impl Engine {
                     Refresh::Metadata
                 };
                 sink.begin(&report.metadata(refresh))?;
-                let summary = QuerySummary {
+                let mut summary = QuerySummary {
                     complete: true,
                     result_count: 1,
                     unresolved_count: report.coverage.unresolved,
                     ..QuerySummary::default()
                 };
+                summary.include_coverage(&report.coverage);
                 sink.row(&QueryRow::Init(report))?;
                 sink.finish(&summary)?;
                 Ok(summary)

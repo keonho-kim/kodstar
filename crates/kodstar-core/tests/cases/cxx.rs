@@ -57,8 +57,11 @@ fn cpp_distinct_parameter_and_const_signatures_are_not_merged() -> TestResult {
         .into_iter()
         .filter(|e| e.relation == "calls")
         .collect();
-    assert_eq!(calls.len(), 3, "{:?}", rows.rows);
-    assert!(calls.iter().all(|e| e.resolution == "ambiguous"));
+    assert_eq!(calls.len(), 1, "{:?}", rows.rows);
+    assert_eq!(calls[0].resolution, "resolved");
+    assert_eq!(calls[0].rule, "clang_semantic_call");
+    let selected = calls[0].target.as_ref().ok_or("selected overload")?;
+    assert!(selected.signature.contains("int") && !selected.signature.contains("const"));
     assert_eq!(
         calls
             .iter()

@@ -9,15 +9,16 @@ use crate::domain::{
     history::HistoryRow,
     results::{QueryRow, QuerySink},
 };
-use crate::infrastructure::history::{Repository, checkpoints::display};
+use crate::infrastructure::history::checkpoints::display;
+use rusqlite::Connection;
 
 pub(super) fn checkpoints(
-    repository: &Repository,
+    connection: &Connection,
     head: i64,
     cancel: &Cancellation,
     sink: &mut dyn QuerySink,
 ) -> Result<u64> {
-    let mut statement=repository.connection.prepare("WITH RECURSIVE ancestry(id) AS (SELECT ?1 UNION SELECT c.parent FROM checkpoints c JOIN ancestry a ON a.id=c.id WHERE c.parent IS NOT NULL) SELECT c.id,c.parent,c.created_at,n.name,c.changed_files FROM checkpoints c JOIN ancestry a ON a.id=c.id LEFT JOIN names n ON n.checkpoint=c.id ORDER BY c.id DESC,n.name")?;
+    let mut statement=connection.prepare("WITH RECURSIVE ancestry(id) AS (SELECT ?1 UNION SELECT c.parent FROM checkpoints c JOIN ancestry a ON a.id=c.id WHERE c.parent IS NOT NULL) SELECT c.id,c.parent,c.created_at,n.name,c.changed_files FROM checkpoints c JOIN ancestry a ON a.id=c.id LEFT JOIN names n ON n.checkpoint=c.id ORDER BY c.id DESC,n.name")?;
     let mut rows = statement.query([head])?;
     let mut count = 0;
     while let Some(row) = rows.next()? {
@@ -35,11 +36,11 @@ pub(super) fn checkpoints(
 }
 
 pub(super) fn branches(
-    repository: &Repository,
+    connection: &Connection,
     cancel: &Cancellation,
     sink: &mut dyn QuerySink,
 ) -> Result<u64> {
-    let mut statement=repository.connection.prepare("SELECT b.name,b.checkpoint,b.name=r.current_branch FROM branches b CROSS JOIN repository r ORDER BY b.name")?;
+    let mut statement=connection.prepare("SELECT b.name,b.checkpoint,b.name=r.current_branch FROM branches b CROSS JOIN repository r ORDER BY b.name")?;
     let mut rows = statement.query([])?;
     let mut count = 0;
     while let Some(row) = rows.next()? {

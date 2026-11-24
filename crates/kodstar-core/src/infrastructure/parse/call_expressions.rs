@@ -14,6 +14,14 @@ impl Extractor<'_> {
     }
 
     fn call_text_at(&self, node: Node<'_>, callee: Node<'_>, depth: usize) -> Result<String> {
+        let spelling = self.call_target(node, callee, depth)?;
+        if self.language == Language::Java && node.kind() == "method_invocation" {
+            return self.java_call(node, spelling);
+        }
+        Ok(spelling)
+    }
+
+    fn call_target(&self, node: Node<'_>, callee: Node<'_>, depth: usize) -> Result<String> {
         if depth >= 32 {
             return Err(crate::domain::diagnostics::Error::new(
                 crate::domain::diagnostics::ErrorKind::Limit,

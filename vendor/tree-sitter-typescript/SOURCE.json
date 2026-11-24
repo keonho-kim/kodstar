@@ -1,0 +1,120 @@
+{
+  "schema_version": 2,
+  "upstream_repository": "https://github.com/tree-sitter/tree-sitter-typescript",
+  "upstream_revision": "f975a621f4e7f532fe322e13c4f79495e0a7b2e7",
+  "generator": "0.26.10",
+  "abi": 15,
+  "targets": [
+    "typescript",
+    "tsx"
+  ],
+  "inputs": [
+    {
+      "path": "Cargo.toml",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/Cargo.toml",
+      "sha256": "8a9161a23ef937a8d25cea41cbfedc40db2c37c52a8ee453dfcd57fc31eebf06"
+    },
+    {
+      "path": "tree-sitter.json",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/tree-sitter.json",
+      "sha256": "4f39daa6a0bde84506cdeaf0b4460ed262df880030b3e6073868d0c746932291"
+    },
+    {
+      "path": "bindings/rust/lib.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/bindings/rust/lib.rs",
+      "sha256": "f5d90ff81f962148bc0e4ce420f11dc8cc7750a53b65be667b18ca4e23fbc36c"
+    },
+    {
+      "path": "bindings/rust/build.rs",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/bindings/rust/build.rs",
+      "sha256": "8e3ee9baddea25add039fc5d12d76fecfe81f1fd175429eb08694ccfcdaf85f4"
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/LICENSE",
+      "sha256": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559"
+    },
+    {
+      "path": "queries/highlights.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/queries/highlights.scm",
+      "sha256": "e0c35adb819127bfd4f853fac5419e7d8ba44760246201d04a4a5ce0228a10c5"
+    },
+    {
+      "path": "queries/locals.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/queries/locals.scm",
+      "sha256": "c3680f9b56276fb2ccc9f1d5f4d03dbca5d64bdf3e6d52ce5a4ad342cec162d5"
+    },
+    {
+      "path": "queries/tags.scm",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/queries/tags.scm",
+      "sha256": "b391288bcc71b513a5df7c9bb232d8bc7418d7e274b125aa0aa4bdd6121a0338"
+    },
+    {
+      "path": "common/define-grammar.js",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/common/define-grammar.js",
+      "sha256": "c2ac6894e0db6164f56dc339788d9da2da60ce1f81d888e6b74a74fc81db818f"
+    },
+    {
+      "path": "common/scanner.h",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/common/scanner.h",
+      "sha256": "da66ef2bd14a3f7ea743e25ba068c6c9aae2c3509db200ff80c4a0e6116e564c"
+    },
+    {
+      "path": "tsx/grammar.js",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/tsx/grammar.js",
+      "sha256": "19b7bc89bac1dfbb64e01ca15ca52345056028c2582d71762efd675af947a0f6"
+    },
+    {
+      "path": "typescript/grammar.js",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/typescript/grammar.js",
+      "sha256": "7e4109889b2ce2731dde89f82f545a12f1e54a286f72bc874f1aed9965c5d5ae"
+    },
+    {
+      "path": "tsx/src/scanner.c",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/tsx/src/scanner.c",
+      "sha256": "d563cd30b2f39718c9ae4292795c5ce03a2ad01954ba3a86ef84c2781a736673"
+    },
+    {
+      "path": "typescript/src/scanner.c",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-typescript/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/typescript/src/scanner.c",
+      "sha256": "9125013b42cb888379d9be909f1d73dfb75a37626c2cdbf4122718a2b431a6d3"
+    },
+    {
+      "path": "node_modules/tree-sitter-javascript/grammar.js",
+      "url": "https://raw.githubusercontent.com/tree-sitter/tree-sitter-javascript/3a837b6f3658ca3618f2022f8707e29739c91364/grammar.js",
+      "sha256": "230e330dd914d94297e5e58d53942cd5debf9c069852da93b6a6b1daae1967dc",
+      "build_only": true
+    }
+  ],
+  "dependencies": [],
+  "files": {
+    "Cargo.toml": "c491e3acec10d308499bc932e49d2f20e4d0ba670571b9fbbac90a40b05bb5a4",
+    "LICENSE": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559",
+    "bindings/rust/build.rs": "8e3ee9baddea25add039fc5d12d76fecfe81f1fd175429eb08694ccfcdaf85f4",
+    "bindings/rust/lib.rs": "f5d90ff81f962148bc0e4ce420f11dc8cc7750a53b65be667b18ca4e23fbc36c",
+    "common/define-grammar.js": "da2bf242fae4b2559608cda92d70f58ab72713e74ced1077b3e3a27ec7857da4",
+    "common/scanner.h": "da66ef2bd14a3f7ea743e25ba068c6c9aae2c3509db200ff80c4a0e6116e564c",
+    "queries/highlights.scm": "e0c35adb819127bfd4f853fac5419e7d8ba44760246201d04a4a5ce0228a10c5",
+    "queries/locals.scm": "c3680f9b56276fb2ccc9f1d5f4d03dbca5d64bdf3e6d52ce5a4ad342cec162d5",
+    "queries/tags.scm": "b391288bcc71b513a5df7c9bb232d8bc7418d7e274b125aa0aa4bdd6121a0338",
+    "tree-sitter.json": "4f39daa6a0bde84506cdeaf0b4460ed262df880030b3e6073868d0c746932291",
+    "tsx/grammar.js": "19b7bc89bac1dfbb64e01ca15ca52345056028c2582d71762efd675af947a0f6",
+    "tsx/src/grammar.json": "ac7f72ddc8dcb2e48519bfdaaab12b3dfff99210883ee5d3a7f02f98d1d78688",
+    "tsx/src/node-types.json": "9e43b4a0d78d5f0e8f26c9dd6c7f8bc12c93514298c4ec21bbc06344e6df9462",
+    "tsx/src/parser.c": "aa45d02d9a1ba95e32bc133af594363f364f16527374c6c20da6af8bd1a429ea",
+    "tsx/src/scanner.c": "d563cd30b2f39718c9ae4292795c5ce03a2ad01954ba3a86ef84c2781a736673",
+    "tsx/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+    "tsx/src/tree_sitter/array.h": "31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c",
+    "tsx/src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+    "typescript/grammar.js": "7e4109889b2ce2731dde89f82f545a12f1e54a286f72bc874f1aed9965c5d5ae",
+    "typescript/src/grammar.json": "33f1f10225fc3c7a9d2d985e992dced279197d1a23f9669be74cee1ed9302f27",
+    "typescript/src/node-types.json": "209f60aef2ff49de3cfb9c85af0a769a5e147a95d61d304a7bbf45779975b0dd",
+    "typescript/src/parser.c": "3ae437aae3e54143058b9361cbc92d1d347424b1601bc31e5194475c21a2ced6",
+    "typescript/src/scanner.c": "9125013b42cb888379d9be909f1d73dfb75a37626c2cdbf4122718a2b431a6d3",
+    "typescript/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+    "typescript/src/tree_sitter/array.h": "31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c",
+    "typescript/src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+    "patch.json": "315e6712a50e8f532a8c8029e6cacb97ec52519a4dcfde807accecba8838b613"
+  },
+  "manifest_adjustment": "Omit the unused upstream README reference."
+}

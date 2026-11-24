@@ -7,6 +7,7 @@
 mod bindings;
 mod builtins;
 mod callable_values;
+mod clang;
 mod cxx;
 mod dispatch;
 mod ejs;
@@ -15,9 +16,11 @@ mod fact_batch;
 mod facts;
 mod field_types;
 mod go;
+mod http;
 mod identities;
 pub(super) mod indexed_paths;
 mod inputs;
+mod java;
 mod javascript;
 mod kotlin;
 mod lexical;
@@ -26,8 +29,8 @@ mod lookup_context;
 mod members;
 mod modules;
 mod namespaces;
+mod native_macros;
 mod owners;
-mod pascal_declarations;
 mod php;
 mod preparation;
 mod prepared;
@@ -36,10 +39,12 @@ mod python;
 mod qualified;
 mod razor;
 mod returns;
+mod reuse;
 mod ruby;
 mod rust;
 mod scala;
 mod scope_imports;
+mod source_quality;
 mod swift;
 
 use crate::domain::cancellation::Cancellation;
@@ -59,6 +64,7 @@ struct FileContext {
     path: PathBuf,
     declared_namespace: String,
 }
+#[derive(Clone)]
 struct Binding {
     scope: u32,
     target: Option<u32>,
@@ -73,7 +79,10 @@ pub(crate) fn run(
     connection: &rusqlite::Connection,
     cancel: &Cancellation,
     selection: super::incremental::Resolution,
+    progress: &mut dyn FnMut(&crate::domain::results::Progress) -> Result<()>,
 ) -> Result<()> {
+    let _span = tracing::info_span!("resolve").entered();
+    progress(&crate::domain::results::Progress::phase("resolve_prepare"))?;
     let connection = &Connection::new(connection)?;
     let all = selection == super::incremental::Resolution::All;
     if all {
@@ -83,7 +92,7 @@ pub(crate) fn run(
              OR (language='go' AND relation='implements' AND expression LIKE '@go-interface:%')",
             [],
         )?;
-        connection.execute_batch("DELETE FROM lookup_blocks;")?;
+        crate::infrastructure::index::dependencies::clear_all(connection)?;
     } else {
         crate::infrastructure::index::invalidation::prepare_partial(connection)?;
     }
@@ -95,17 +104,28 @@ pub(crate) fn run(
     crate::application::analysis::resolve::python::mro::reset(connection)?;
     crate::application::analysis::resolve::php::members::reset(connection)?;
     let prepared = prepared::Prepared::new(connection.connection())?;
+    native_macros::diagnostics(connection, prepared.native_macros)?;
     preparation::run(connection, cancel, &prepared, all)?;
+    clang::prepare(connection)?;
+    http::prepare(connection, cancel, &prepared)?;
+    native_macros::requirements::validate(connection, cancel)?;
+    prepared
+        .partial_sources
+        .set(source_quality::prepare(connection)?);
     connection.execute_batch(include_str!("lisp/packages.sql"))?;
     let merged: bool =
         connection.cached_row("SELECT EXISTS(SELECT 1 FROM symbol_aliases)", [], |r| {
             r.get(0)
         })?;
 
-    facts::run(connection, cancel, &prepared, merged, !all)?;
+    progress(&crate::domain::results::Progress::phase("resolve"))?;
+    facts::run(connection, cancel, &prepared, merged, !all, progress)?;
+    prepared.flush_dependencies()?;
+    prepared.report();
 
     publication::flush(connection)?;
 
+    progress(&crate::domain::results::Progress::phase("dispatch"))?;
     if all {
         crate::application::analysis::resolve::go::interfaces::run(connection, cancel)?;
 
@@ -116,7 +136,9 @@ pub(crate) fn run(
         dispatch::run(connection, cancel, true)?;
         crate::application::analysis::resolve::go::interfaces::refresh_calls(connection, cancel)?;
     }
-    connection.execute_batch("DELETE FROM relation_texts WHERE NOT EXISTS(SELECT 1 FROM relation_routes r WHERE r.kind=6 AND r.entity=relation_texts.id);")?;
+    // A live route page is nonempty by schema and the routing writer's invariant.
+    // Existence needs no decoding of all block IDs in that page.
+    connection.execute_batch("DELETE FROM relation_texts WHERE NOT EXISTS(SELECT 1 FROM relation_route_pages r WHERE r.kind=6 AND r.entity=relation_texts.id);")?;
 
     Ok(())
 }
@@ -157,6 +179,7 @@ fn context(
 struct Lookup<'conn, 'operation> {
     connection: &'operation Connection<'conn>,
     fact: Option<i64>,
+    source: Option<i64>,
     relation: &'operation str,
     external_scope_id: usize,
     scope_sequence: usize,
@@ -179,5 +202,43 @@ impl Lookup<'_, '_> {
         let Some(fact) = self.fact else { return Ok(()) };
         self.prepared.dependency(params![fact, kind, key, found])?;
         Ok(())
+    }
+}
+
+impl<'conn, 'operation> Lookup<'conn, 'operation> {
+    fn new(
+        connection: &'operation Connection<'conn>,
+        prepared: &'operation prepared::Prepared<'conn>,
+        context: &FileContext,
+        source: Option<i64>,
+        fact: Option<i64>,
+        relation: &'operation str,
+        expression: &str,
+    ) -> Self {
+        prepared.start_lookup();
+        Self {
+            connection,
+            prepared,
+            source,
+            fact,
+            relation,
+            external_scope_id: 0,
+            scope_sequence: 0,
+            external_present: false,
+            reason: None,
+            rule: "lexical_binding",
+            source_override: None,
+            member_depth: 0,
+            candidate_only: false,
+            language: context.language,
+            namespace: crate::domain::resolve::namespaces::Namespace::usage(
+                context.language,
+                relation,
+                expression,
+            ),
+            receiver: false,
+            ruby_side_checked: false,
+            ruby_side: None,
+        }
     }
 }

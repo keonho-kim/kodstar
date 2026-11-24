@@ -1,0 +1,20 @@
+# Purpose: Bound test execution and native-analysis concurrency with visible failures.
+# Pattern: Test Runner Policy.
+# Usage: cargo nextest run --workspace --locked.
+# Related: docs/development.md, crates/kodstar-core/tests/engine.rs.
+
+nextest-version = "0.9.151"
+
+[profile.default]
+test-threads = 4
+retries = 0
+fail-fast = false
+failure-output = "immediate"
+slow-timeout = { period = "30s", terminate-after = 2, grace-period = "2s" }
+
+[test-groups.native]
+max-threads = 2
+
+[[profile.default.overrides]]
+filter = 'package(kodstar-clang) | (package(kodstar-core) & binary(engine) & test(/^(clang|cxx|cxx_guards|cxx_identities|native_context|native_input_budget|native_inputs|parser_native|parser_macros)::/))'
+test-group = "native"

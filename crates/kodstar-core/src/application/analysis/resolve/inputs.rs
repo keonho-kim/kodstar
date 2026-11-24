@@ -16,6 +16,21 @@ pub(super) enum Disposition {
 
 impl Lookup<'_, '_> {
     pub(super) fn input(&mut self, context: &FileContext, expression: &str) -> Result<Disposition> {
+        if let Some(result) = self.clang_call(context)? {
+            return Ok(result);
+        }
+        if let Some(result) = self.http_input(context, expression)? {
+            return Ok(result);
+        }
+        if matches!(
+            context.language,
+            crate::domain::languages::Language::C | crate::domain::languages::Language::Cpp
+        ) && expression.starts_with("@native-macro:")
+        {
+            self.rule = "native_macro_syntax";
+            self.reason = Some("native macro expansion is not evaluated");
+            return Ok(Disposition::Handled);
+        }
         if let Some(result) = self.ejs_input(context, expression)? {
             return Ok(result);
         }

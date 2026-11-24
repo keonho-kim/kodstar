@@ -116,13 +116,13 @@ fn astro_script_slices_keep_original_ranges_and_cannot_complete_each_others_synt
         "Main.astro",
         "<script>function broken(){</script><script>}</script>",
     )?;
-    assert!(p.build(false).is_err());
+    assert_eq!(p.build(false)?.coverage.partial_files, 1);
     let rows = p.query(Query::Symbols {
         file: "Main.astro".into(),
     })?;
     assert_eq!(
         rows.metadata.ok_or("metadata")?.generation,
-        Some(before.generation)
+        Some(before.generation + 1)
     );
     Ok(())
 }

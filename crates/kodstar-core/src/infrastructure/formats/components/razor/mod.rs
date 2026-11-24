@@ -55,7 +55,9 @@ pub(in crate::infrastructure::formats::components) fn prepare(
         if let Some((length, close)) = comment {
             offset = find(source, at + length, close)
                 .map(|i| i + close.len())
-                .ok_or_else(|| Error::operation("Razor comment is incomplete"))?;
+                .ok_or_else(|| {
+                    Error::input("source_syntax_error", "Razor comment is incomplete", None)
+                })?;
             continue;
         }
         if tail.starts_with(b"@@") {
@@ -76,8 +78,13 @@ pub(in crate::infrastructure::formats::components) fn prepare(
                 } else {
                     b"</style".as_slice()
                 };
-                let closing = find(source, offset, close)
-                    .ok_or_else(|| Error::operation("Razor script/style is incomplete"))?;
+                let closing = find(source, offset, close).ok_or_else(|| {
+                    Error::input(
+                        "source_syntax_error",
+                        "Razor script/style is incomplete",
+                        None,
+                    )
+                })?;
                 offset = tag_end(source, closing + close.len())? + 1;
             }
             continue;
@@ -150,9 +157,13 @@ fn code_end(source: &[u8], start: usize, cancel: &Cancellation) -> Result<usize>
             continue;
         }
         if source[at..].starts_with(b"/*") {
-            at = find(source, at + 2, b"*/")
-                .map(|i| i + 2)
-                .ok_or_else(|| Error::operation("Razor C# comment is incomplete"))?;
+            at = find(source, at + 2, b"*/").map(|i| i + 2).ok_or_else(|| {
+                Error::input(
+                    "source_syntax_error",
+                    "Razor C# comment is incomplete",
+                    None,
+                )
+            })?;
             continue;
         }
         if matches!(source[at], b'\'' | b'"') {
@@ -161,7 +172,13 @@ fn code_end(source: &[u8], start: usize, cancel: &Cancellation) -> Result<usize>
             if quote == b'"' && count >= 3 {
                 at = find(source, at + count, &source[at..at + count])
                     .map(|i| i + count)
-                    .ok_or_else(|| Error::operation("Razor raw string is incomplete"))?;
+                    .ok_or_else(|| {
+                        Error::input(
+                            "source_syntax_error",
+                            "Razor raw string is incomplete",
+                            None,
+                        )
+                    })?;
                 continue;
             }
             let verbatim = quote == b'"' && at > 0 && source[at - 1] == b'@';
@@ -192,5 +209,9 @@ fn code_end(source: &[u8], start: usize, cancel: &Cancellation) -> Result<usize>
         }
         at += 1;
     }
-    Err(Error::operation("Razor code body is incomplete"))
+    Err(Error::input(
+        "source_syntax_error",
+        "Razor code body is incomplete",
+        None,
+    ))
 }

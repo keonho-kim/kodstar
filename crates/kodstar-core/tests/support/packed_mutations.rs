@@ -1,9 +1,37 @@
-// Purpose: 내용 의미를 유지한 물리 ID·scope 변경으로 증분 보존 검증.
+// Purpose: 물리 ID·scope 표시 변경과 관계 ID 조회로 증분 보존 관측.
 // Pattern: Test Fixture Mutation.
-// Usage: 증분 회귀 사례가 테스트 소유 인덱스만 변경.
-// Related: crates/kodstar-core/tests/support/packed.rs.
+// Usage: 증분 회귀 사례가 테스트 소유 인덱스를 표시하고 갱신 후 ID를 대조.
+// Related: crates/kodstar-core/tests/support/packed.rs, crates/kodstar-core/tests/support/postings.rs, crates/kodstar-core/tests/cases/incremental_bodies.rs, crates/kodstar-core/tests/cases/optimization.rs.
 
+use kodstar_core::InitReport;
 use rusqlite::{Connection, Result, params};
+
+pub fn relationship_ids(report: &InitReport, file: &str) -> Result<Vec<i64>> {
+    let connection = Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
+    read_relationship_ids(&connection, file)
+}
+
+pub fn mark_relationship_ids(report: &InitReport, file: &str) -> Result<Vec<i64>> {
+    let connection = Connection::open(std::path::Path::new(&report.cache).join("index.sqlite"))?;
+    mark(&connection, file)?;
+    let ids = read_relationship_ids(&connection, file)?;
+    assert!(
+        !ids.is_empty(),
+        "fixture has no relationships to preserve: {file}"
+    );
+    Ok(ids)
+}
+
+fn read_relationship_ids(connection: &Connection, file: &str) -> Result<Vec<i64>> {
+    super::postings::register(connection)?;
+    let mut statement = connection.prepare(
+        "SELECT r.id FROM relationships r JOIN facts u ON u.id=r.fact_id
+         JOIN files f ON f.id=u.file_id WHERE f.path=?1 ORDER BY r.id",
+    )?;
+    statement
+        .query_map([file.as_bytes()], |row| row.get(0))?
+        .collect()
+}
 
 fn integer(bytes: &mut Vec<u8>, mut value: u64) {
     while value >= 128 {

@@ -4,6 +4,7 @@
 // Related: crates/kodstar-cli/src/args.rs, crates/kodstar-cli/src/invocation.rs.
 
 use clap::{Command, error::ErrorKind};
+use rstest::rstest;
 
 fn visit(command: &Command, check: &mut impl FnMut(&Command)) {
     if command.is_hide_set() || command.get_name() == "help" {
@@ -80,4 +81,21 @@ fn documented_examples_parse_without_executing_operations() {
             }
         }
     });
+}
+
+#[rstest]
+#[case::default(&["kodstar", "languages"], true)]
+#[case::global_false(&["kodstar", "--verbose", "false", "languages"], false)]
+#[case::command_false(&["kodstar", "languages", "--verbose", "false"], false)]
+#[case::nested_false(&["kodstar", "history", "diff", "--verbose", "false"], false)]
+#[case::explicit_true(&["kodstar", "--verbose", "true", "branch", "create", "work"], true)]
+fn verbosity_defaults_to_true_and_propagates_from_global_and_nested_positions(
+    #[case] arguments: &[&str],
+    #[case] expected: bool,
+) {
+    let matches = super::command()
+        .try_get_matches_from(arguments.iter().copied())
+        .unwrap();
+    assert_eq!(matches.get_one::<bool>("verbose"), Some(&expected));
+    crate::invocation::Invocation::parse(&matches).unwrap();
 }

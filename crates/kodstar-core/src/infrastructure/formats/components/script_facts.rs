@@ -26,7 +26,7 @@ fn scope(value: u32, offset: u32, root: u32) -> Result<u32> {
         add(value, offset)
     }
 }
-fn position(span: &mut SourceSpan, origin: SourceSpan) {
+pub(super) fn position(span: &mut SourceSpan, origin: SourceSpan) {
     span.start_byte += origin.start_byte;
     span.end_byte += origin.start_byte;
     if span.line == 1 {

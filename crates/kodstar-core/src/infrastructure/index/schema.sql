@@ -54,9 +54,8 @@ CREATE VIEW symbol_identities AS
     WHERE NOT EXISTS(SELECT 1 FROM symbol_aliases a WHERE a.symbol_id=s.id);
 
 CREATE VIEW fact_lookups AS
-    SELECT json_extract(j.value,'$[0]') AS fact_id,b.key_id,
-           json_extract(j.value,'$[1]') AS found
-    FROM lookup_blocks b,json_each(kodstar_postings(b.payload,b.count)) j;
+    SELECT j.first AS fact_id,b.key_id,j.second AS found
+    FROM lookup_blocks b,kodstar_posting_rows(b.payload,b.count) j;
 CREATE VIEW lookup_dependencies AS
     SELECT d.fact_id,k.kind,k.lookup_key,d.found
     FROM fact_lookups d JOIN lookup_keys k ON k.id=d.key_id;
@@ -68,3 +67,19 @@ CREATE TABLE diagnostics (
     message TEXT NOT NULL,
     line INTEGER
 );
+
+CREATE TABLE native_analysis (
+    file_id INTEGER PRIMARY KEY REFERENCES files_rows(id) ON DELETE CASCADE,
+    environment BLOB NOT NULL CHECK(length(environment)=32),
+    status TEXT NOT NULL CHECK(status IN ('complete','incomplete','limited')),
+    detail TEXT
+);
+CREATE TABLE native_inputs (
+    file_id INTEGER NOT NULL REFERENCES native_analysis(file_id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    kind INTEGER NOT NULL CHECK(kind IN (0,1,2)),
+    hash BLOB,
+    PRIMARY KEY(file_id,path),
+    CHECK((kind=2 AND hash IS NOT NULL AND length(hash)=32) OR (kind<>2 AND hash IS NULL))
+) WITHOUT ROWID;
+CREATE INDEX native_input_consumers ON native_inputs(path,file_id);

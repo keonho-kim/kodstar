@@ -6,7 +6,7 @@
 use super::super::packed::codec::{self, Input};
 use super::{Relation, groups::Groups, sets::targets};
 use crate::domain::relations::Resolution;
-use rusqlite::{Connection, Result, Statement, types::ValueRef};
+use rusqlite::{Connection, Result, types::ValueRef};
 
 pub(super) struct Borrowed<'a> {
     id: i64,
@@ -36,13 +36,16 @@ impl Borrowed<'_> {
         }
     }
 
-    pub fn into_owned(self) -> Relation {
+    pub fn into_owned(self, columns: u64) -> Relation {
         Relation {
             id: self.id,
             fact: self.fact,
             source: self.source,
             target: self.target,
-            external: self.external.map(str::to_owned),
+            external: self
+                .external
+                .filter(|_| columns & (1 << 4) != 0)
+                .map(str::to_owned),
             state: self.state,
             rule: self.rule,
             reason: self.reason,
@@ -61,23 +64,21 @@ pub(super) fn visit(
         return Err(codec::invalid());
     }
     let mut groups = Groups::new(bytes, count)?;
-    let mut read: Option<Statement<'_>> = None;
     while let Some((range, set)) = groups.next()? {
         if set == 0 {
             rows(&mut groups.input, &groups.rows[range], source, &mut consume)?;
         } else {
-            let query = match &mut read {
-                Some(query) => query,
-                slot @ None => {
-                    slot.insert(c.prepare("SELECT count,payload FROM relation_sets WHERE id=?1")?)
-                }
-            };
-            let payload: Vec<u8> = query.query_row([set], |r| {
-                if r.get::<_, usize>(0)? != range.len() {
-                    return Err(codec::invalid());
-                }
-                r.get(1)
-            })?;
+            let payload: Vec<u8> = super::super::packed::statements::row(
+                c,
+                "SELECT count,payload FROM relation_sets WHERE id=?1",
+                [set],
+                |r| {
+                    if r.get::<_, usize>(0)? != range.len() {
+                        return Err(codec::invalid());
+                    }
+                    r.get(1)
+                },
+            )?;
             let mut input = Input(&payload);
             rows(&mut input, &groups.rows[range], source, &mut consume)?;
             input.finish()?;

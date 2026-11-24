@@ -19,8 +19,14 @@ impl Extractor<'_> {
             .or_else(|| node.child_by_field_name("type"))
             .or_else(|| node.named_child(0))
     }
-    pub(super) fn references(&mut self, node: Node<'_>, context: &Context) -> Result<()> {
+    pub(super) fn references(
+        &mut self,
+        node: Node<'_>,
+        context: &Context,
+        parent: Option<Node<'_>>,
+    ) -> Result<()> {
         let node_kind = node.kind();
+        self.documentation_references(node, context)?;
         let module_call = matches!(self.language, Language::JavaScript | Language::TypeScript)
             && crate::infrastructure::parse::javascript::imports::dynamic_import(node);
         if self.config.imports.contains(&node_kind) || module_call {
@@ -60,7 +66,7 @@ impl Extractor<'_> {
                 if self.language == Language::Elixir {
                     let mut arity = crate::infrastructure::parse::child_kind(node, &["arguments"])
                         .map_or(0, |n| n.named_child_count());
-                    if node.parent().is_some_and(|p| {
+                    if parent.is_some_and(|p| {
                         p.kind() == "binary_operator"
                             && p.child_by_field_name("operator")
                                 .is_some_and(|n| text(n, self.source) == "|>")
@@ -76,7 +82,7 @@ impl Extractor<'_> {
                         .child_by_field_name("args")
                         .map_or(0, |args| args.named_child_count());
                     expression.push_str(&format!("/{arity}"));
-                    if let Some(remote) = node.parent().filter(|p| p.kind() == "remote")
+                    if let Some(remote) = parent.filter(|p| p.kind() == "remote")
                         && let Some(module) = remote
                             .child_by_field_name("module")
                             .and_then(|n| n.child_by_field_name("module"))
@@ -101,13 +107,14 @@ impl Extractor<'_> {
                 }
             }
         }
+        self.hono(node, context)?;
+        self.htmx_jsx(node, context)?;
         self.ejs_include(node, context)?;
         self.jsx_reference(node, context)?;
-        self.type_use(node, context)?;
+        self.type_use(node, context, parent)?;
         self.erlang_facts(node, context)?;
         self.elixir_capture(node, context)?;
         self.php_facts(node, context)?;
-        self.pascal_facts(node, context)?;
         self.python_property_read(node, context)?;
         self.python_exports(node, context)?;
         self.callable_values(node, context)?;

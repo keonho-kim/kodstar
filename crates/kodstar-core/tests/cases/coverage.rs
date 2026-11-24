@@ -27,21 +27,22 @@ fn generation_coverage_matches_rows_after_update_delete_and_failed_extraction() 
     let removed = p.build(false)?;
     assert_rows(&removed)?;
     p.write("next.rs", "fn broken( {")?;
-    assert!(p.build(false).is_err());
+    let partial = p.build(false)?;
+    assert_eq!(partial.coverage.partial_files, 1);
     let metadata = p
         .query(Query::Symbols {
             file: "next.rs".into(),
         })?
         .metadata
         .ok_or("query metadata")?;
-    assert_eq!(metadata.generation, Some(removed.generation));
-    let mut expected = removed.coverage.clone();
+    assert_eq!(metadata.generation, Some(removed.generation + 1));
+    let mut expected = partial.coverage.clone();
     expected.reused_files = 0;
     assert_eq!(
         serde_json::to_value(metadata.coverage)?,
         serde_json::to_value(expected)?
     );
-    assert_rows(&removed)?;
+    assert_rows(&partial)?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/kodstar-core", "crates/kodstar-cli"]
-exclude = ["vendor/tree-sitter-kotlin-ng"]
+members = ["crates/kodstar-core", "crates/kodstar-cli", "crates/kodstar-clang"]
+exclude = ["vendor/*"]
 resolver = "3"
 
 [workspace.package]
@@ -11,13 +11,32 @@ publish = false
 
 [workspace.dependencies]
 kodstar-core = { path = "crates/kodstar-core" }
+kodstar-clang = { path = "crates/kodstar-clang" }
 clap = { version = "4.6.7", default-features = false, features = ["std", "help", "usage", "error-context", "string"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
-rusqlite = { version = "0.40.2", default-features = false, features = ["libsqlite3-sys", "bundled", "limits", "fallible_uint", "hooks", "functions", "vtab"] }
+rusqlite = { version = "0.40.2", default-features = false, features = ["libsqlite3-sys", "bundled", "limits", "fallible_uint", "hooks", "functions", "vtab", "cache"] }
 blake3 = { version = "1.8", default-features = false, features = ["std"] }
 zstd = { version = "=0.14.3", default-features = false }
 memchr = "=2.8.3"
+html-escape = "=0.3.0"
+shlex = "=2.0.1"
+smallvec = { version = "=1.16.4", features = ["union"] }
+smol_str = "=0.3.7"
+string-interner = { version = "=0.20.0", default-features = false, features = ["std", "backends"] }
+roaring = "=0.12.0"
+petgraph = { version = "=0.8.3", default-features = false, features = ["std"] }
+similar = { version = "=3.2.1", default-features = false, features = ["std", "text"] }
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["std", "fmt", "registry"] }
+criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+rstest = { version = "=0.28.0", default-features = false }
+insta = { version = "=1.49.0", default-features = false }
+loom = { version = "=0.7.2", default-features = false }
+simdutf8 = "=0.1.5"
+encoding_rs = "=0.8.44"
+roxmltree = { git = "https://github.com/RazrFalcon/roxmltree", rev = "37931a222b691d9b07d0d50a35271443df753ffa" }
 crossbeam-channel = "=0.5.17"
 fastcdc = { version = "=5.0.0", default-features = false }
 tempfile = "=3.27.0"
@@ -45,12 +64,13 @@ tree-sitter-zig = "=1.1.2"
 tree-sitter-elixir = "=0.3.5"
 tree-sitter-erlang = "=0.21.0"
 tree-sitter-commonlisp = "=0.4.1"
-tree-sitter-pascal = "=0.10.2"
-tree-sitter-xml = "=0.7.0"
 tree-sitter-json = "=0.24.8"
 tree-sitter-toml-ng = "=0.7.0"
 
 [workspace.lints.rust]
+dead_code = "deny"
+unused_imports = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ["cfg(kodstar_loom)"] }
 unsafe_op_in_unsafe_fn = "deny"
 unused_must_use = "deny"
 
@@ -61,7 +81,23 @@ unimplemented = "deny"
 
 [patch.crates-io]
 tree-sitter-kotlin-ng = { path = "vendor/tree-sitter-kotlin-ng" }
+tree-sitter-commonlisp = { path = "vendor/tree-sitter-commonlisp" }
+tree-sitter-c-sharp = { path = "vendor/tree-sitter-c-sharp" }
+tree-sitter-swift = { path = "vendor/tree-sitter-swift" }
+tree-sitter-javascript = { path = "vendor/tree-sitter-javascript" }
+tree-sitter-typescript = { path = "vendor/tree-sitter-typescript" }
+tree-sitter-c = { path = "vendor/tree-sitter-c" }
+tree-sitter-cpp = { path = "vendor/tree-sitter-cpp" }
+
+tree-sitter-java = { path = "vendor/tree-sitter-java" }
+tree-sitter-ruby = { path = "vendor/tree-sitter-ruby" }
+tree-sitter-scala = { path = "vendor/tree-sitter-scala" }
+tree-sitter-zig = { path = "vendor/tree-sitter-zig" }
+tree-sitter-php = { path = "vendor/tree-sitter-php" }
+tree-sitter-erlang = { path = "vendor/tree-sitter-erlang" }
 
 [profile.dist]
 inherits = "release"
 strip = "symbols"
+lto = "thin"
+codegen-units = 1

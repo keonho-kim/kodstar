@@ -5,17 +5,20 @@
 | 프로젝트 이름 | **KodStar** |
 | 시각적 브랜드 표기 | **kod<sup>☆</sup>**, 실행 명령은 `kodstar` |
 | 실행 명령 | `kodstar` |
-| 구현 언어 | 분석 엔진과 CLI 모두 Rust |
+| 구현 언어 | 분석 엔진과 CLI는 Rust, C/C++ 의미 분석은 정적 링크한 Clang |
 | 실행 플랫폼 | macOS·Linux. Windows는 지원하지 않음 |
 | 제품 형태 | 로컬 소스코드 관계 분석과 자동 변경 이력을 제공하는 CLI와 재사용 가능한 엔진 |
 | 핵심 우선순위 | 분석 근거와 한계의 명확성, 낮은 메모리 사용량, 빠른 조회와 증분 갱신 |
-| 분석 대상 | 프로그래밍 언어 19개, 웹 컴포넌트·템플릿 6개, 코드 해석용 보조 입력 |
+| 분석 대상 | 프로그래밍 언어 18개, HTML·웹 컴포넌트·템플릿 7개, 코드 해석용 보조 입력 |
 | 저장 위치 | 프로젝트 내부의 영구 이력 저장소와 사용자 홈의 프로젝트 경로별 분석 캐시 |
 | 저장 방식 | 수명을 분리한 SQLite 기반 소스 이력과 관계 인덱스 |
 
 이 문서는 제공하는 기능·동작·외부 계약을 정의한다. 명령 사용 예시는 [README](README.md), 언어별 capability는 `kodstar languages`에서 확인한다. 내부 구조는 [아키텍처 문서](docs/architecture.md), 개발·검증 절차는 [개발 문서](docs/development.md)에 둔다.
 
 외부 도구 연동은 Rust 엔진 API, 구조화된 CLI 출력과 `serve --stdio` 계약으로 제공한다.
+
+분석기는 단일 실행 바이너리에 포함한다. 보조 실행 파일이나 별도 런타임 설치·실행 시 추출을
+요구하지 않으며, 내장 리소스는 프로세스 메모리에서 사용한다.
 
 ## 1. 개요
 
@@ -68,6 +71,8 @@ kodstar history diff
 | 변경 영향 | 객체·타입 멤버·파일을 시드로 역방향 영향 후보 탐색 |
 | 경로 조회 | 두 객체 사이의 관계 경로와 최단 경로 조회 |
 | 객체 검색 | 정확 이름과 접두 이름 검색, 동명 후보 선택 |
+| 프로젝트 개요 | 디렉터리·패키지 간 관계, 다수 객체가 사용하는 정의, 순환 import 집계 |
+| 순위 검색 | 식별자·한정 이름·경로의 단어를 바탕으로 정의 후보와 직접 관계 조회 |
 | 설명 | 정의·사용 위치, 해석 규칙, 후보·미해결 이유와 분석 출처 표시 |
 | 증분 갱신 | 조회 시 변경 확인, 변경 파일 재분석, 의존 관계 재해석, 삭제·rename 반영 |
 | 로컬 이력 | 자동 체크포인트, 이름 지정, 이력 조회·파일 diff·전체/선택 파일 복원 |
@@ -79,11 +84,11 @@ kodstar history diff
 | 출력 | 사람이 읽는 text, JSON, JSONL, TSV, 스트리밍, 결과·방문 한도와 잘림 표시 |
 | 자원 관리 | 메모리 예산, 제한된 병렬 처리, 바이트 기준 대기열 제한, 대규모 탐색의 디스크 보조 |
 | 파일 감시 | 사용자가 실행한 동안만 변경을 감시하고 갱신 |
-| 도구 연동 | Rust 엔진 API, 구조화된 CLI 결과, 외부 도구용 stdio 세션 |
+| 도구 연동 | Rust 엔진 API, 구조화된 CLI 결과, stdio 세션 |
 
 ## 3. 지원 언어
 
-19개 언어의 구문 정의와 정적으로 확인 가능한 관계를 분석한다. 언어마다 제공하는 구문·관계와 제한 사항을 별도로 공개한다.
+18개 언어의 구문 정의와 정적으로 확인 가능한 관계를 분석한다. 언어마다 제공하는 구문·관계와 제한 사항을 별도로 공개한다.
 
 | 언어 | 대표 입력 | 분석 대상 기능 |
 |---|---|---|
@@ -92,7 +97,7 @@ kodstar history diff
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | JavaScript 기능, 타입·interface·타입 참조·type-only import·경로 별칭·정적으로 확인 가능한 멤버 연결 |
 | Rust | `.rs` | crate·module·`mod`·`use` tree·`pub use`·함수·타입·trait·`impl`·분리된 impl·`Self`/`self`·조건부 선언 |
 | Go | `.go` | package·import·함수·타입·receiver·메서드·interface 후보·제네릭 타입 참조·build tag |
-| Java | `.java` | package·import·클래스·interface·생성자·메서드·타입 참조·상속·명시 타입 기반 receiver |
+| Java | `.java` | package·import·클래스·interface·생성자·메서드·타입 참조·상속·명시 타입 기반 receiver·메서드 인자 수 비교 |
 | C | `.c`, C로 판별한 `.h` | 함수 선언·정의·struct·include·직접 호출·전처리 조건의 보존 |
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, C++로 판별한 `.h` | namespace·클래스·멤버·선언과 정의·include·상속·정적으로 확인 가능한 호출·template 후보 |
 | C# | `.cs` | namespace·using·클래스·interface·partial·generic·attribute·생성자·타입 기반 멤버 연결·구현 후보 |
@@ -105,7 +110,6 @@ kodstar history diff
 | Elixir | `.ex`, `.exs` | module·`def`/`defp`·alias·import·use·정적 한정 호출·파일 간 대상 연결 |
 | Erlang | `.erl`, `.hrl`, `.escript` | module·name/arity·export·import·include·record·정적 remote call |
 | Common Lisp | `.lisp`, `.cl`, `.lsp`, `.asd` | package·함수·클래스·메서드·매크로 정의·명시적 참조·정적으로 확인 가능한 호출 |
-| Pascal / Delphi | `.pas`, `.pp`, `.dpr`, `.dpk`, `.lpr`, `.inc` | unit·uses·procedure·function·class·property·상속·선언과 구현·확인 가능한 상속 메서드 호출 |
 
 확장자 표는 대표 입력이다. 실제 등록된 확장자·구문 변형과 지원 관계는 `kodstar languages`로 확인한다. 확장자가 겹치는 입력에는 자동 판별과 사용자의 명시적 override를 적용한다.
 
@@ -134,6 +138,7 @@ grammar가 등록되어 있다는 사실만으로 전체 관계 분석을 지원
 
 | 대상 | 입력 | 분석 대상 기능 |
 |---|---|---|
+| HTML | `.html`, `.htm` | script의 JavaScript와 정적 htmx 요청·같은 파일의 ID 참조 |
 | Vue | `.vue` | 내부 JavaScript/TypeScript, import, 정의, 확인 가능한 템플릿·컴포넌트 참조 |
 | Svelte | `.svelte` | script 블록·선정된 내장 구문·import·정의·확인 가능한 템플릿 참조 |
 | Astro | `.astro` | frontmatter·script·import·정의·확인 가능한 템플릿·컴포넌트 참조 |
@@ -144,6 +149,25 @@ grammar가 등록되어 있다는 사실만으로 전체 관계 분석을 지원
 혼합 파일에서 추출한 정의와 사용 위치는 원본 파일의 위치로 표시한다. script 블록 분리·masking 때문에 byte 위치가 틀어지지 않도록 원본 위치 관계를 보존한다.
 
 React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 사용한다. 프레임워크 이름만으로 런타임 라우팅·반응성·템플릿 실행·생성 코드 전체를 해석한다고 표시하지 않는다. CSS 자체의 관계 분석은 범위 밖이다.
+
+Hono는 canonical `hono` import와 lexical 앱 생성 근거를 확인한다. 정적 `get`·`post`·`put`·
+`patch`·`delete`·`head`·`options`·`all`·`on`과 `use`, `basePath`·`route` 및 명시적 앱 import/export를
+분석한다. 등록은 `handles`, 등록된 handler의 Context에 대한 JSX 응답은 `renders` 관계다.
+단순 함수·컴포넌트 이름이 같다는 이유로 프레임워크 근거를 만들지 않는다. 재할당·shadowing·
+사용자 모듈로 바뀐 import는 확인하며 동적 앱 factory·constructor 설정·렌더러 실행은 해석하지 않는다.
+
+htmx의 `hx-get`·`hx-post`·`hx-put`·`hx-patch`·`hx-delete`와 `data-hx-*`는 `http_request`로
+기록한다. HTML, JSX, 지원 template과 Hono의 정적 HTML 문자열에서 원본 위치를 보존한다.
+문자열 escape·보간을 실행해 생성 HTML을 추측하지 않는다. 주석·raw text·비활성 `hx-disable`
+구간은 요청을 만들지 않으며 정적 `hx-target="#id"`는 같은 파일의 유일한 ID를 확인한다.
+루트 기준 URL의 query·fragment를 구분하고 HTTP 메서드·정적 literal·단순 `:name`·말단 `*`
+패턴으로 후보를 찾는다. 상대 URL의 document base, 외부 host, 임의 CSS selector, 다른 htmx
+속성의 상속과 runtime DOM 상태는 확정하지 않는다. 서버 배포와 실행 순서를 증명하지 않은
+HTTP 연결은 후보·복수 후보로 공개하며 `--include-candidates`로 조회한다.
+
+HTTP mount는 최대 16단계, 등록·투영은 최대 16,384개, 투영 경로는 최대 65,536바이트다. 순환·한도를 넘으면 부분 그래프를
+공개하지 않는다. 요청 대상의 추가·수정·삭제와 등록·export 변경도 증분 결과에 반영한다.
+
 
 ## 5. 코드 해석용 보조 입력
 
@@ -156,8 +180,6 @@ React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 
 | .NET solution | `.sln`, `.slnx`의 프로젝트 소속과 참조 |
 | .NET project | `.csproj` 등의 소스 소속과 정적 프로젝트·패키지 참조 |
 | XAML | code-behind·event handler·binding·resource·확인 가능한 ViewModel 참조 |
-| Delphi/Lazarus form | 지원하는 `.dfm`, `.lfm` 변형의 component 구조와 event handler 연결 |
-| Lazarus package | `.lpk`의 unit·package 참조 |
 
 `package.json`, `tsconfig`, `Cargo.toml`, `go.mod`, `go.work`, `pyproject.toml`, `pom.xml`, Composer 설정 등은 해당 언어 해석에 필요한 범위에서 읽는다. 빌드 스크립트나 프로젝트 코드를 실행해 정보를 얻지 않는다. 패키지명이 같아도 ecosystem·모듈 경계가 다르면 같은 객체로 합치지 않는다.
 
@@ -173,6 +195,8 @@ React·Next.js 등의 JSX/TSX 입력은 JavaScript·TypeScript 분석 경로를 
 제공하지 않는다. 선택한 웹 입력의 구조를 읽는 기능은 독립 HTML/CSS 의미 분석을 포함하지 않는다.
 
 ## 7. CLI 명령어 전체
+
+`kodstar --licenses`는 내장한 제삼자 라이선스 고지를 출력하며 프로젝트나 홈 상태를 생성하지 않는다.
 
 ### 설치·최초 실행·제거
 
@@ -221,8 +245,11 @@ Rust API는 `Engine::init`·`InitOptions`·`InitReport`를 사용하며 stdio도
 | `kodstar explain <파일> <객체>` | 정의 정보, 사용 위치, 해석 규칙, 후보와 미해결 이유 표시 |
 | `kodstar impact <파일> [객체]` | 정적 관계를 역방향으로 탐색해 변경 영향 후보 표시 |
 | `kodstar path <파일::객체> <파일::객체>` | 필터를 만족하는 두 객체 사이의 최단 관계 경로 하나 표시 |
+| `kodstar path <파일::객체> <파일::객체> --undirected` | 단계마다 탐색 방향을 바꿀 수 있는 최단 경로 표시 |
 | `kodstar search <이름>` | 정확 이름으로 객체 후보 검색 |
 | `kodstar search <이름> --prefix` | 접두 이름으로 객체 후보 검색 |
+| `kodstar search <단어> --ranked` | 식별자·한정 이름·경로 단어로 후보를 정렬하고 상위 후보의 직접 관계 표시 |
+| `kodstar overview` | 한 인덱스 세대의 디렉터리·패키지 관계, 주요 객체, 순환 import 집계 |
 
 ### 7.3 상태·진단·언어 정보
 
@@ -269,14 +296,26 @@ Rust API는 `Engine::init`·`InitOptions`·`InitReport`를 사용하며 stdio도
 | `kodstar history save NAME` | 현재 소스 상태를 확보하고 체크포인트에 이름 부여 |
 | `kodstar history diff` | 최신 체크포인트와 그 부모 사이의 파일 변경 비교 |
 | `kodstar history diff --from ID --to ID` | 명시한 두 체크포인트의 파일 변경 비교 |
+| `kodstar history diff --graph [--from ID --to ID]` | 체크포인트 사이의 관계 추가·삭제·대상 변경·해석 상태·사용 수 비교 |
 | `kodstar history restore ID [PATH]` | 전체 추적 범위 또는 선택 파일을 지정 상태로 복원 |
 | `kodstar history upgrade` | 기존 이력 형식 전환·검증, 보존 내용 재압축과 빈 페이지 회수 |
 
 `ID`는 체크포인트 식별자 또는 명시적으로 부여한 이름이다. 체크포인트당 이름 하나를 부여하며 기존 이름을 이동하거나 덮어쓰지 않는다. 같은 이름을 같은 체크포인트에 다시 저장하는 것은 허용한다. 출력은 비교에 실제 사용한 식별자를 표시한다. `save` 시 내용이 이미 저장되어 있으면 새 체크포인트 없이 이름만 부여한다. 하위 명령의 옵션은 `history diff --root PATH`처럼 해당 하위 명령 뒤에 둔다.
 
-파일 diff는 추가·수정·삭제, 양쪽 내용 해시·파일 종류·권한과 변경된 텍스트 구간을 표시한다. 동일한 앞·뒤 행을 제외하며 최소 편집 거리의 patch를 보장하지 않는다. 텍스트 표시는 `max_file_bytes`의 한도를 사용한다. 바이너리·표시 한도 초과는 `diff_omitted` 행에 사유를 남기며 소스 저장·해시 비교는 생략하지 않는다.
+파일 diff는 추가·수정·삭제, 양쪽 내용 해시·파일 종류·권한과 변경된 텍스트 구간을 표시한다. 동일한 앞·뒤 행을 제외하고, 변경 창의 양쪽 합계가 256KiB·4,096행 이내이면 내부 동일 행도 행 정렬로 제외한다. 정렬 한도를 넘으면 스트리밍으로 변경 범위를 표시하며 최소 편집 거리의 patch를 보장하지 않는다. 행 번호와 줄 끝은 각 원본을 따른다. 텍스트 표시는 `max_file_bytes`의 한도를 사용한다. 바이너리·표시 한도 초과는 `diff_omitted` 행에 사유를 남기며 소스 저장·해시 비교는 생략하지 않는다.
 
 기본 `history`·`history diff`는 변경 확인과 자동 체크포인트 후 저장된 이력을 조회한다. 분석 성공은 전제하지 않는다. `--no-refresh`는 변경 확인·자동 저장을 생략하고 기존 이력을 읽는다. 명시적 diff의 `--from`과 `--to`는 함께 지정하며 현재 파일을 변경하거나 체크포인트를 만들지 않는다. 최초 체크포인트의 diff는 빈 추적 상태와 비교한다. 이름·이력 조회·파일 diff는 분석 인덱스 없이 사용할 수 있다.
+
+`--graph`는 비교할 체크포인트의 분석을 현재 분석 환경에 맞춰 준비한다. 이력 diff에서
+`--no-refresh`는 작업 파일 캡처를 생략한다. 그래프 비교에 필요한 과거 분석은 선택한
+체크포인트에서 준비한다. 양쪽 설정 fingerprint·추출 버전·관계 registry가 일치해야 한다.
+원본 파일, 구문 출처 객체의 논리 키, 관계 종류, 호출·참조식, 조건, 타입 전용 여부로 사용을
+대응시킨다. 같은 사용의 위치 이동은 비교에서 제외하고, 대상·해석 상태별 사용 수와 대표
+근거를 비교한다. 각 상태에 대상이 하나인 사용은 대상 변경으로 대응할 수 있다. 변경하지
+않은 파일에서 재해석된 관계도 비교에 포함한다. 양쪽 coverage와 `complete`를 함께 확인한다.
+그래프 결과에는 `--limit N`과 `--all`을 적용할 수 있다. 비교 작업의 바이트 예산을 넘으면
+완성된 비교를 반환하지 않고 한도 오류를 보고한다.
+같은 저장소·체크포인트 쌍·분석 환경의 최근 비교 결과는 출력 한도를 바꿔도 재사용할 수 있다.
 
 `restore`는 현재 변경의 보존을 먼저 완료한 뒤 파일을 복원한다. 복원된 상태를 현재 브랜치의 새 체크포인트로 기록하며 기존 이력을 되감거나 삭제하지 않는다. 변경이 없는 복원은 중복 체크포인트를 만들지 않는다. 대상에 없는 추적 파일의 삭제와 선택 경로의 범위를 명확히 하고, 추적하지 않은 파일을 조용히 덮어쓰지 않는다.
 
@@ -337,6 +376,10 @@ kodstar related src/order.rs OrderService --members
 
 양방향 전이 조회는 정방향 도달 집합과 역방향 도달 집합을 각각 구한 뒤 합친다. 매 단계마다 방향을 바꾸는 무방향 확장으로 해석하지 않는다.
 
+`path --undirected`는 두 방향의 내부 관계를 매 단계에서 탐색한다. 공통 의존성을 거치는
+`A → C ← B` 같은 경로도 찾으며 결과의 `direction`은 단계의 실제 진행 방향을 표시한다.
+`--direction`과 동시에 사용할 수 없다. 관계·해석 상태 필터와 방문·깊이·출력 한도를 적용한다.
+
 ### 8.4 간접 연결과 전체 도달 조회
 
 ```bash
@@ -376,6 +419,31 @@ kodstar related src/order.rs create_order --transitive --all --max-nodes 0 --for
 | 제한 | 지원하지 않는 구문·동적 표현·조건부 후보·자원 제한 |
 | 출처 | 추출기·해석기 또는 의미 정보 provider와 그 버전 |
 
+구문 주석에 `ADR: docs/adr/0001.md#review`, `RFC: ../docs/rfc/0003.md`, `@adr` 또는
+`@rfc`로 명시된 Markdown 참조를 현재 객체 또는 바로 앞의 독립 주석에서 찾는다. 상대 경로는
+프로젝트 루트 기준이며, `./` 또는 `../`로 시작하면 주석 파일 기준이다. 대상은 조회한 분석
+세대의 체크포인트에 보존된 프로젝트 내부 일반 파일이어야 한다. 대상 위치는 UTF-8 Markdown의
+첫 제목 또는 지정한 제목 anchor다. 제목은 `#` 형식을 읽고 anchor는 소문자·공백의 하이픈 변환과
+문자·숫자·하이픈·밑줄로 비교한다. 경로·제목·입력 한도로 찾지 못한 경우는 주석 위치와 원인을
+반환한다. 각 문서는 256 KiB와 파일 분석 한도 중 작은 값을, 조회 전체는 1 MiB와 메모리
+예산의 16분의 1 중 작은 값을 적용한다.
+
+### 8.7 프로젝트 개요와 순위 검색
+
+`overview`는 선택된 인덱스에 저장된 분석 파일·보조 입력을 프로젝트 상대 디렉터리로 집계한다.
+확정된 내부 의존 관계를 대상으로 디렉터리·패키지 경계의 사용 수와 근거 위치를 보여준다.
+객체의 사용 수는 다른 소스 객체 수이며, 여러 사용 위치가 같은 객체를 가리키면 한 번 센다.
+순환은 import·reexport·include로 서로에게 도달할 수 있는 파일 그룹을 보여준다. 파일이 많은
+그룹에는 전체 파일 수와 최대 32개 경로 예시를 표시한다. 파일·관계 작업 한도와 결과 한도를
+도달한 경우 해당 범위와 불완전 여부를 결과 요약에 표시한다. 디렉터리 행에서 결과가 잘리면
+관계 집계를 생략한다.
+
+`search --ranked`는 최대 256바이트의 입력에서 단어를 추출하고, 이름·한정 이름·경로에서
+일치하는 단어 수, 전체 이름 일치, 대상 필드에 따라 정렬한다. 식별자의 밑줄과 대소문자
+경계를 단어 경계로 사용한다. 같은 이름의 객체는 독립 후보로 보존하며, 최대 8개 정의 이후
+직접 관계를 반환한다. `--prefix`와 함께 사용할 수 없다. 검색과 관계 조회는 한 인덱스 세대를 사용한다.
+방문 수와 `--max-nodes`는 검색어 또는 그 검색어로 시작하는 색인 단어가 있는 정의를 기준으로 한다.
+
 ## 9. CLI 옵션과 공통 정책
 
 옵션은 의미가 있는 명령에만 적용한다. 예를 들어 `--sites`를 `cache` 명령에 적용하지 않는다.
@@ -400,7 +468,7 @@ kodstar related src/order.rs create_order --transitive --all --max-nodes 0 --for
 | `--format text\|json\|jsonl\|tsv` | 출력 형식 선택 |
 | `--limit N` | 출력 행 제한. 기본값 200 |
 | `--all` | 출력 행 제한 해제 |
-| `--max-nodes N` | 탐색 방문 객체 제한. 기본값 100,000, `0`은 명시적 상한 해제 |
+| `--max-nodes N` | 탐색에서 방문한 객체, 순위 검색의 일치 후보 또는 개요에 포함한 파일의 상한. 기본값 100,000, `0`은 명시적 상한 해제 |
 | `--jobs N` | 분석 워커 수 조정 |
 | `--memory-budget <크기>` | 분석·탐색 작업 메모리 예산 조정 |
 | `--max-file-bytes N` | 파일당 분석 입력 크기 상한 조정 |
@@ -529,6 +597,9 @@ size·mtime·가능한 ctime과 최근 기록 시각을 빠른 변경 확인에 
 | `template_extends` | 템플릿 layout·상속 관계 |
 | `depends_on` | 프로젝트·패키지의 명시적 의존 |
 | `event_handler` | UI·form에서 명시한 handler 연결 |
+| `http_request` | htmx 요청과 일치하는 HTTP 등록·middleware·handler 후보 |
+| `handles` | 검증한 Hono 앱에 명시적으로 등록한 handler·middleware |
+| `renders` | 등록된 Hono handler의 JSX 응답에서 참조한 컴포넌트 |
 
 함수 값의 확인된 대상은 `references`로 보존하고, 잠재 실행은 `indirect_call` 후보로 분리한다. 콜백을 실행하지 않는 소비자도 있을 수 있으므로 직접 `calls`로 승격하지 않는다.
 
@@ -574,6 +645,10 @@ partial 선언·분리된 구현처럼 의미상 같은 객체의 여러 정의 
 
 우선 확인하는 근거는 lexical scope·shadowing·언어별 가시성, 같은 모듈의 정의, 명시적 import·별칭·재수출, 결정 가능한 receiver·소유 타입이다.
 
+Java 메서드 호출은 해석한 대상 중 AST에 기록한 고정 인자 수나 가변 인자의 최소 수가
+맞지 않는 후보를 제외한다. 같은 인자 수나 가변 인자 때문에 여러 대상이 남으면 모호함을
+표시한다. 호출 결과의 receiver를 해석할 때에도 먼저 이 규칙을 적용한다.
+
 프로젝트 전체에서 같은 이름이 하나 발견되거나 가까운 폴더에 있다는 이유만으로 확정 연결을 만들지 않는다. 경로 근접도 같은 보조 정보가 있더라도 후보 정렬과 설명에 한정한다. 표준 내장 이름과 같은 사용자 정의도 먼저 해당 언어의 바인딩 규칙으로 해석한다.
 
 임의의 신뢰도 숫자를 정확도 확률처럼 보여주지 않는다. 적용한 규칙과 근거 위치를 제공한다.
@@ -590,6 +665,61 @@ partial 선언·분리된 구현처럼 의미상 같은 객체의 여러 정의 
 
 조건부 선언·Rust cfg·Go build tag·C/C++ 전처리 조건은 관측한 조건을 보존한다. 여러 조건의 소스를 함께 읽은 결과를 특정 빌드 프로파일의 실행 결과처럼 표시하지 않는다.
 
+전처리 지시문이 선언·타입·본문을 나누면 위치를 보존한 조건별 입력으로 구문을 분석한다.
+실제 코드가 있는 각 도달 가능한 영역이 구문이 성립한 투영에 포함되어야 하며, 누락·한도 초과는
+분석 실패로 처리한다. 모든 빌드 조합의 의미나 매크로 확장을 보장하지 않는다. C/C++의 구조 매크로는
+`unexpanded_native_macros` 진단으로 표시하고 해당 파일과 연결한 대상의 관계를 후보로 유지한다.
+후보 관계는 `--include-candidates`로 조회한다. 원본 소스와 이력 바이트는 변경하지 않는다.
+타입 선언으로 확인한 이름은 보정에서 보호하며, native 입력의 보정·재파싱은 최대 8회다.
+소문자 문장 매크로는 같은 파일 또는 관측된 include 경로에서 함수형 정의를 확인한다.
+정의를 확인하지 못하거나 갱신 중 정의가 사라지면 `source_macro_incomplete`를 공개하고 해당 파일과
+provider의 관계를 확정하지 않는다. 확인할 수 있는 구문 선언과 원문은 유지한다.
+
+코드·식별자·문자열의 잘못된 인코딩은 파일 실패로 진단한다. Python·Ruby의 첫 두 줄에 명시된
+ASCII·UTF-8·Latin-1·ISO-8859-5·Windows-1251/1252·KOI8-R/U는 엄격하게 해석한다.
+인코딩을 추측하거나 잘못된 바이트를 대체하지 않으며 위치와 이력은 원문 바이트를 기준으로 한다.
+Kotlin multi-dollar 문자열은 활성 보간과 원본 위치를 보존한다.
+
+조건부 분석은 파일당 조건 이름 1,024개, 중첩 128단계, 한 조건 체인의 분기 128개, 투영 256개로
+제한한다. 개별 조건의 만족 조합 탐색은 이름 128개와 16,384단계 이내이며 취소를 확인한다. 결과 병합은 worker의
+fact 예산에 맞춰 메모리를 제한하고, 넘치는 key는 page 수를 제한한 임시 DB로 옮긴다. 한도를
+넘으면 결과를 줄여 공개하지 않고 실패한다. 임시 DB는 성공·실패·취소에서 회수한다.
+
+### 13.4 내장 C/C++ 의미 근거
+
+공식 Clang 23.1.4를 프로세스 안에서 실행한다. builtin·표준 라이브러리 header는 실행 파일의 파일별 Zstd frame에서
+요청 시 메모리로 복원하고, 프로젝트 include와 `compile_commands.json`은 분석 중인 체크포인트에서
+읽는다. 디스크의 다른 소스를 따라 읽거나 compiler·빌드·plugin을 실행하지 않는다.
+macOS 바이너리는 같은 LLVM 버전의 libc++와 Zig 0.17.0의 Darwin C header를 원문 그대로 포함한다.
+기본 문맥은 C17·C++20이며 compile command의 `arguments` 또는 셸 quote만 파싱한 `command`에서
+제한된 include·define·표준·예외/RTTI·최적화·thread flag를 적용한다. 셸·response file·plugin을
+실행하지 않으며 외부 SDK 경로와 모호한 복수 compile entry는 의미 확정에 사용하지 않는다.
+시간 의존 builtin macro도 의미 확정에서 제외한다.
+
+Tree-sitter가 C/C++의 기본 선언·scope·사용 사실을 추출하고 내장 Clang이 같은 소스 체크포인트의
+의미 근거를 보강한다. 완료한 TU의 실제 callee를 USR와 선언 위치로 대응해 overload·template
+호출과 매크로 생성 함수를 보강한다. 기존 include 가시성·논리 정체성·충돌과 조건부 선언의
+불확실성은 유지한다. 별도 SDK나
+지원하지 않는 문맥으로 의미 근거를 얻지 못하면 `clang_semantic_incomplete`, 예산에 닿으면
+`clang_semantic_limit`를 공개하고 구문 분석 결과는 유지한다. native 미완료만으로 정상 구문
+조회를 실패시키지 않는다. 이력의 원문은 바꾸지 않는다.
+
+전체 memory budget은 동시 사용량을 위한 scheduling 경계이며 명령 전체의 처리량 제한이 아니다.
+파싱 단계는 입력·queue·DB와 worker stack을 예약하고 남은 공간을 native 작업에 배정한다.
+native 입력은 16MiB stack의 단일 worker가 처리하고 나머지 worker는 2MiB stack으로
+일반 입력을 처리한다. native 큐는 한 입력으로 제한하며 취소·종료를 전달한다. native worker도
+native 입력이 없으면 일반 입력을 처리한다. 파싱 단계가 끝나면 모든 worker·작업 버퍼를
+해제한 뒤 관계 해석 단계로 넘어간다. AST 방문의 깊이와 작업 수에도 파일별 한도를 둔다.
+
+native 입력 한도 128MiB, token 8,388,608개, template 작업 1,048,576개, 경로 65,536개는 파일마다
+초기화하며 메모리 바이트 수와 독립적이다. 결과 버퍼는 task 배정량의 1/8과 16MiB 중 작은 값으로
+제한한다. Clang의 AST·전처리·소스 버퍼 관측치는 task 배정량에서 buffer 여유를 제외한 값과
+비교한다. 이 관측치는 모든 LLVM 할당을 포함하지 않으며 OS RSS hard limit이 아니다.
+제한 원인·사용량·한도와 compiler 오류의 위치 또는 누락 header를 진단한다.
+include와 실패한 파일·디렉터리 탐색의 변화도 소비 파일을 재분석하며 과거 조회는
+해당 체크포인트의 header를 사용한다. callee 근거가 바뀐 호출만 본문 journal에서 교체한다.
+의미 사실이 같으면 native 입력 관측만 교체하므로 include의 공백 편집으로 전체 관계를 초기화하지 않는다.
+
 ## 14. 출력과 오류 계약
 
 ### 14.1 출력 형식
@@ -602,6 +732,15 @@ partial 선언·분리된 구현처럼 의미상 같은 객체의 여러 정의 
 | TSV | 셸 파이프·간단한 후처리 |
 
 stdout에는 선택한 결과 형식만 기록한다. 자동 갱신 진행·경고·진단은 stderr로 보낸다. JSON 결과에 진행 메시지를 섞지 않는다.
+진행은 기본적으로 터미널·리다이렉션·파이프에서 모두 표시한다. 수집·파싱/의미 분석·관계 해석·공개 단계와
+현재 작업 파일을 알리며 반복 진행의 표시 빈도를 제한한다. native 문맥 미완료·작업 제한 진단은
+표시 빈도 제한으로 누락하지 않는다. stdio session은 protocol의 구조화된 progress frame을 사용한다.
+
+전역 옵션 `--verbose true|false`의 기본값은 `true`다. 명령 앞이나 하위 명령 뒤에 지정할 수 있다.
+상세 출력은 일반 진행과 명령 준비·동기화·수집·추출·해석·조회 단계의 시간·결과 개수를 stderr에
+표시한다. `false`는 일반 진행과 시간 출력을 끄며 오류·분석 제한·미완료 경고는 항상 표시한다.
+값은 필수이고 `true`·`false`만 허용한다. 계측은 소스 원문·검색어·프로젝트 경로를 기록하거나
+로그 파일을 생성하지 않으며, stdout과 stdio progress frame의 계약을 바꾸지 않는다.
 
 text는 프로젝트·세대·최신성을 먼저 표시하고 관계별 방향·종류·대상·해석 상태·규칙을 출력한다.
 객체의 정의 위치는 `definition`, 사용 위치는 `use` 행으로 구분한다.
@@ -639,15 +778,33 @@ JSONL은 `type: metadata`, 여러 `type: result`, 마지막 `type: summary` 행 
 fingerprint·추출 버전을 함께 표시한다.
 
 이력 결과 행의 `kind`는 `checkpoint`, `branch`, `change`, `diff_line`, `diff_omitted`, `operation`,
-`impact`다. `impact` 행은 근거 그래프의 `checkpoint`와 `relationship`을 함께 가진다.
+`impact`, `graph_change`다. `impact`는 근거 그래프의 `checkpoint`와 `relationship`을 가진다.
+`graph_change`는 `change`와 양쪽 근거 `before`·`after`를 가진다. 개요 행은 `module`,
+`module_dependency`, `package_dependency`, `hub`, `import_cycle`을 구분한다.
+`documentation_reference` 행은 주석의 `source`, 해석한 문서의 `target`, `resolution`과
+미해결 `reason`을 반환한다.
 `init` 결과의 `parsed_files`는 추출한 입력 수이며 보조 입력도 포함한다.
 `coverage.analyzed_files`는 지원 언어·컴포넌트로 분석한 파일 수다.
+`partial_files`는 Tree-sitter가 일부 구문을 복구했거나 문장 매크로를 확인할 수 없는 파일 수다.
+이름·선언부·소유 범위를 확인한 정의는 유지하고 불확실한 scope나 provider를 거친 관계는 후보로 남긴다.
+`failed_files`는 복구 불가능한 입력·인코딩·파일 작업 한도로 실패한 파일 수이며 `skipped_files`에 포함된다.
+잘못된 JS/TS 설정은 `configuration_invalid`로 격리하며 다른 소스와 원문 이력은 계속 사용할 수 있다.
+`fragment_files`는 독립 선언으로 해석할 수 없는 macro 치환 조각이 있는 파일 수다.
+`configuration_incomplete_files`는 상속·참조 설정을 사용할 수 없는 설정 파일 수다.
+가장 가까운 설정이 실패하거나 한도로 제외되면 상위 설정이나 package fallback을 대신 적용하지 않는다.
+`native_incomplete_files`와 `native_limited_files`는 각각 native 문맥 미완료와 자원 한도 파일 수다.
+부분·실패·조각·설정 누락이 있는 분석 조회는 `complete=false`와 구체적인 `reasons`를 반환한다.
+native 두 범주는 선택적 의미 보강의 상태이며 자체로 `complete=false`를 만들지 않는다.
+부분·실패 입력에서 객체를 찾을 수 없으면 일반적인 대상 없음으로 확정하지 않고
+`source_unavailable`을 반환한다.
 전체 결과 타입은 [results.rs](crates/kodstar-core/src/domain/results.rs)와
 [history.rs](crates/kodstar-core/src/domain/history.rs)에 정의한다.
 
 ### 14.3 위치·경로·정렬
 
-내부 위치는 UTF-8 byte offset과 range를 기준으로 보존한다. text의 line·column은 1부터 시작하며 column은 UTF-8 바이트 열이다. 외부 도구는 이를 필요한 위치 단위로 변환한다.
+내부 위치는 원문 byte offset과 range를 기준으로 보존한다. text의 line·column은 1부터 시작하며
+column은 원문 바이트 열이다. UTF-8 입력은 UTF-8 바이트 위치이며 명시적 인코딩을 디코딩한 입력도
+원문 위치로 되돌린다. 외부 도구는 이를 필요한 위치 단위로 변환한다.
 
 비 UTF-8 경로는 표시 문자열 외에 platform과 손실 없는 OS 경로 bytes의 base64 표현을 제공한다. 표시용 문자열을 객체 정체성이나 파일 재접근의 유일한 기준으로 삼지 않는다.
 
@@ -684,6 +841,7 @@ fingerprint·추출 버전을 함께 표시한다.
 | `$HOME/.kodstar/<path-hash>/index.sqlite-wal` | SQLite의 변경 기록 보조 파일 |
 | `$HOME/.kodstar/<path-hash>/index.sqlite-shm` | SQLite의 공유 상태 보조 파일 |
 | `$HOME/.kodstar/<path-hash>/past.sqlite` | 하나의 재사용 가능한 과거 분석 인덱스. 같은 WAL/SHM·lease·GC 규칙 적용 |
+| `$HOME/.kodstar/<path-hash>/graph-diff.sqlite` | 최근 체크포인트 한 쌍의 관계 변경과 대표 근거. 같은 WAL/SHM·lease·GC 규칙 적용 |
 | `$HOME/.kodstar/<path-hash>/lease.lock` | 사용 중인 캐시의 삭제 방지 |
 | `$HOME/.kodstar/<path-hash>/writer.lock` | 중복 갱신의 직렬화 |
 | `$HOME/.kodstar/gc-state.json` | 캐시 정리 진행 정보 |
@@ -730,7 +888,7 @@ fingerprint·추출 버전을 함께 표시한다.
 
 ## 16. 저장 일관성과 장애 시 동작
 
-분석 캐시의 저장 형식은 **16**다. 호환되지 않는 캐시는 변경 없이 거절한다. 초기화된
+분석 캐시의 저장 형식은 **19**다. 호환되지 않는 캐시는 변경 없이 거절한다. 초기화된
 프로젝트의 이력을 보존하면서 다음 명령으로 명시적으로 재생성한다.
 
 ```bash
@@ -741,16 +899,17 @@ kodstar init /work/project
 캐시는 재생성 가능한 분석 데이터다. 영구 이력의 업그레이드·복구는
 [소스 이력 정책](#153-영구-이력-저장소)을 따르며 캐시 정리와 별개다.
 
-정상 완료한 분석 결과만 새 인덱스 세대로 공개한다. 정의·바인딩·사실·관계·진단·세대 정보가 서로 다른 분석 상태로 섞이지 않도록 한다.
+파일별 처리 결과를 일관되게 완성한 분석을 새 인덱스 세대로 공개한다. 정의·바인딩·사실·관계·진단·세대 정보가 서로 다른 분석 상태로 섞이지 않도록 한다.
 
 - 갱신 작성자는 프로젝트별 하나로 직렬화한다.
 - 동시 갱신 요청은 먼저 끝난 작업의 세대와 변경 상태를 다시 확인한다.
 - 조회는 하나의 커밋된 세대에서 일관된 결과를 읽는다.
 - 중단·디스크 부족·치명적 읽기 실패는 미완료 세대를 공개하지 않는다.
-- 마지막 정상 인덱스는 보존한다.
+- 치명적 실행 실패·취소에서는 마지막 공개 인덱스를 보존한다.
 - 자동 갱신 실패 시 이전 결과를 최신 결과처럼 조용히 반환하지 않는다.
 - 이전 결과를 바로 읽으려면 `--no-refresh`를 사용하고 미확인 최신성을 표시한다.
-- 구문 오류·부분 추출은 정상 완료 캐시로 승격하지 않는다.
+- 구문 오류는 복구 가능한 선언과 진단을 함께 공개하고 불확실한 관계를 확정하지 않는다. 원문 해석이 불가능한 파일은 사실을 제거한다. 이전 사실이나 부분 추출을 최신의 완전한 결과로 표시하지 않는다.
+- 부분·실패·조각·설정 누락은 `complete=false`로 표시한다. native 상태는 별도로 표시한다. 복구 상태의 변화도 성공·실패 lookup 소비자를 다시 해석한다.
 - 설정상 제외·미지원·크기 제한으로 건너뛴 파일은 실패와 구분해 coverage에 표시한다.
 
 폴더 일부를 읽지 못한 스캔을 정상 전수 스캔으로 취급하지 않는다. 확인하지 못한 하위 파일을 삭제된 것으로 제거하지 않는다. 객체 수가 줄었다는 이유만으로 갱신을 거부하지 않고 실제 삭제·추출 완료 근거로 판단한다.
@@ -868,14 +1027,16 @@ stderr에는 프로세스 진단만 쓴다. 요청은 `protocol_version: 2`, 문
 `project`는 `root`, `config`, `jobs`, `memory_budget`, `max_file_bytes`를 받는다.
 크기는 정수 바이트다. 경로는 세션 시작 디렉터리 기준이며, 루트·최신성·분석·한도는
 CLI와 같은 엔진 정책을 따른다. `query.kind`는 `symbols`, `list`, `related`, `deps`, `refs`,
-`explain`, `impact`, `changes`, `path`, `search`다. `changes`는 `since`로 체크포인트를 지정하며 CLI의 `impact --since`와 같다. 파일·이름 인자는 CLI와 같은 뜻이고 `at`는
+`explain`, `impact`, `changes`, `path`, `search`, `overview`다. `changes`는 `since`로 체크포인트를 지정하며 CLI의 `impact --since`와 같다. `search.ranked: true`로 순위 검색을 선택한다. 파일·이름 인자는 CLI와 같은 뜻이고 `at`는
 `[line, byte_column]`, `path`의 `from`·`to`는 `file::qualified-name` 문자열이다.
-`options`는 CLI 조회 옵션의 snake_case 이름과 `relations` 배열을 사용한다. CLI의 `--rev`는 `options.revision`으로 전달한다.
+`options`는 CLI 조회 옵션의 snake_case 이름과 `relations` 배열을 사용한다. CLI의 `--rev`는 `options.revision`으로, `path --undirected`는 `options.direction: "undirected"`로 전달한다.
 `refresh`는 `metadata`(기본), `verify`, `none` 중 하나다.
 
-`history.request.action`은 `upgrade`, `list`, `save`, `diff`, `restore`, `branches`, `create_branch`, `switch_branch`, `delete_branch`다.
+`history.request.action`은 `upgrade`, `list`, `save`, `diff`, `graph_diff`, `restore`, `branches`, `create_branch`, `switch_branch`, `delete_branch`다.
 `save`·브랜치 변경은 `name`, `restore`는 `revision`과 선택적인 `path`, `diff`는 함께 지정하는 `from`·`to`를 받는다.
-`list`와 `diff`만 선택적인 `refresh`를 받으며 기본값은 metadata다. CLI branch 명령도 이 history 요청으로 전송한다.
+`list`, `diff`, `graph_diff`는 선택적인 `refresh`를 받으며 기본값은 metadata다.
+`graph_diff`는 `diff`와 같은 `from`·`to` 선택에 `limit`을 추가한다. `limit: 0`은
+결과 행 상한을 해제한다. CLI branch 명령도 이 history 요청으로 전송한다.
 
 ```jsonl
 {"protocol_version":2,"id":"name-1","method":"history","params":{"project":{"root":"/work/project"},"request":{"action":"save","name":"baseline"}}}

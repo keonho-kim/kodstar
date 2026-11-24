@@ -6,6 +6,7 @@
 //! Concrete I/O and parser adapters. Analysis policy belongs to the inner layers.
 
 pub(crate) mod cache;
+pub(crate) mod clang;
 pub(crate) mod formats;
 pub(crate) mod history;
 pub(crate) mod index;

@@ -50,9 +50,16 @@ pub(super) fn tag_end(source: &[u8], start: usize) -> Result<usize> {
             return Ok(index);
         }
     }
-    Err(Error::operation("component opening tag is incomplete"))
+    Err(Error::input(
+        "source_syntax_error",
+        "component opening tag is incomplete",
+        None,
+    ))
 }
-pub(super) fn matching_brace(source: &[u8], start: usize) -> Result<usize> {
+pub(in crate::infrastructure::formats) fn matching_brace(
+    source: &[u8],
+    start: usize,
+) -> Result<usize> {
     let mut depth = 0usize;
     let mut quote = None;
     let mut escaped = false;
@@ -76,7 +83,11 @@ pub(super) fn matching_brace(source: &[u8], start: usize) -> Result<usize> {
             }
         }
     }
-    Err(Error::operation("Razor code body is incomplete"))
+    Err(Error::input(
+        "source_syntax_error",
+        "Razor code body is incomplete",
+        None,
+    ))
 }
 
 pub(super) fn next_markup(
@@ -104,7 +115,9 @@ pub(super) fn next_markup(
             if source[start..].starts_with(b"@*") {
                 *offset = find(source, start + 2, b"*@")
                     .map(|i| i + 2)
-                    .ok_or_else(|| Error::operation("Razor comment is incomplete"))?;
+                    .ok_or_else(|| {
+                        Error::input("source_syntax_error", "Razor comment is incomplete", None)
+                    })?;
             }
             continue;
         }
@@ -117,7 +130,13 @@ pub(super) fn next_markup(
         if source[start..].starts_with(b"<!--") {
             *offset = find(source, start + 4, b"-->")
                 .map(|i| i + 3)
-                .ok_or_else(|| Error::operation("component comment is incomplete"))?;
+                .ok_or_else(|| {
+                    Error::input(
+                        "source_syntax_error",
+                        "component comment is incomplete",
+                        None,
+                    )
+                })?;
             continue;
         }
         return Ok(Some(start));

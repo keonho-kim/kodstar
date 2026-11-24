@@ -48,23 +48,31 @@ fn pairs(mut bytes: &[u8]) -> Result<Vec<[u64; 2]>> {
 }
 
 pub(super) fn register(c: &Connection, flags: FunctionFlags) -> Result<()> {
-    c.create_scalar_function("kodstar_relation_width", 0, flags, |_| Ok(1024i64))?;
-    c.create_scalar_function("kodstar_relation_pairs", 1, flags, |ctx| {
-        serde_json::to_string(&pairs(ctx.get_raw(0).as_blob()?)?)
-            .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+    super::expansion::register(c, c"kodstar_relation_pair_rows", |bytes, _| {
+        pairs(bytes)?
+            .into_iter()
+            .map(|[a, b]| {
+                Ok([
+                    i64::try_from(a).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    i64::try_from(b).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                ])
+            })
+            .collect()
     })?;
-    c.create_scalar_function("kodstar_relation_postings", 2, flags, |ctx| {
-        let page: i64 = ctx.get(1)?;
-        let values = slots(ctx.get_raw(0).as_blob()?)?
+    super::expansion::register(c, c"kodstar_relation_posting_rows", |bytes, page| {
+        slots(bytes)?
             .into_iter()
             .map(|slot| {
-                page.checked_mul(1024)
-                    .and_then(|n| n.checked_add(slot + 1))
-                    .ok_or(rusqlite::Error::InvalidQuery)
+                Ok([
+                    page.checked_mul(1024)
+                        .and_then(|n| n.checked_add(slot + 1))
+                        .ok_or(rusqlite::Error::InvalidQuery)?,
+                    0,
+                ])
             })
-            .collect::<Result<Vec<_>>>()?;
-        serde_json::to_string(&values).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+            .collect()
     })?;
+    c.create_scalar_function("kodstar_relation_width", 0, flags, |_| Ok(1024i64))?;
     c.create_scalar_function("kodstar_relation_page", 3, flags, |ctx| {
         let mut values = slots(ctx.get_raw(0).as_blob()?)?;
         let slot: i64 = ctx.get(1)?;

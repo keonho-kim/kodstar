@@ -10,4 +10,6 @@ CREATE TEMP TABLE IF NOT EXISTS resolution_members(id INTEGER PRIMARY KEY);
 CREATE TEMP TABLE IF NOT EXISTS resolution_externals(scope INTEGER,key TEXT,PRIMARY KEY(scope,key));
 DELETE FROM resolution_externals;
 CREATE TEMP TABLE IF NOT EXISTS resolution_module_owners(depth INTEGER,file_id INTEGER,owner_id INTEGER,PRIMARY KEY(depth,file_id,owner_id));
+CREATE TEMP TABLE IF NOT EXISTS namespace_paths(language INTEGER,package INTEGER,name TEXT,file_id INTEGER,owner_id INTEGER,
+    PRIMARY KEY(language,package,name,owner_id)) WITHOUT ROWID;
 CREATE TEMP TABLE IF NOT EXISTS resolution_canonical(id INTEGER PRIMARY KEY);

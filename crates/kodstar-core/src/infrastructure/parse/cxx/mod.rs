@@ -8,6 +8,7 @@ pub(super) mod guards;
 pub(super) mod declarations;
 pub(super) mod declarators;
 pub(super) mod imports;
+mod macros;
 
 use crate::domain::diagnostics::Result;
 use crate::domain::facts::{Binding, Fact, Scope};

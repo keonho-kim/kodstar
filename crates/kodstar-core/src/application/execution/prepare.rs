@@ -3,7 +3,10 @@
 // Usage: Context가 선택한 프로젝트의 실행 자원을 준비.
 // Related: crates/kodstar-core/src/application/execution/context.rs.
 
-use super::{context::ProjectContext, state::InputState};
+use super::{
+    context::ProjectContext,
+    state::{InputState, Intent},
+};
 use crate::application::workspace::SelectedProject;
 use crate::domain::{cancellation::Cancellation, diagnostics::Result, query::Refresh};
 use crate::infrastructure::{cache::CacheStore, history::Repository, index, watch::Changes};
@@ -11,11 +14,12 @@ use crate::infrastructure::{cache::CacheStore, history::Repository, index, watch
 pub(super) fn project(
     store: &CacheStore,
     selected: SelectedProject,
-    initialize: bool,
+    intent: &Intent,
     refresh: Refresh,
     watch: bool,
     cancel: &Cancellation,
 ) -> Result<ProjectContext> {
+    let initialize = intent.initializes();
     let repository = Repository::open(&selected.root, initialize, cancel)?;
     crate::infrastructure::installation::register(store, &selected.root, &repository.identity()?)?;
     let create = initialize || refresh != Refresh::None;
@@ -36,8 +40,14 @@ pub(super) fn project(
         selected.settings.db_cache_bytes,
     )?;
     if !create {
-        index::require_committed(&connection)?;
-        index::require_history(&connection, &repository.identity()?, None)?;
+        if !intent.diagnostic() {
+            index::require_committed(&connection)?;
+        }
+        let generation: i64 =
+            connection.query_row("SELECT generation FROM metadata", [], |r| r.get(0))?;
+        if generation > 0 {
+            index::require_history(&connection, &repository.identity()?, None)?;
+        }
     }
     let changes = if watch {
         Some(Changes::start(

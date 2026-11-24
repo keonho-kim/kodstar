@@ -36,11 +36,9 @@ impl Extractor<'_> {
         &mut self,
         node: Node<'_>,
         context: &mut Context,
+        top_level: bool,
     ) -> Result<()> {
-        if !node
-            .parent()
-            .is_some_and(|parent| parent.parent().is_none())
-        {
+        if !top_level || !matches!(self.language, Language::CSharp | Language::Php) {
             return Ok(());
         }
         let declaration = matches!(

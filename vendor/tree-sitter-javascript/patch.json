@@ -1,0 +1,17 @@
+{
+  "reason": "Accept JSX attribute text and property-context reserved words without changing JavaScript lexical keywords.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "          $.html_character_reference,",
+      "after": "          $.html_character_reference,\n          alias(token.immediate('&'), $.string_fragment),",
+      "occurrences": 2
+    },
+    {
+      "file": "grammar.js",
+      "before": "_jsx_attribute_name: $ => choice(alias($._jsx_identifier, $.property_identifier), $.jsx_namespace_name),",
+      "after": "_jsx_attribute_name: $ => choice(alias($._jsx_identifier, $.property_identifier), alias(choice('break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with'), $.property_identifier), $.jsx_namespace_name),",
+      "occurrences": 1
+    }
+  ]
+}

@@ -100,7 +100,8 @@ pub(super) fn extract(
         let masked = &mut mask[script.body];
         masked.copy_from_slice(original);
         let offset = maximum;
-        parser.extract_with_syntax(
+        let earlier = parser.partial.take();
+        let result = parser.extract_with_syntax(
             ParseSyntax { language, jsx: false, ejs_server: false, original_source: None },
             path, masked, cancel, &mut |mut fact| {
                 if script_facts::client_fact(&mut fact, offset, root, origin, &mut maximum)? {
@@ -116,7 +117,12 @@ pub(super) fn extract(
             ), error);
             wrapped.kind = kind;
             wrapped
-        })?;
+        });
+        parser.remap_partial(earlier, |mut span| {
+            script_facts::position(&mut span, origin);
+            span
+        });
+        result?;
     }
     Ok(())
 }

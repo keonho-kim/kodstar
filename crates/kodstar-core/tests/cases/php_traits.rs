@@ -122,7 +122,7 @@ fn php_trait_rule_changes_reresolve_unchanged_callers_and_match_rebuilds() -> Te
 }
 
 #[test]
-fn php_deep_return_chains_fail_with_a_limit_and_preserve_the_generation() -> TestResult {
+fn php_deep_return_chains_publish_a_file_work_limit() -> TestResult {
     let p = Project::new()?;
     p.write("main.php",r"<?php class Item { function copy(): self { return $this; } } function caller(Item $item) { $item->copy(); }")?;
     let initial = p.build(false)?;
@@ -131,16 +131,13 @@ fn php_deep_return_chains_fail_with_a_limit_and_preserve_the_generation() -> Tes
         "main.php",
         &format!("<?php function caller($item) {{ {chain}; }}"),
     )?;
-    assert_eq!(
-        p.build(false).err().ok_or("expected depth limit")?.kind,
-        ErrorKind::Limit
-    );
+    assert_eq!(p.build(false)?.coverage.failed_files, 1);
     let rows = p.query(Query::Symbols {
         file: "main.php".into(),
     })?;
     assert_eq!(
         rows.metadata.ok_or("metadata")?.generation,
-        Some(initial.generation)
+        Some(initial.generation + 1)
     );
     Ok(())
 }

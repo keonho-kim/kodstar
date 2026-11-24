@@ -3,6 +3,7 @@
 // Usage: 파일 diff가 내용 해시 비교 후 호출.
 // Related: crates/kodstar-core/src/application/history/compare.rs, crates/kodstar-core/src/application/history/text/ranges.rs.
 
+mod alignment;
 mod lines;
 mod ranges;
 mod validation;
@@ -38,6 +39,18 @@ pub(super) fn render(
         }
         _ => (0..u64::MAX, 0..u64::MAX, 1),
     };
+    if let (Content::Text { id: a, .. }, Content::Text { id: b, .. }) = (before, after)
+        && let Some(count) = alignment::render(
+            connection,
+            path,
+            [(a, left.clone()), (b, right.clone())],
+            line,
+            cancel,
+            sink,
+        )?
+    {
+        return Ok(count);
+    }
     let mut count = 0;
     for (side, content, range) in [("before", before, left), ("after", after, right)] {
         match content {

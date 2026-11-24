@@ -4,7 +4,11 @@
 // Related: crates/kodstar-core/src/infrastructure/index/dependencies/mod.rs.
 
 use crate::domain::diagnostics::{Error, Result};
+#[cfg(test)]
 use std::fmt::Write;
+
+#[cfg(test)]
+mod tests;
 
 pub(super) const MAX_COUNT: usize = 128;
 
@@ -21,6 +25,7 @@ pub(super) fn push(output: &mut Vec<u8>, fact: i64, previous: i64, found: bool) 
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn json(bytes: &[u8], count: usize) -> Result<String> {
     let mut output = String::with_capacity(count.min(MAX_COUNT) * 25 + 2);
     output.push('[');

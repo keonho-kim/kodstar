@@ -1,0 +1,47 @@
+{
+  "reason": "Preserve JSX property names, TypeScript variance/type-only exports, generic function type arguments and newline-separated type members. Member separators are checked against source tokens by the input adapter.",
+  "replacements": [
+    {
+      "file": "node_modules/tree-sitter-javascript/grammar.js",
+      "before": "          $.html_character_reference,",
+      "after": "          $.html_character_reference,\n          alias(token.immediate('&'), $.string_fragment),",
+      "occurrences": 2
+    },
+    {
+      "file": "common/define-grammar.js",
+      "before": "      type_parameter: $ => seq(\n        optional('const'),",
+      "after": "      type_parameter: $ => seq(\n        optional('const'),\n        optional(seq('in', optional('out'))),\n        optional('out'),",
+      "occurrences": 1
+    },
+    {
+      "file": "common/define-grammar.js",
+      "before": "          $.export_clause,\n          optional($._from_clause),",
+      "after": "          choice($.export_clause, '*', $.namespace_export),\n          optional($._from_clause),",
+      "occurrences": 1
+    },
+    {
+      "file": "node_modules/tree-sitter-javascript/grammar.js",
+      "before": "_jsx_attribute_name: $ => choice(alias($._jsx_identifier, $.property_identifier), $.jsx_namespace_name),",
+      "after": "_jsx_attribute_name: $ => choice(alias($._jsx_identifier, $.property_identifier), alias(choice('break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with'), $.property_identifier), $.jsx_namespace_name),",
+      "occurrences": 1
+    },
+    {
+      "file": "common/define-grammar.js",
+      "before": "      type_arguments: $ => seq(\n        '<',\n        commaSep1($.type),\n        optional(','),\n        '>',\n      ),\n",
+      "after": "      type_arguments: $ => choice(\n        seq('<', commaSep1($.type), optional(','), '>'),\n        seq(\n          alias($._nested_function_type_argument, $.function_type),\n          repeat(seq(',', $.type)), optional(','), '>',\n        ),\n      ),\n\n      _nested_function_type_argument: $ => prec.left(seq(\n        field('type_parameters', alias($._nested_type_parameters, $.type_parameters)),\n        field('parameters', $.formal_parameters),\n        '=>',\n        field('return_type', choice($.type, $.asserts, $.type_predicate)),\n      )),\n\n      _nested_type_parameters: $ => seq(\n        '<<', commaSep1($.type_parameter), optional(','), '>',\n      ),\n",
+      "occurrences": 1
+    },
+    {
+      "file": "common/define-grammar.js",
+      "before": "      call_signature: $ => $._call_signature,",
+      "after": "      call_signature: $ => choice(\n        $._call_signature,\n        seq(\n          field('type_parameters', optional($.type_parameters)),\n          field('parameters', $.formal_parameters),\n          field('return_type', alias($._closed_signature_return, $.type_annotation)),\n          repeat(alias($._closed_generic_signature, $.call_signature)),\n          alias($._following_generic_signature, $.call_signature),\n        ),\n      ),\n\n      _closed_signature_return: $ => seq(':', choice(\n        $.lookup_type, $.generic_type, $.predefined_type, $.array_type,\n        $.tuple_type, $.object_type, $.literal_type, $.intersection_type, $.union_type,\n      )),\n      _closed_generic_signature: $ => seq(\n        field('type_parameters', $.type_parameters),\n        field('parameters', $.formal_parameters),\n        field('return_type', alias($._closed_signature_return, $.type_annotation)),\n      ),\n      _following_generic_signature: $ => seq(\n        field('type_parameters', $.type_parameters),\n        field('parameters', $.formal_parameters),\n        field('return_type', optional(choice($.type_annotation, $.asserts_annotation, $.type_predicate_annotation))),\n      ),",
+      "occurrences": 1
+    },
+    {
+      "file": "common/define-grammar.js",
+      "before": "    conflicts: ($, previous) => previous.concat([",
+      "after": "    conflicts: ($, previous) => previous.concat([\n      [$.primary_expression, $.type_parameter],\n      [$.jsx_attribute, $.constraint],\n      [$.type_annotation, $._closed_signature_return],",
+      "occurrences": 1
+    }
+  ]
+}

@@ -1,11 +1,15 @@
 // Purpose: 바이트 예산 예약과 permit 반납.
 // Pattern: RAII Permit.
 // Usage: 입력과 이벤트 소유자가 예약·해제.
-// Related: crates/kodstar-core/src/application/analysis/events.rs, crates/kodstar-core/src/application/analysis/discovery.rs.
+// Related: crates/kodstar-core/src/application/analysis/events.rs, crates/kodstar-core/src/application/analysis/discovery.rs, crates/kodstar-core/src/application/analysis/budget/model.rs.
 
 //! Byte permits account for owned input and queued facts until their consumer releases them.
 
-use std::sync::{Arc, Condvar, Mutex};
+#[cfg(all(test, kodstar_loom))]
+use loom::sync::{Condvar, Mutex};
+use std::sync::Arc;
+#[cfg(not(all(test, kodstar_loom)))]
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
 use crate::domain::cancellation::Cancellation;
@@ -78,7 +82,10 @@ impl Drop for Permit {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, kodstar_loom))]
+mod model;
+
+#[cfg(all(test, not(kodstar_loom)))]
 mod tests {
     use std::sync::mpsc;
     use std::thread;

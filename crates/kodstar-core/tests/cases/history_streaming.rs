@@ -6,7 +6,7 @@
 use crate::support::*;
 use kodstar_core::*;
 
-fn difference(
+pub(super) fn difference(
     before: &[u8],
     after: &[u8],
 ) -> std::result::Result<Vec<HistoryRow>, Box<dyn std::error::Error>> {
@@ -155,7 +155,8 @@ fn corrupted_line_metadata_cannot_change_the_reported_diff_range() -> TestResult
 }
 
 #[test]
-fn inserting_a_full_chunk_preserves_suffix_alignment_and_original_context() -> TestResult {
+fn inserting_a_full_chunk_preserves_suffix_alignment_and_excludes_unchanged_context() -> TestResult
+{
     let tail = "tail line\n".repeat(15000);
     let insertion = format!("{}\n", "z".repeat(65535));
     let before = format!("head\n{tail}");
@@ -174,13 +175,6 @@ fn inserting_a_full_chunk_preserves_suffix_alignment_and_original_context() -> T
             }
         })
         .collect();
-    assert_eq!(
-        lines,
-        vec![
-            ("before", 2, "tail line\n"),
-            ("after", 2, insertion.as_str()),
-            ("after", 3, "tail line\n")
-        ]
-    );
+    assert_eq!(lines, vec![("after", 2, insertion.as_str())]);
     Ok(())
 }

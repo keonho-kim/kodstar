@@ -48,6 +48,7 @@ pub(in crate::application::analysis) fn prepare(
     };
     let from = checkpoints::resolve(&selection.connection, &prior)?;
     let count = changes::prepare(&selection.connection, Some(from), snapshot.id, cancel)?;
+    super::super::native_inputs::prepare(&selection.connection, previous, cancel)?;
     selection.previous_files = crate::infrastructure::index::coverage(previous)?.scanned_files;
     // A sequential inventory is cheaper when most existing paths changed.
     if count > selection.previous_files / 2 {

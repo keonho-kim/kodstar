@@ -26,7 +26,7 @@ fn exact_module_lookup_does_not_scan_unrelated_files()
             language: "rust".into(),
             module: format!("crate::module{i}"),
             package: "fixture".into(),
-            content_hash: "00".repeat(32),
+            content_hash: [0; 32],
             size: 0,
             status: "analyzed",
         }
@@ -48,6 +48,7 @@ fn exact_module_lookup_does_not_scan_unrelated_files()
     let mut lookup = Lookup {
         connection: &sql,
         fact: None,
+        source: None,
         relation: "references",
         external_scope_id: 0,
         scope_sequence: 0,

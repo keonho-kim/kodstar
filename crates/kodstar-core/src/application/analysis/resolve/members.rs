@@ -6,6 +6,9 @@
 use crate::application::analysis::resolve::Lookup;
 use crate::domain::diagnostics::Result;
 
+#[cfg(test)]
+mod tests;
+
 impl Lookup<'_, '_> {
     pub(super) fn members(&mut self, member: &str) -> Result<()> {
         if self.member_depth >= 32 {
@@ -29,9 +32,7 @@ impl Lookup<'_, '_> {
         let elixir = self.language == crate::domain::languages::Language::Elixir;
         let keyed = matches!(
             self.language,
-            crate::domain::languages::Language::Rust
-                | crate::domain::languages::Language::Pascal
-                | crate::domain::languages::Language::Kotlin
+            crate::domain::languages::Language::Rust | crate::domain::languages::Language::Kotlin
         );
         let key = keyed.then(|| self.language.lookup_key(member));
         let member = key.as_deref().unwrap_or(member);
@@ -105,10 +106,7 @@ impl Lookup<'_, '_> {
                 JOIN facts fact ON fact.id=?1 JOIN files caller ON caller.id=fact.file_id
                 WHERE s.id=resolution_candidates.id AND s.exported=0 AND (target.package<>caller.package OR target.module<>caller.module OR target.declared_module<>caller.declared_module))",[self.fact])?;
         }
-        if matches!(
-            self.language,
-            crate::domain::languages::Language::Zig | crate::domain::languages::Language::Pascal
-        ) {
+        if matches!(self.language, crate::domain::languages::Language::Zig) {
             self.connection.cached_execute("DELETE FROM resolution_candidates WHERE EXISTS (SELECT 1 FROM symbols s WHERE s.id=resolution_candidates.id AND s.exported=0 AND s.file_id<>(SELECT file_id FROM facts WHERE id=?1))",[self.fact])?;
         }
         Ok(())

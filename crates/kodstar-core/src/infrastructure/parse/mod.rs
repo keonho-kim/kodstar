@@ -8,6 +8,7 @@
 mod bindings;
 mod call_expressions;
 mod callable_values;
+mod conditional;
 mod conditions;
 mod context;
 mod csharp;
@@ -16,13 +17,18 @@ mod declaration_metadata;
 mod declarations;
 mod decorators;
 mod definitions;
+mod documentation;
 mod elixir;
 mod erlang;
+mod extraction;
 mod fields;
 mod forms;
 mod go;
+mod hybrid;
 mod imports;
 mod inheritance;
+mod input;
+mod java;
 mod javascript;
 mod kotlin;
 mod lisp;
@@ -31,9 +37,9 @@ mod namespaces;
 mod nominal;
 mod ownership;
 mod parameters;
-mod pascal;
 mod php;
 mod python;
+mod recovery;
 mod references;
 mod return_values;
 mod ruby;
@@ -45,15 +51,15 @@ mod swift;
 mod syntax;
 mod type_uses;
 mod validation;
+mod walk;
 mod zig;
 
 use crate::domain::cancellation::Cancellation;
-use crate::domain::diagnostics::{Error, ErrorKind, Result};
+use crate::domain::diagnostics::Result;
 use crate::domain::facts::{Definition, Fact, Scope};
 use crate::domain::languages::Language;
 use crate::domain::source::SourceSpan;
 use crate::domain::symbols::SymbolKind;
-use crate::infrastructure::languages;
 use crate::infrastructure::languages::SyntaxConfig;
 use context::{Context, NamePath};
 pub(crate) use session::{ParseSession, ParseSyntax};
@@ -63,6 +69,7 @@ pub(crate) use syntax::{child_kind, span, text};
 struct Extractor<'a> {
     language: Language,
     source: &'a [u8],
+    cancel: &'a Cancellation,
     config: SyntaxConfig,
     next: u32,
     fact_limit: usize,
@@ -71,120 +78,12 @@ struct Extractor<'a> {
     lisp_package: Option<std::sync::Arc<str>>,
     swift_manifest: bool,
     cxx_header: bool,
+    native_macro_context: bool,
     ejs_server: bool,
+    htmx: bool,
+    hono_contexts: std::collections::BTreeSet<u32>,
     original_source: Option<&'a [u8]>,
-}
-
-impl ParseSession {
-    pub(crate) fn extract(
-        &mut self,
-        language: Language,
-        path: &Path,
-        source: &[u8],
-        cancel: &Cancellation,
-        emit: &mut dyn FnMut(Fact) -> Result<()>,
-    ) -> Result<()> {
-        self.extract_with_syntax(
-            ParseSyntax {
-                language,
-                jsx: false,
-                ejs_server: false,
-                original_source: None,
-            },
-            path,
-            source,
-            cancel,
-            emit,
-        )
-    }
-
-    pub(crate) fn extract_with_syntax(
-        &mut self,
-        syntax: ParseSyntax<'_>,
-        path: &Path,
-        source: &[u8],
-        cancel: &Cancellation,
-        emit: &mut dyn FnMut(Fact) -> Result<()>,
-    ) -> Result<()> {
-        let ParseSyntax {
-            language,
-            jsx,
-            ejs_server,
-            original_source,
-        } = syntax;
-        let grammar = if language == Language::TypeScript && jsx {
-            tree_sitter_typescript::LANGUAGE_TSX.into()
-        } else {
-            languages::grammar(language, path)?
-        };
-        let masked = if language == Language::Pascal {
-            crate::infrastructure::parse::pascal::uses::prepare(source, cancel)?
-        } else {
-            std::borrow::Cow::Borrowed(source)
-        };
-        let tree = self.parse_tree(&grammar, path, &masked, cancel)?;
-        if let Some(original) = original_source {
-            if original.len() != source.len() {
-                return Err(Error::operation("original and masked source ranges differ"));
-            }
-            validation::validate_rendered_names(&tree, original, path, cancel)?;
-        }
-        file_root(path, source, emit)?;
-        let mut extractor = Extractor {
-            language,
-            source,
-            config: SyntaxConfig::for_language(language),
-            next: 0,
-            file_namespace: None,
-            lisp_package: None,
-            swift_manifest: language == Language::Swift
-                && path.file_name().is_some_and(|n| n == "Package.swift"),
-            cxx_header: matches!(language, Language::C | Language::Cpp)
-                && path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
-                    ["h", "hh", "hpp", "hxx"]
-                        .iter()
-                        .any(|e| s.eq_ignore_ascii_case(e))
-                }),
-            ejs_server,
-            original_source,
-            fact_limit: self.fact_limit,
-            emit,
-        };
-        let initial = Context::default();
-        let mut contexts = vec![initial];
-        let mut cursor = tree.root_node().walk();
-        let mut steps = 0usize;
-        loop {
-            if contexts.len() > 1024 {
-                return Err(Error::new(
-                    ErrorKind::Limit,
-                    "syntax nesting exceeds 1024 levels",
-                ));
-            }
-            if steps.is_multiple_of(128) {
-                cancel.check()?;
-            }
-            steps += 1;
-            let parent = contexts
-                .last()
-                .ok_or_else(|| Error::operation("missing extraction context"))?
-                .clone();
-            let current = extractor.enter(cursor.node(), parent)?;
-            contexts.push(current);
-            if cursor.goto_first_child() {
-                continue;
-            }
-            loop {
-                contexts.pop();
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    return Ok(());
-                }
-            }
-        }
-    }
+    projection: Option<&'a conditional::Projection<'a>>,
 }
 
 pub(crate) fn file_root(

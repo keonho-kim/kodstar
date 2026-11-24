@@ -5,6 +5,8 @@
 
 #[path = "cases/annotations.rs"]
 mod annotations;
+#[path = "cases/append_reuse.rs"]
+mod append_reuse;
 #[path = "cases/astro.rs"]
 mod astro;
 #[path = "cases/blade.rs"]
@@ -15,10 +17,14 @@ mod cache;
 mod callable_values;
 #[path = "cases/checkpoint_delta.rs"]
 mod checkpoint_delta;
+#[path = "cases/clang.rs"]
+mod clang;
 #[path = "cases/component_links.rs"]
 mod component_links;
 #[path = "cases/components.rs"]
 mod components;
+#[path = "cases/configuration_failures.rs"]
+mod configuration_failures;
 #[path = "cases/configuration_paths.rs"]
 mod configuration_paths;
 #[path = "cases/consistency.rs"]
@@ -65,6 +71,8 @@ mod go_incremental;
 mod go_interfaces;
 #[path = "cases/go_paths.rs"]
 mod go_paths;
+#[path = "cases/history_alignment.rs"]
+mod history_alignment;
 #[path = "cases/history_impact.rs"]
 mod history_impact;
 #[path = "cases/history_metadata.rs"]
@@ -81,6 +89,14 @@ mod history_streaming;
 mod history_upgrade;
 #[path = "cases/history_watch.rs"]
 mod history_watch;
+#[path = "cases/htmx.rs"]
+mod htmx;
+#[path = "cases/http.rs"]
+mod http;
+#[path = "cases/http_lookup.rs"]
+mod http_lookup;
+#[path = "cases/hybrid_recovery.rs"]
+mod hybrid_recovery;
 #[path = "cases/identities.rs"]
 mod identities;
 #[path = "cases/incremental_bodies.rs"]
@@ -93,6 +109,10 @@ mod incremental_inputs;
 mod incremental_scopes;
 #[path = "cases/incremental_statistics.rs"]
 mod incremental_statistics;
+#[path = "cases/input_contexts.rs"]
+mod input_contexts;
+#[path = "cases/input_failures.rs"]
+mod input_failures;
 #[path = "cases/javascript.rs"]
 mod javascript;
 #[path = "cases/kotlin.rs"]
@@ -115,14 +135,26 @@ mod module_incremental;
 mod module_rules;
 #[path = "cases/namespaces.rs"]
 mod namespaces;
+#[path = "cases/native_context.rs"]
+mod native_context;
+#[path = "cases/native_input_budget.rs"]
+mod native_input_budget;
+#[path = "cases/native_inputs.rs"]
+mod native_inputs;
+#[path = "cases/native_structures.rs"]
+mod native_structures;
 #[path = "cases/optimization.rs"]
 mod optimization;
 #[path = "cases/ownership.rs"]
 mod ownership;
 #[path = "cases/package_paths.rs"]
 mod package_paths;
-#[path = "cases/pascal.rs"]
-mod pascal;
+#[path = "cases/parser_input.rs"]
+mod parser_input;
+#[path = "cases/parser_macros.rs"]
+mod parser_macros;
+#[path = "cases/parser_native.rs"]
+mod parser_native;
 #[path = "cases/php.rs"]
 mod php;
 #[path = "cases/php_traits.rs"]
@@ -163,6 +195,8 @@ mod rust_macros;
 mod rust_namespaces;
 #[path = "cases/scala.rs"]
 mod scala;
+#[path = "cases/source_forms.rs"]
+mod source_forms;
 #[path = "cases/storage_atoms.rs"]
 mod storage_atoms;
 #[path = "cases/storage_projection.rs"]

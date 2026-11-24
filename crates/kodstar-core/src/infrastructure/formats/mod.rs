@@ -8,6 +8,8 @@
 mod auxiliary;
 mod components;
 mod dotnet;
+pub(crate) mod htmx;
+pub(crate) mod markup;
 mod xml;
 
 pub(crate) use auxiliary::{extract as extract_auxiliary, language as auxiliary_language};
@@ -41,7 +43,7 @@ pub(crate) fn is_auxiliary(path: &Path) -> bool {
         .is_some_and(|extension| {
             matches!(
                 extension,
-                "sln" | "slnx" | "csproj" | "fsproj" | "vbproj" | "xaml" | "dfm" | "lfm" | "lpk"
+                "sln" | "slnx" | "csproj" | "fsproj" | "vbproj" | "xaml"
             )
         })
         || path

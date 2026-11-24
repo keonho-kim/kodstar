@@ -9,6 +9,26 @@ use crate::domain::languages::Language;
 use crate::infrastructure::index::cached::Sql as Connection;
 use rusqlite::{OptionalExtension, params};
 
+mod cxx;
+#[cfg(test)]
+mod tests;
+
+pub(super) fn prepare_paths(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "DELETE FROM namespace_paths;
+         INSERT INTO namespace_paths
+         SELECT s.language_id,f.package_id,
+             CASE WHEN s.language='rust' THEN f.module||'::'||replace(s.qualified_name,'r#','')
+                  ELSE replace(replace(s.qualified_name,'.','::'),char(92),'::') END,
+             f.id,s.id
+         FROM symbols s JOIN files f ON f.id=s.file_id
+         WHERE s.kind_id=(SELECT id FROM atoms WHERE value='module')
+           AND s.language_id IN (SELECT id FROM atoms WHERE value IN ('rust','csharp','php','elixir'))
+           AND f.status_id=(SELECT id FROM atoms WHERE value='analyzed');",
+    )?;
+    Ok(())
+}
+
 pub(super) fn nearest_module(
     c: &Connection,
     file: i64,
@@ -61,10 +81,6 @@ impl Lookup<'_, '_> {
         module: &str,
         depth: usize,
     ) -> Result<()> {
-        self.connection.cached_execute(
-            "DELETE FROM resolution_module_owners WHERE depth=?1",
-            [depth],
-        )?;
         if !matches!(
             context.language,
             Language::Rust | Language::Cpp | Language::CSharp | Language::Php | Language::Elixir
@@ -77,22 +93,22 @@ impl Lookup<'_, '_> {
             return Ok(());
         }
         let normalized = module.replace(['.', '\\'], "::");
-        self.connection.cached_execute(
-            "INSERT OR IGNORE INTO resolution_module_owners
-            SELECT ?4,s.file_id,s.id FROM symbols s JOIN files f ON f.id=s.file_id
-            WHERE s.kind_id=(SELECT id FROM atoms WHERE value='module')
-              AND s.language_id=(SELECT id FROM atoms WHERE value=?1)
-              AND f.package_id=(SELECT id FROM atoms WHERE value=?2)
-              AND f.status_id=(SELECT id FROM atoms WHERE value='analyzed')
-              AND (CASE WHEN ?1='rust' THEN f.module||'::'||replace(s.qualified_name,'r#','')
-                        ELSE replace(replace(s.qualified_name,'.','::'),char(92),'::') END)=?3",
-            params![
-                context.language.as_str(),
-                context.package,
-                normalized,
-                depth
-            ],
-        )?;
+        if context.language == Language::Cpp {
+            cxx::owners(self.connection, &context.package, &normalized, depth)?;
+        } else {
+            self.connection.cached_execute(
+                "INSERT OR IGNORE INTO resolution_module_owners
+            SELECT ?4,file_id,owner_id FROM namespace_paths
+            WHERE language=(SELECT id FROM atoms WHERE value=?1)
+              AND package=(SELECT id FROM atoms WHERE value=?2) AND name=?3",
+                params![
+                    context.language.as_str(),
+                    context.package,
+                    normalized,
+                    depth
+                ],
+            )?;
+        }
         self.connection.cached_execute("INSERT OR IGNORE INTO resolution_modules SELECT depth,file_id FROM resolution_module_owners WHERE depth=?1",[depth])?;
         Ok(())
     }
@@ -135,6 +151,9 @@ impl Lookup<'_, '_> {
             return Ok(false);
         }
         let name = name.replace(['.', '\\'], "::");
+        if context.language == Language::Cpp {
+            return cxx::declared(self.connection, &context.package, &name);
+        }
         Ok(self.connection.cached_row(
             "SELECT EXISTS(SELECT 1 FROM symbols s JOIN files f ON f.id=s.file_id
             WHERE s.language=?1 AND f.package=?2 AND s.kind='module'

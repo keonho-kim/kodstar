@@ -69,6 +69,7 @@ pub(crate) fn run(
                 extraction_version: Some(extraction),
             });
         }
+        project.repository.release();
         sink.begin(&metadata)?;
         let summary = QuerySummary {
             complete: true,
@@ -85,7 +86,7 @@ pub(crate) fn run(
         state.analysis_checkpoint = Some(state.checkpoint.clone());
     }
     let path = project.cache.directory.join("past.sqlite");
-    let _writer = project.cache.writer(cancel)?;
+    let writer = project.cache.writer(cancel)?;
     let mut before = index::open(
         &path,
         &selected.root,
@@ -129,12 +130,18 @@ pub(crate) fn run(
         &project.connection,
         cancel,
     )?;
+    for connection in [&before, &project.connection] {
+        index::limit_reads(connection, selected.settings.memory_budget)?;
+        index::observe_cancellation(connection, cancel)?;
+    }
+    let before = before.transaction()?;
+    let after = project.connection.transaction()?;
     let before_environment: (String, u32, u32) = before.query_row(
         "SELECT config_hash,extraction_version,relation_registry_version FROM metadata",
         [],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
-    let after_environment: (String, u32, u32) = project.connection.query_row(
+    let after_environment: (String, u32, u32) = after.query_row(
         "SELECT config_hash,extraction_version,relation_registry_version FROM metadata",
         [],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -145,7 +152,7 @@ pub(crate) fn run(
         ));
     }
     let mut metadata = crate::application::query::metadata::read(
-        &project.connection,
+        &after,
         &project.selected,
         project.refresh,
         project.maintenance.clone(),
@@ -153,21 +160,23 @@ pub(crate) fn run(
     if let Some(state) = &mut metadata.history {
         state.comparison = Some(Comparison {
             before_coverage: Some(index::coverage(&before)?),
-            after_coverage: Some(index::coverage(&project.connection)?),
+            after_coverage: Some(index::coverage(&after)?),
             configuration: Some(before_environment.0),
             extraction_version: Some(before_environment.1),
             from: Some(checkpoints::display(from)),
             to: checkpoints::display(to),
         });
     }
+    drop(writer);
+    project.repository.release();
     sink.begin(&metadata)?;
     let mut output = rows::Output::new(options, &selected.settings, cancel, sink);
-    output.emit(&mut before, &selected, &checkpoints::display(from))?;
-    output.emit(
-        &mut project.connection,
-        &project.selected,
-        &checkpoints::display(to),
-    )?;
+    output.emit(&before, &selected, &checkpoints::display(from))?;
+    output.emit(&after, &project.selected, &checkpoints::display(to))?;
+    index::stop_observing(&before)?;
+    index::stop_observing(&after)?;
+    before.finish()?;
+    after.finish()?;
     let summary = output.finish()?;
     Ok(summary)
 }

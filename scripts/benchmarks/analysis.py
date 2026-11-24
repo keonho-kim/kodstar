@@ -91,7 +91,10 @@ def indexed_results(home):
         return {"inputs_sha256": inputs, "symbols_sha256": symbols,
                 "relationships_sha256": relations, "scopes_sha256": scopes,
                 "bindings_sha256": bindings, "identities_sha256": identities,
-                "lookups_sha256": digest(database, lookup_sql)}
+                "lookups_sha256": digest(database, lookup_sql),
+                "native_analysis_sha256": digest(database, "SELECT hex(f.path),n.status,n.detail FROM native_analysis n JOIN files f ON f.id=n.file_id ORDER BY 1,2,3"),
+                "native_environment_sha256": digest(database, "SELECT hex(f.path),hex(n.environment) FROM native_analysis n JOIN files f ON f.id=n.file_id ORDER BY 1,2"),
+                "native_inputs_sha256": digest(database, "SELECT hex(f.path),n.path,n.kind,hex(n.hash) FROM native_inputs n JOIN files f ON f.id=n.file_id ORDER BY 1,2,3,4")}
 
 
 def measure(binary, project, home, arguments):
@@ -145,11 +148,13 @@ def mutation_runs(binary, project, home, common, fixture):
         yield name, result
 
 
-def semantic_result(result, lookup_contract_change=False):
+def semantic_result(result, lookup_contract_change=False, native_engine_change=False):
     coverage = {key: value for key, value in result["coverage"].items() if key != "reused_files"}
     indexed = dict(result["indexed_results"])
     if lookup_contract_change:
         indexed.pop("lookups_sha256")
+    if native_engine_change:
+        indexed.pop("native_environment_sha256")
     return coverage, indexed, result["source_results"]
 
 
@@ -201,6 +206,7 @@ def main():
     parser.add_argument("--project", required=True, type=Path)
     parser.add_argument("--file", required=True)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--native-engine-change", action="store_true", help="record changed native fingerprints while comparing all semantic results and diagnostics")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--mutations", action="store_true", help="also compare a Go probe's notes, body, additions and deletions")
@@ -217,12 +223,18 @@ def main():
     project = args.project.resolve(strict=True)
     report = {"platform": platform.platform(), "machine": platform.machine(), "jobs": args.jobs, "runs": [],
               "lookup_contract_change": args.lookup_contract_change,
+              "native_engine_change": args.native_engine_change,
               "binary_sha256": {"baseline": binary_digest(args.baseline),
                                 "candidate": binary_digest(args.candidate)}}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     expected = None
     expected_mutations = {}
     expected_edits = {}
+    report["launch_warmup_seconds"] = {}
+    for label in ("baseline", "candidate"):
+        started = time.perf_counter()
+        subprocess.run([str(getattr(args, label).resolve(strict=True)), "--version"], check=True, capture_output=True)
+        report["launch_warmup_seconds"][label] = time.perf_counter() - started
     # Package and object identities include the canonical root. Reset one owned path
     # rather than comparing opaque identities from unrelated temporary roots.
     with tempfile.TemporaryDirectory(prefix="kodstar-benchmark-input-") as sandbox:
@@ -249,6 +261,8 @@ def main():
                     run["indexed_results"] = indexed_results(home)
                     run["source_results"] = source_results(working)
                     compared = {**run["indexed_results"], **run["source_results"]}
+                    if args.native_engine_change:
+                        compared.pop("native_environment_sha256")
                     if args.lookup_contract_change:
                         compared.pop("lookups_sha256")
                     observed = (run["init"]["coverage"], compared)
@@ -272,7 +286,7 @@ def main():
                         suffix = declaration_suffix(args.file) if name == "declaration" else b"\n"
                         run[name] = edit_run(binary.resolve(strict=True), working, home, common, args.file, suffix,
                                              args.body_replacement if name == "body" else None)
-                        observed_edit = semantic_result(run[name]["incremental"], args.lookup_contract_change)
+                        observed_edit = semantic_result(run[name]["incremental"], args.lookup_contract_change, args.native_engine_change)
                         if name not in expected_edits:
                             expected_edits[name] = observed_edit
                         elif observed_edit != expected_edits[name]:
@@ -282,7 +296,7 @@ def main():
                         run["mutations"] = {}
                         for name, result in mutation_runs(binary.resolve(strict=True), working, home, common, fixture):
                             run["mutations"][name] = result
-                            observed_mutation = semantic_result(result, args.lookup_contract_change)
+                            observed_mutation = semantic_result(result, args.lookup_contract_change, args.native_engine_change)
                             if name not in expected_mutations:
                                 expected_mutations[name] = observed_mutation
                             elif observed_mutation != expected_mutations[name]:

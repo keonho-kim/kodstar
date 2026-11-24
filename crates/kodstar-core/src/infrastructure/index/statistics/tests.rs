@@ -13,6 +13,7 @@ use std::sync::{
 #[test]
 fn file_only_generations_preserve_graph_counts_without_reading_relationships() -> Result<()> {
     let c = Connection::open_in_memory()?;
+    diagnostic_schema(&c)?;
     let forbid = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&forbid);
     c.create_scalar_function(
@@ -62,5 +63,13 @@ fn file_only_generations_preserve_graph_counts_without_reading_relationships() -
         (full.symbols, full.relationships, full.unresolved),
         (value.symbols, value.relationships, value.unresolved)
     );
+    Ok(())
+}
+
+pub(super) fn diagnostic_schema(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "CREATE TABLE diagnostics(file_id INTEGER,code TEXT);
+        CREATE TABLE native_analysis(file_id INTEGER PRIMARY KEY,status TEXT);",
+    )?;
     Ok(())
 }

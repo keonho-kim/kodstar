@@ -43,6 +43,16 @@ impl<'conn> Writer<'conn> {
         base: Option<i64>,
     ) -> Result<()> {
         let id = self.store(bytes, base)?;
+        self.reference(blob, part, start, id)
+    }
+
+    pub(in crate::infrastructure::history) fn reference(
+        &mut self,
+        blob: i64,
+        part: u64,
+        start: u64,
+        id: i64,
+    ) -> Result<()> {
         self.reference.execute(params![blob, part, start, id])?;
         Ok(())
     }
@@ -52,10 +62,18 @@ impl<'conn> Writer<'conn> {
         bytes: &[u8],
         base: Option<i64>,
     ) -> Result<i64> {
+        self.store_hashed(bytes, base, &blake3::hash(bytes))
+    }
+
+    pub(in crate::infrastructure::history) fn store_hashed(
+        &mut self,
+        bytes: &[u8],
+        base: Option<i64>,
+        hash: &blake3::Hash,
+    ) -> Result<i64> {
         if bytes.is_empty() || bytes.len() > encoding::MAX {
             return Err(Error::operation("invalid history chunk size"));
         }
-        let hash = blake3::hash(bytes);
         let hash = hash.as_bytes().as_slice();
         let previous: Option<i64> = self.matching.query_row([hash], |r| r.get(0)).optional()?;
         let id = if let Some(id) = previous {

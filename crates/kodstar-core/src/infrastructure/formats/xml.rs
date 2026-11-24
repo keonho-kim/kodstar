@@ -1,55 +1,44 @@
-// Purpose: XML project·resource·event 관계 추출.
+// Purpose: 읽기 전용 XML 문서에서 project·resource·event 관계 추출.
 // Pattern: Format Adapter.
-// Usage: auxiliary가 XML 보조 입력을 전달.
-// Related: crates/kodstar-core/src/infrastructure/formats/auxiliary/mod.rs.
+// Usage: auxiliary가 보존 XML 원문과 파일 작업 예산을 전달.
+// Related: crates/kodstar-core/src/infrastructure/formats/auxiliary/mod.rs, crates/kodstar-core/src/infrastructure/formats/dotnet.rs.
 
+mod attributes;
+pub(super) mod positions;
+#[cfg(test)]
+mod tests;
+pub(super) mod values;
+use crate::domain::{
+    cancellation::Cancellation,
+    diagnostics::{Error, Result},
+    facts::{Binding, Fact, SyntaxUse},
+    relations::RelationKind,
+};
+use crate::infrastructure::parse::ParseSession;
+use positions::Positions;
 use std::path::Path;
 
-use tree_sitter::Node;
-
-use crate::domain::cancellation::Cancellation;
-use crate::domain::diagnostics::Result;
-use crate::domain::facts::{Binding, Fact, SyntaxUse};
-use crate::domain::relations::RelationKind;
-use crate::infrastructure::parse::{ParseSession, child_kind, span, text};
-
-pub(super) fn tag_name<'a>(node: Node<'_>, source: &'a [u8]) -> &'a str {
-    let tag = if node.kind() == "element" {
-        child_kind(node, &["STag", "EmptyElemTag"])
-    } else {
-        Some(node)
-    };
-    tag.and_then(|tag| child_kind(tag, &["Name"]))
-        .map(|name| text(name, source))
-        .unwrap_or("")
+pub(super) fn tag_name<'a>(node: roxmltree::Node<'_, '_>, source: &'a [u8]) -> &'a str {
+    if !node.is_element() {
+        return "";
+    }
+    let raw = &source[node.range().start + 1..];
+    let end = raw
+        .iter()
+        .position(|byte| byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>'))
+        .unwrap_or(0);
+    std::str::from_utf8(&raw[..end]).unwrap_or("")
 }
 
-fn element_text(node: Node<'_>, name: &str, source: &[u8]) -> Option<String> {
-    let content = child_kind(node, &["content"])?;
-    let mut cursor = content.walk();
-    let child = content
-        .named_children(&mut cursor)
-        .find(|child| child.kind() == "element" && tag_name(*child, source) == name)?;
-    let content = child_kind(child, &["content"])?;
-    let mut cursor = content.walk();
+fn element_text(node: roxmltree::Node<'_, '_>, name: &str, source: &[u8]) -> Option<String> {
+    let child = node
+        .children()
+        .find(|child| tag_name(*child, source) == name)?;
     let mut value = String::new();
-    for part in content
-        .named_children(&mut cursor)
-        .filter(|node| node.kind() == "CharData")
-    {
-        value.push_str(text(part, source));
+    for text in child.children().filter(|child| child.is_text()) {
+        value.push_str(text.text()?);
     }
     Some(value.trim().to_string())
-}
-
-pub(super) fn decode(value: &str) -> String {
-    value
-        .trim_matches(['\'', '"'])
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
 }
 
 pub(crate) fn extract(
@@ -59,8 +48,22 @@ pub(crate) fn extract(
     cancel: &Cancellation,
     emit: &mut dyn FnMut(Fact) -> Result<()>,
 ) -> Result<()> {
-    let tree = parser.parse_tree(&tree_sitter_xml::LANGUAGE_XML.into(), path, source, cancel)?;
-    if path.extension().is_some_and(|s| s == "csproj") {
+    cancel.check()?;
+    let text = simdutf8::compat::from_utf8(source)
+        .map_err(|error| Error::caused_by("non-UTF-8 XML source", error))?;
+    let document = roxmltree::Document::parse_with_options(
+        text,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            nodes_limit: u32::try_from(source.len().saturating_add(1)).unwrap_or(u32::MAX),
+            entity_resolver: None,
+        },
+    )
+    .map_err(|error| Error::caused_by(format!("invalid XML {}", path.display()), error))?;
+    cancel.check()?;
+    let positions = Positions::new(source, parser.fact_limit() / 4);
+    let project = path.extension().is_some_and(|s| s == "csproj");
+    if project {
         emit(Fact::Binding(Binding {
             scope: 0,
             name: "@project".into(),
@@ -69,25 +72,30 @@ pub(crate) fn extract(
             imported_name: None,
             type_name: None,
             kind: "dotnet_project",
-            span: span(tree.root_node()),
+            span: positions.span(
+                if source.starts_with(b"\xef\xbb\xbf") {
+                    3
+                } else {
+                    0
+                }..source.len(),
+            ),
         }))?;
     }
-    let mut cursor = tree.root_node().walk();
-    let mut root_class = String::new();
-    let mut depth = 0usize;
-    loop {
+    let mut attributes = attributes::Attributes::default();
+    for node in document.descendants().filter(|node| node.is_element()) {
         cancel.check()?;
-        let node = cursor.node();
-        if depth > 1024 {
-            return Err(crate::domain::diagnostics::Error::operation(
-                "XML nesting exceeds 1024 levels",
-            ));
+        if node
+            .ancestors()
+            .filter(|ancestor| ancestor.is_element())
+            .count()
+            > 1024
+        {
+            return Err(Error::operation("XML nesting exceeds 1024 levels"));
         }
-        if path.extension().is_some_and(|s| s == "csproj") {
-            super::dotnet::visit(node, source, emit)?;
+        if project {
+            super::dotnet::visit(node, source, &positions, emit)?;
         }
-        if node.kind() == "element"
-            && tag_name(node, source) == "dependency"
+        if tag_name(node, source) == "dependency"
             && let (Some(group), Some(artifact)) = (
                 element_text(node, "groupId", source),
                 element_text(node, "artifactId", source),
@@ -98,112 +106,12 @@ pub(crate) fn extract(
                 scope: 0,
                 expression: format!("@package:maven:{group}:{artifact}"),
                 relation: RelationKind::DependsOn,
-                span: span(node),
+                span: positions.span(node.range()),
                 condition: None,
                 type_only: false,
             }))?;
         }
-        if node.kind() == "Attribute"
-            && let (Some(name), Some(value)) =
-                (child_kind(node, &["Name"]), child_kind(node, &["AttValue"]))
-        {
-            let name = text(name, source);
-            let value_text = decode(text(value, source));
-            let owner = node
-                .parent()
-                .map(|node| tag_name(node, source))
-                .unwrap_or("");
-            let relation = if name == "Include"
-                && matches!(
-                    owner,
-                    "ProjectReference" | "Compile" | "Page" | "ApplicationDefinition"
-                )
-                || name == "Path" && owner == "Project"
-                || name == "Value" && owner == "Filename"
-            {
-                Some(RelationKind::DependsOn)
-            } else if name == "Source" && owner == "ResourceDictionary" {
-                Some(RelationKind::TemplateInclude)
-            } else {
-                None
-            };
-            if let Some(relation) = relation {
-                emit(Fact::Use(SyntaxUse {
-                    source: 0,
-                    scope: 0,
-                    expression: format!("@file:{}", value_text.replace('\\', "/")),
-                    relation,
-                    span: span(value),
-                    condition: None,
-                    type_only: false,
-                }))?;
-            }
-            if name == "x:Class" {
-                root_class = value_text.clone();
-                emit(Fact::Use(SyntaxUse {
-                    source: 0,
-                    scope: 0,
-                    expression: value_text.clone(),
-                    relation: RelationKind::UsesType,
-                    span: span(value),
-                    condition: None,
-                    type_only: false,
-                }))?;
-                let filename = path.file_name().unwrap_or_default().to_string_lossy();
-                emit(Fact::Use(SyntaxUse {
-                    source: 0,
-                    scope: 0,
-                    expression: format!("@file:{filename}.cs"),
-                    relation: RelationKind::Includes,
-                    span: span(value),
-                    condition: None,
-                    type_only: false,
-                }))?;
-            }
-            if matches!(
-                name,
-                "Click"
-                    | "Loaded"
-                    | "Unloaded"
-                    | "TextChanged"
-                    | "SelectionChanged"
-                    | "Checked"
-                    | "Unchecked"
-                    | "Closing"
-                    | "Opened"
-                    | "KeyDown"
-                    | "KeyUp"
-                    | "MouseDown"
-                    | "MouseUp"
-                    | "Tapped"
-            ) && !root_class.is_empty()
-                && value_text
-                    .chars()
-                    .all(|character| character.is_alphanumeric() || character == '_')
-            {
-                emit(Fact::Use(SyntaxUse {
-                    source: 0,
-                    scope: 0,
-                    expression: format!("{root_class}::{value_text}"),
-                    relation: RelationKind::EventHandler,
-                    span: span(value),
-                    condition: None,
-                    type_only: false,
-                }))?;
-            }
-        }
-        if cursor.goto_first_child() {
-            depth += 1;
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return Ok(());
-            }
-            depth = depth.saturating_sub(1);
-        }
+        attributes.visit(node, path, source, &positions, emit)?;
     }
+    Ok(())
 }

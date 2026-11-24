@@ -28,18 +28,18 @@ void Target() {}
     })?;
     assert!(relationships(&rows).iter().any(|e| e.relation == "calls" && e.target.as_ref().is_some_and(|t| t.name == "Target")), "{:?}", rows.rows);
     p.write("Main.razor", "@code { void Broken() {")?;
-    assert!(p.build(false).is_err());
+    assert_eq!(p.build(false)?.coverage.failed_files, 1);
     let rows = p.query(Query::Symbols {
         file: "Main.razor".into(),
     })?;
     assert_eq!(
         rows.metadata.as_ref().ok_or("metadata")?.generation,
-        Some(build.generation)
+        Some(build.generation + 1)
     );
     assert!(
         rows.rows
             .iter()
-            .any(|r| matches!(r, QueryRow::Symbol(s) if s.name == "Target"))
+            .all(|r| !matches!(r, QueryRow::Symbol(s) if s.name == "Target"))
     );
     Ok(())
 }

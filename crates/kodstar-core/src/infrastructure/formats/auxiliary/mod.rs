@@ -43,7 +43,6 @@ pub(crate) fn language(path: &Path) -> Language {
         name if name.starts_with("tsconfig") => Language::TypeScript,
         _ => match path.extension().and_then(|extension| extension.to_str()) {
             Some("sln" | "slnx" | "csproj" | "vbproj" | "fsproj" | "xaml") => Language::CSharp,
-            Some("dfm" | "lfm" | "lpk") => Language::Pascal,
             _ => Language::Rust,
         },
     }
@@ -96,11 +95,6 @@ pub(crate) fn extract(
         go::extract(path, source, cancel, &mut emit)
     } else if path.extension().is_some_and(|extension| extension == "sln") {
         text::solution(source, &mut emit)
-    } else if path
-        .extension()
-        .is_some_and(|extension| extension == "dfm" || extension == "lfm")
-    {
-        text::form(path, source, &mut emit)
     } else {
         super::xml::extract(parser, path, source, cancel, &mut emit)
     }

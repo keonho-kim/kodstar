@@ -3,8 +3,29 @@
 // Usage: engine 통합 검사가 원래 구문 환경이 같은 호출 변경을 적용.
 // Related: crates/kodstar-core/src/application/analysis/incremental.rs, crates/kodstar-core/tests/support/snapshot.rs.
 
-use crate::support::{snapshot::normalized_index, *};
-use rusqlite::Connection;
+use crate::support::{
+    packed_mutations::{mark_relationship_ids, relationship_ids},
+    snapshot::normalized_index,
+    *,
+};
+
+#[test]
+fn a_longer_go_call_updates_following_declarations_without_wider_resolution() -> TestResult {
+    let p = Project::new()?;
+    let source = "package api\nfunc caller() { one(); }\nfunc one() {}\nfunc longer() {}\n";
+    p.write("api.go", source)?;
+    p.write("stable.py", "def keeper(): pass\ndef stable(): keeper()\n")?;
+    let initial = p.build(false)?;
+    let expected = mark_relationship_ids(&initial, "stable.py")?;
+    p.write("api.go", &source.replace("one();", "longer();"))?;
+    let changed = p.build(false)?;
+    assert_eq!(relationship_ids(&changed, "stable.py")?, expected);
+    assert_eq!(
+        normalized_index(&changed)?,
+        normalized_index(&p.build(true)?)?
+    );
+    Ok(())
+}
 
 #[test]
 fn stable_body_environments_preserve_other_languages_and_match_full() -> TestResult {
@@ -81,26 +102,13 @@ fn stable_body_environments_preserve_other_languages_and_match_full() -> TestRes
             "api.erl",
             "-module(api).\nalpha() -> ok.\nbeta() -> ok.\ncaller() -> alpha().\n",
         ),
-        (
-            "api.pas",
-            "program Api;\nprocedure alpha; begin end;\nprocedure beta; begin end;\nprocedure caller; begin alpha(); end;\nbegin end.\n",
-        ),
     ] {
         let source = source.replace("beta", "bravo");
         let p = Project::new()?;
         p.write(file, &source)?;
         p.write("stable.py", "def keeper(): pass\ndef stable(): keeper()\n")?;
         let initial = p.build(false)?;
-        let c = Connection::open(std::path::Path::new(&initial.cache).join("index.sqlite"))?;
-        packed_mutations::mark(&c, "stable.py")?;
-        postings::register(&c)?;
-        let ids = |c: &Connection| -> rusqlite::Result<Vec<i64>> {
-            c.prepare("SELECT r.id FROM relationships r JOIN facts f ON f.id=r.fact_id JOIN files source ON source.id=f.file_id WHERE source.path=CAST('stable.py' AS BLOB) ORDER BY r.id")?
-                .query_map([], |r| r.get(0))?.collect()
-        };
-        let expected = ids(&c)?;
-        assert!(!expected.is_empty());
-        drop(c);
+        let expected = mark_relationship_ids(&initial, "stable.py")?;
         let changed_source = source
             .replace("alpha();", "bravo();")
             .replace("alpha() }", "bravo() }")
@@ -111,14 +119,11 @@ fn stable_body_environments_preserve_other_languages_and_match_full() -> TestRes
         assert_ne!(source, changed_source, "fixture did not change: {file}");
         p.write(file, &changed_source)?;
         let changed = p.build(false)?;
-        let c = Connection::open(std::path::Path::new(&changed.cache).join("index.sqlite"))?;
-        postings::register(&c)?;
         assert_eq!(
-            ids(&c)?,
+            relationship_ids(&changed, "stable.py")?,
             expected,
             "unrelated relationships rewritten: {file}"
         );
-        drop(c);
         assert_eq!(
             normalized_index(&changed)?,
             normalized_index(&p.build(true)?)?,

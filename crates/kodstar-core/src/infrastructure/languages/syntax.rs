@@ -27,7 +27,7 @@ impl SyntaxConfig {
                 call_field: "function",
             },
             Language::JavaScript => Self {
-                classes: &["class_declaration"],
+                classes: &["class_declaration", "class"],
                 functions: &[
                     "function_declaration",
                     "generator_function_declaration",
@@ -51,6 +51,7 @@ impl SyntaxConfig {
                 classes: &[
                     "abstract_class_declaration",
                     "class_declaration",
+                    "class",
                     "enum_declaration",
                     "interface_declaration",
                     "type_alias_declaration",
@@ -238,13 +239,6 @@ impl SyntaxConfig {
                 functions: &[],
                 imports: &[],
                 calls: &["list_lit"],
-                call_field: "function",
-            },
-            Language::Pascal => Self {
-                classes: &["declType"],
-                functions: &["declProc", "defProc"],
-                imports: &["declUses"],
-                calls: &["exprCall"],
                 call_field: "function",
             },
             _ => Self {

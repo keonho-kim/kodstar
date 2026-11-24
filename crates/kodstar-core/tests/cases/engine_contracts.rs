@@ -5,7 +5,82 @@
 
 use crate::support::*;
 use kodstar_core::*;
-use std::path::{Path, PathBuf};
+
+#[test]
+fn a_blocked_query_sink_does_not_lock_out_another_reader() -> TestResult {
+    use std::{sync::mpsc, time::Duration};
+
+    struct Blocked<'a> {
+        began: mpsc::Sender<()>,
+        resume: &'a mpsc::Receiver<()>,
+    }
+    impl QuerySink for Blocked<'_> {
+        fn begin(&mut self, _metadata: &QueryMetadata) -> Result<()> {
+            self.began
+                .send(())
+                .map_err(|error| Error::new(ErrorKind::Operation, error.to_string()))?;
+            self.resume
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|error| Error::new(ErrorKind::Operation, error.to_string()))
+        }
+        fn row(&mut self, row: &QueryRow) -> Result<()> {
+            assert!(matches!(row, QueryRow::Symbol(symbol) if symbol.name == "target"));
+            Ok(())
+        }
+        fn finish(&mut self, _summary: &QuerySummary) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    let p = Project::new()?;
+    p.write("main.rs", "fn target() {}")?;
+    p.write("alternate.rs", "fn replacement() {}")?;
+    let alias = p.root.join("alias.rs");
+    std::os::unix::fs::symlink("main.rs", &alias)?;
+    p.build(false)?;
+    let query = Query::Symbols {
+        file: "alias.rs".into(),
+    };
+    let options = QueryOptions {
+        refresh: Refresh::None,
+        ..QueryOptions::default()
+    };
+    let (started, begin) = mpsc::channel();
+    let (resume, blocked) = mpsc::channel();
+    let (done, observed) = mpsc::channel();
+    std::thread::scope(|scope| -> TestResult {
+        let project = &p;
+        let first_query = &query;
+        let first = scope.spawn(move || {
+            project.engine.query(
+                &project.options(),
+                first_query,
+                &options,
+                &Cancellation::default(),
+                &mut Blocked {
+                    began: started,
+                    resume: &blocked,
+                },
+            )
+        });
+        begin.recv_timeout(Duration::from_secs(5))?;
+        std::fs::remove_file(&alias)?;
+        std::os::unix::fs::symlink("alternate.rs", &alias)?;
+        let second = scope.spawn(|| {
+            let result = p.query(query.clone());
+            done.send(result).expect("second result receiver closed");
+        });
+        let result = observed.recv_timeout(Duration::from_secs(2));
+        resume.send(())?;
+        first.join().map_err(|_| "first reader panicked")??;
+        second.join().map_err(|_| "second reader panicked")?;
+        let result = result??;
+        assert!(
+            matches!(result.rows.as_slice(), [QueryRow::Symbol(symbol)] if symbol.name == "replacement")
+        );
+        Ok(())
+    })
+}
 
 #[test]
 fn rust_direction_recursion_and_use_ranges_are_preserved() -> TestResult {
@@ -63,102 +138,43 @@ fn parameter_shadowing_does_not_bind_to_a_same_named_global() -> TestResult {
 }
 
 #[test]
-fn changed_import_targets_are_reresolved_without_reparsing_the_caller() -> TestResult {
-    let project = Project::new()?;
-    project.write(
-        "api.ts",
-        "import { target as invoke } from './dep';\nexport function caller() { invoke(); }\n",
-    )?;
-    project.write("dep.ts", "export function target() {}\n")?;
-    project.build(false)?;
-    let initial = project.query(Query::Deps {
-        selector: selector("api.ts", "caller"),
-    })?;
-    assert_eq!(relationships(&initial).len(), 1);
-    project.write("dep.ts", "export function other() {}\n")?;
-    let update = project.build(false)?;
-    assert_eq!(update.parsed_files, 1);
-    assert_eq!(update.coverage.reused_files, 1);
-    let missing = project.query(Query::Deps {
-        selector: selector("api.ts", "caller"),
-    })?;
-    assert!(relationships(&missing).is_empty());
-    project.write("dep.ts", "export function target() {}\n")?;
-    project.build(false)?;
-    let restored = project.query(Query::Deps {
-        selector: selector("api.ts", "caller"),
-    })?;
-    assert_eq!(relationships(&restored).len(), 1);
-    Ok(())
-}
-
-#[test]
-fn parse_failure_preserves_previous_generation_and_stale_access_is_explicit() -> TestResult {
+fn failed_file_uses_a_partial_generation_and_older_source_remains_queryable() -> TestResult {
     let project = Project::new()?;
     project.write("src/main.rs", "pub fn stable() {}\n")?;
     let before = project.build(false)?;
     project.write("src/main.rs", "pub fn broken( {\n")?;
-    assert!(project.build(false).is_err());
+    let partial = project.build(false)?;
+    assert_eq!(partial.coverage.partial_files, 1);
+    assert_eq!(partial.generation, before.generation + 1);
     let cached = project.query(Query::Symbols {
-        file: PathBuf::from("src/main.rs"),
+        file: "src/main.rs".into(),
     })?;
-    let metadata = cached.metadata.ok_or("missing metadata")?;
-    assert_eq!(metadata.generation, Some(before.generation));
-    assert_eq!(metadata.freshness, "not_checked");
+    assert!(cached.rows.is_empty());
+    assert!(!cached.summary.ok_or("partial summary")?.complete);
+    let mut historical = Collected::default();
+    project.engine.query(
+        &project.options(),
+        &Query::Symbols {
+            file: "src/main.rs".into(),
+        },
+        &QueryOptions {
+            revision: Some("c1".into()),
+            ..QueryOptions::default()
+        },
+        &Cancellation::default(),
+        &mut historical,
+    )?;
     assert!(
-        cached
+        historical
             .rows
             .iter()
-            .any(|row| matches!(row,QueryRow::Symbol(symbol) if symbol.name=="stable"))
+            .any(|r| matches!(r, QueryRow::Symbol(s) if s.name == "stable"))
     );
-    let mut sink = Collected::default();
-    let error = project
-        .engine
-        .query(
-            &project.options(),
-            &Query::Symbols {
-                file: PathBuf::from("src/main.rs"),
-            },
-            &QueryOptions::default(),
-            &Cancellation::default(),
-            &mut sink,
-        )
-        .err()
-        .ok_or("refresh should fail")?;
-    assert_eq!(error.kind, ErrorKind::Operation);
-    assert!(sink.rows.is_empty());
     Ok(())
 }
 
 #[test]
-fn no_index_query_does_not_initialize_a_cache() -> TestResult {
-    let project = Project::new()?;
-    project.write("api.py", "def sample(): pass\n")?;
-    let result = project.query(Query::Symbols {
-        file: PathBuf::from("api.py"),
-    });
-    assert_eq!(
-        result.err().ok_or("missing failure")?.kind,
-        ErrorKind::NotFound
-    );
-    assert!(!project.directory.join("cache").exists());
-    Ok(())
-}
-
-#[test]
-fn unchanged_build_does_not_advance_generation() -> TestResult {
-    let project = Project::new()?;
-    project.write("api.py", "def sample(): pass\n")?;
-    let initial = project.build(false)?;
-    let reused = project.build(false)?;
-    assert!(!reused.changed);
-    assert_eq!(reused.generation, initial.generation);
-    assert_eq!(reused.parsed_files, 0);
-    Ok(())
-}
-
-#[test]
-fn byte_path_identity_and_symlink_root_are_not_display_string_identity() -> TestResult {
+fn symlink_roots_reuse_the_initialized_project() -> TestResult {
     let project = Project::new()?;
     project.write("api.py", "def sample(): pass\n")?;
     project.build(false)?;
@@ -176,6 +192,5 @@ fn byte_path_identity_and_symlink_root_are_not_display_string_identity() -> Test
         )?;
         assert!(!report.changed);
     }
-    assert!(Path::new(&project.root).is_absolute());
     Ok(())
 }

@@ -38,16 +38,6 @@ impl Extractor<'_> {
                 | "base_clause"
                 | "inheritance_specifier"
                 | "delegation_specifiers" => RelationKind::Inherits,
-                "declClass" | "declIntf" => {
-                    let mut parents = child.walk();
-                    for base in child
-                        .children_by_field_name("parent", &mut parents)
-                        .filter(|n| n.is_named())
-                    {
-                        self.base_types(base, context, RelationKind::Inherits)?;
-                    }
-                    continue;
-                }
                 _ => continue,
             };
             self.base_types(child, context, relation)?;
@@ -98,7 +88,6 @@ impl Extractor<'_> {
                     | "name"
                     | "constant"
                     | "scope_resolution"
-                    | "typeref"
                     | "sym_lit"
             );
             if named_type {

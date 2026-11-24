@@ -53,14 +53,28 @@ impl CommandHandler for Query<'_> {
         index::limit_reads(&project.connection, project.selected.settings.memory_budget)?;
         index::observe_cancellation(&project.connection, cancel)?;
         let snapshot = project.connection.transaction()?;
+        if matches!(self.query, Request::Explain { .. }) && project.selected.snapshot.is_none() {
+            let checkpoint: Option<String> =
+                snapshot.query_row("SELECT checkpoint FROM metadata", [], |row| row.get(0))?;
+            let id = crate::infrastructure::history::checkpoints::resolve(
+                &project.repository.connection,
+                checkpoint
+                    .as_deref()
+                    .ok_or_else(|| Error::operation("analysis has no checkpoint"))?,
+            )?;
+            project.selected.snapshot = Some(project.repository.snapshot(id));
+        }
         let result = query::run(
             &snapshot,
-            &project.selected,
+            query::ReadScope {
+                selected: &project.selected,
+                maintenance: project.maintenance.clone(),
+                repository: Some(&mut project.repository),
+            },
             self.query,
             self.options,
             cancel,
             self.sink,
-            project.maintenance.clone(),
         );
         index::stop_observing(&snapshot)?;
         snapshot.finish()?;
@@ -110,6 +124,7 @@ impl CommandHandler for Status<'_> {
         } else {
             None
         };
+        project.repository.release();
         self.sink.begin(&QueryMetadata {
             history: project.selected.history.clone(),
             maintenance: project.maintenance.clone(),
@@ -124,6 +139,7 @@ impl CommandHandler for Status<'_> {
             unresolved_count: coverage.unresolved,
             coverage: coverage.clone(),
         })?;
+        let published = generation > 0 && last_error.is_none();
         self.sink.row(&QueryRow::Status(StatusRow {
             history: project.selected.history.clone(),
             maintenance: project.maintenance.clone(),
@@ -133,7 +149,7 @@ impl CommandHandler for Status<'_> {
             indexed_at,
             last_update,
             last_error,
-            coverage,
+            coverage: coverage.clone(),
             storage_version: index::STORAGE_VERSION,
             integrity,
         }))?;
@@ -152,11 +168,16 @@ impl CommandHandler for Status<'_> {
                 count += 1;
             }
         }
-        let summary = QuerySummary {
+        let mut summary = QuerySummary {
             complete: true,
             result_count: count,
             ..QuerySummary::default()
         };
+        summary.include_coverage(&coverage);
+        if !published {
+            summary.complete = false;
+            summary.reasons.push("analysis_unpublished");
+        }
         self.sink.finish(&summary)?;
         index::stop_observing(&snapshot)?;
         snapshot.finish()?;

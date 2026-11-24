@@ -4,40 +4,43 @@
 // Related: crates/kodstar-core/src/infrastructure/index/dependencies/codec.rs, crates/kodstar-core/src/infrastructure/index/dependencies/schema.sql.
 
 mod codec;
+pub(in crate::infrastructure::index) mod pages;
+pub(crate) use pages::{clear_all, clear_file};
 mod publication;
 mod read;
 mod selection;
 mod writer;
 pub(crate) use publication::publish;
 pub(crate) use read::affect;
+pub(crate) use read::affect_imports;
 pub(crate) use selection::prepare_selected;
 #[cfg(test)]
 mod tests;
 
 use crate::domain::diagnostics::Result;
-use rusqlite::{Connection, functions::FunctionFlags};
+use rusqlite::Connection;
 
 pub(crate) fn register(connection: &Connection) -> rusqlite::Result<()> {
-    connection.create_scalar_function(
-        "kodstar_postings",
-        2,
-        FunctionFlags::SQLITE_UTF8
-            | FunctionFlags::SQLITE_DETERMINISTIC
-            | FunctionFlags::SQLITE_INNOCUOUS,
-        |context| {
-            let bytes = context.get_raw(0).as_blob()?;
-            let count = context.get::<usize>(1)?;
-            codec::json(bytes, count)
-                .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))
-        },
-    )
+    super::packed::expansion::register(connection, c"kodstar_posting_rows", |bytes, count| {
+        let mut rows = Vec::new();
+        codec::visit(
+            bytes,
+            usize::try_from(count).map_err(|_| rusqlite::Error::InvalidQuery)?,
+            |fact, found| {
+                rows.push([fact, i64::from(found)]);
+                Ok(())
+            },
+        )
+        .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))?;
+        Ok(rows)
+    })
 }
 
 pub(crate) fn verify(connection: &Connection) -> Result<()> {
     let invalid: bool = connection.query_row(
         "SELECT EXISTS(
-        SELECT 1 FROM lookup_blocks b,json_each(kodstar_postings(b.payload,b.count)) j
-        LEFT JOIN facts f ON f.id=json_extract(j.value,'$[0]')
+        SELECT 1 FROM lookup_blocks b,kodstar_posting_rows(b.payload,b.count) j
+        LEFT JOIN facts f ON f.id=j.first
         WHERE f.id IS NULL OR f.file_id<>b.file_id)",
         [],
         |r| r.get(0),

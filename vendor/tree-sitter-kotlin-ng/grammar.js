@@ -22,6 +22,8 @@ module.exports = grammar({
   name: 'kotlin',
 
   conflicts: $ => [
+    [$.context_parameters, $._reserved_identifier],
+    [$.if_expression, $.parenthesized_expression],
     [$.class_body, $.enum_class_body],
 
     [$.binary_expression, $.call_expression],
@@ -85,6 +87,7 @@ module.exports = grammar({
     'set',
     // used to check if we can parse a comment
     '$',
+    $._primary_constructor_semi,
   ],
 
   inline: $ => [
@@ -230,6 +233,7 @@ module.exports = grammar({
     ),
 
     primary_constructor: $ => seq(
+      optional($._primary_constructor_semi),
       optional(seq(
         optional($.modifiers),
         'constructor',
@@ -447,7 +451,12 @@ module.exports = grammar({
       $.expression,
     ),
 
+    context_parameters: $ => seq(
+      "context", "(", optionalCommaSep1(choice(seq($._identifier, ":", $.type), $.type)), ")",
+    ),
+
     modifiers: $ => prec.right(repeat1(choice(
+      $.context_parameters,
       $.annotation,
       $.class_modifier,
       $.member_modifier,
@@ -656,6 +665,7 @@ module.exports = grammar({
       $.try_expression,
       $.callable_reference,
       $.lambda_literal,
+      $.suspend_lambda,
       $.anonymous_function,
     ),
 
@@ -669,6 +679,8 @@ module.exports = grammar({
         field('operator', choice('++', '--', '!!')),
       ),
     )),
+
+    suspend_lambda: $ => seq('suspend', $.lambda_literal),
 
     annotated_expression: $ => seq($.annotation, $.expression),
 
@@ -852,6 +864,7 @@ module.exports = grammar({
         seq(
           commaSep1(field('condition', $._when_condition)),
           optional(','),
+          optional(seq('if', $.expression)),
         ),
         'else',
       ),
@@ -1050,6 +1063,7 @@ module.exports = grammar({
         'actual',
         'annotation',
         'constructor',
+        'context',
         'const',
         'data',
         'enum',

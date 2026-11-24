@@ -8,6 +8,7 @@
 use super::diagnostics::{Coverage, Diagnostic, Result};
 use super::source::{PathEncoding, SourceSpan};
 use super::symbols::Symbol;
+use std::sync::Arc;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +49,40 @@ pub struct QuerySummary {
     pub reasons: Vec<&'static str>,
 }
 
+impl QuerySummary {
+    pub(crate) fn truncate(&mut self, reason: &'static str) {
+        self.complete = false;
+        self.truncated = true;
+        if !self.reasons.contains(&reason) {
+            self.reasons.push(reason);
+        }
+    }
+
+    /// Input omissions make graph answers partial, independently of query row limits.
+    pub(crate) fn include_coverage(&mut self, coverage: &Coverage) {
+        for (omitted, reason) in [
+            (coverage.partial_files > 0, "source_syntax_partial"),
+            (coverage.fragment_files > 0, "source_fragment_context"),
+            (
+                coverage.configuration_incomplete_files > 0,
+                "configuration_incomplete",
+            ),
+            (coverage.failed_files > 0, "source_analysis_failed"),
+            (
+                coverage.skipped_files > coverage.failed_files,
+                "source_input_limit",
+            ),
+        ] {
+            if omitted {
+                self.complete = false;
+                if !self.reasons.contains(&reason) {
+                    self.reasons.push(reason);
+                }
+            }
+        }
+    }
+}
+
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct UseSite {
     pub file: String,
@@ -56,9 +91,20 @@ pub struct UseSite {
 }
 
 #[derive(serde::Serialize, Clone, Debug)]
+pub struct DocumentationReference {
+    pub kind: &'static str,
+    pub document_kind: &'static str,
+    pub reference: String,
+    pub source: UseSite,
+    pub target: Option<UseSite>,
+    pub resolution: &'static str,
+    pub reason: Option<&'static str>,
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
 pub struct Relationship {
-    pub source: Symbol,
-    pub target: Option<Symbol>,
+    pub source: Arc<Symbol>,
+    pub target: Option<Arc<Symbol>>,
     pub external: Option<String>,
     pub relation: String,
     pub expression: String,
@@ -82,6 +128,48 @@ pub struct FileConnection {
     pub direction: &'static str,
     pub relation: String,
     pub count: u64,
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct OverviewPath {
+    pub path: String,
+    pub path_encoding: Option<PathEncoding>,
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OverviewRow {
+    Module {
+        path: String,
+        path_encoding: Option<PathEncoding>,
+        files: u64,
+    },
+    ModuleDependency {
+        from: String,
+        from_encoding: Option<PathEncoding>,
+        to: String,
+        to_encoding: Option<PathEncoding>,
+        relation: String,
+        count: u64,
+        site: UseSite,
+    },
+    PackageDependency {
+        from_package: String,
+        to_package: String,
+        from: OverviewPath,
+        to: OverviewPath,
+        relation: String,
+        count: u64,
+        site: UseSite,
+    },
+    Hub {
+        symbol: Box<Symbol>,
+        incoming: u64,
+    },
+    ImportCycle {
+        files: usize,
+        sample: Vec<OverviewPath>,
+    },
 }
 
 #[derive(serde::Serialize, Clone, Debug)]
@@ -135,6 +223,8 @@ pub enum QueryRow {
     Symbol(Symbol),
     Relationship(Box<Relationship>),
     File(FileConnection),
+    Documentation(Box<DocumentationReference>),
+    Overview(Box<OverviewRow>),
     Language(LanguageCapability),
     Status(Status),
     Cache(CacheEntry),
@@ -157,6 +247,33 @@ pub struct Progress {
     pub phase: &'static str,
     pub completed_files: u64,
     pub source_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_task: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+impl Progress {
+    pub fn phase(phase: &'static str) -> Self {
+        Self {
+            phase,
+            completed_files: 0,
+            source_bytes: 0,
+            current_task: None,
+            detail: None,
+        }
+    }
+    pub fn task(phase: &'static str, task: String, detail: Option<String>) -> Self {
+        Self {
+            current_task: Some(task),
+            detail,
+            ..Self::phase(phase)
+        }
+    }
+    pub(crate) fn owned_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.current_task.as_ref().map_or(0, String::capacity)
+            + self.detail.as_ref().map_or(0, String::capacity)
+    }
 }
 
 #[derive(serde::Serialize, Clone, Debug)]

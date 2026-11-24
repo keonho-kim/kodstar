@@ -38,10 +38,18 @@ pub(super) fn run<C: CommandHandler>(
     mut command: C,
     cancel: &Cancellation,
 ) -> Result<C::Output> {
+    let _command = tracing::info_span!("command", handler = std::any::type_name::<C>()).entered();
     cancel.check()?;
     command.validate()?;
-    let mut context = Context::prepare(store, project, command.plan(), cancel)?;
-    context.synchronize(cancel, &mut |event| command.progress(event))?;
+    let mut context = {
+        let _prepare = tracing::info_span!("prepare").entered();
+        Context::prepare(store, project, command.plan(), cancel)?
+    };
+    {
+        let _sync = tracing::info_span!("synchronize").entered();
+        context.synchronize(cancel, &mut |event| command.progress(event))?;
+    }
+    command.progress(&Progress::phase("execute"))?;
     command.execute(&mut context, cancel)
 }
 

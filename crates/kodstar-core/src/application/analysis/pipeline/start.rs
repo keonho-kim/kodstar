@@ -13,17 +13,26 @@ use crate::infrastructure::{
 pub(super) fn file(
     c: &Sql<'_>,
     record: &FileRecord,
-    preserve: bool,
+    change: &super::super::events::FileChange,
     full: bool,
     reuse: &mut ReusePolicy,
     resolution: &mut Resolution,
     budget: usize,
 ) -> Result<FileFacts> {
-    let preserve = preserve && *resolution != Resolution::All;
+    use super::super::events::FileChange;
+    let preserve = matches!(change, FileChange::Body) && *resolution != Resolution::All;
     c.execute(
         "INSERT OR IGNORE INTO seen_files VALUES(?1)",
         [path_bytes(&record.path)],
     )?;
+    if !full
+        && *resolution != Resolution::All
+        && let FileChange::Append(candidate) = change
+        && let Some(context) = index::append_reuse::start(c, record, candidate)?
+    {
+        *resolution = Resolution::Selected;
+        return Ok(context);
+    }
     let scoped = !full
         && !preserve
         && *resolution != Resolution::All
@@ -41,6 +50,10 @@ pub(super) fn file(
             |r| r.get(0),
         )?;
         granular = index::body_reuse::prepare(c, id, budget)?;
+        c.execute(
+            "DELETE FROM bindings WHERE file_id=?1 AND kind='clang_call'",
+            [id],
+        )?;
         c.execute(
             "INSERT OR IGNORE INTO body_files(id,granular) VALUES(?1,?2)",
             rusqlite::params![id, granular],

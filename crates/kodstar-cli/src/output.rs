@@ -5,6 +5,9 @@
 
 mod history;
 mod json;
+mod licenses;
+pub(crate) use licenses::render as render_licenses;
+mod overview;
 pub(crate) mod progress;
 mod text;
 mod tsv;
@@ -25,14 +28,14 @@ pub(crate) struct Renderer<W> {
 }
 
 impl<W: Write> Renderer<W> {
-    pub(crate) fn new(writer: W, format: Format) -> Self {
+    pub(crate) fn new(writer: W, format: Format, verbose: bool) -> Self {
         Self {
             writer,
             format,
             begun: false,
             finished: false,
             first: true,
-            progress: ProgressPrinter::new(),
+            progress: ProgressPrinter::new(verbose),
         }
     }
 }
@@ -122,6 +125,8 @@ fn row_kind(row: &QueryRow) -> &'static str {
         QueryRow::Symbol(_) => "symbol",
         QueryRow::Relationship(_) => "relationship",
         QueryRow::File(_) => "file",
+        QueryRow::Documentation(_) => "documentation_reference",
+        QueryRow::Overview(_) => "overview",
         QueryRow::Language(_) => "language",
         QueryRow::Status(_) => "status",
         QueryRow::Cache(_) => "cache",

@@ -1,11 +1,88 @@
 {
-  "reason": "Kotlin classMemberDeclarations permits optional semis; retain every complete member on one line.",
-  "specification": "https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-classMemberDeclarations",
+  "reason": "Preserve member/constructor boundaries, soft context identifiers, suspend lambdas and guarded when branches.",
   "replacements": [
     {
       "before": "repeat(seq($.class_member_declaration, $._class_member_semi))",
       "after": "repeat(seq($.class_member_declaration, optional($._class_member_semi)))",
       "occurrences": 2
+    },
+    {
+      "file": "grammar.js",
+      "before": "    // used to check if we can parse a comment\n    '$',\n",
+      "after": "    // used to check if we can parse a comment\n    '$',\n    $._primary_constructor_semi,\n",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    primary_constructor: $ => seq(\n",
+      "after": "    primary_constructor: $ => seq(\n      optional($._primary_constructor_semi),\n",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "    DOLLAR,\n",
+      "after": "    DOLLAR,\n    PRIMARY_CONSTRUCTOR_SEMI,\n",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "                if (index == 5) {",
+      "after": "                if (index == 5) {\n                    if (valid_symbols[PRIMARY_CONSTRUCTOR_SEMI]) {\n                        lexer->result_symbol = PRIMARY_CONSTRUCTOR_SEMI;\n                        return true;\n                    }",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    modifiers: $ => prec.right(repeat1(choice(\n      $.annotation,",
+      "after": "    context_parameters: $ => seq(\n      \"context\", \"(\", optionalCommaSep1(choice(seq($._identifier, \":\", $.type), $.type)), \")\",\n    ),\n\n    modifiers: $ => prec.right(repeat1(choice(\n      $.context_parameters,\n      $.annotation,",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "static bool scan_words(",
+      "after": "static bool annotated_primary_constructor(TSLexer *lexer) {\n    for (unsigned tokens = 0; tokens < 512 && !lexer->eof(lexer); ++tokens) {\n        while (iswspace(lexer->lookahead)) skip(lexer);\n        if (lexer->lookahead == '@') {\n            skip(lexer);\n            while (iswalnum(lexer->lookahead) || lexer->lookahead == '_' ||\n                   lexer->lookahead == '.' || lexer->lookahead == ':') skip(lexer);\n            if (lexer->lookahead == '(') {\n                unsigned depth = 1;\n                skip(lexer);\n                while (depth && !lexer->eof(lexer)) {\n                    if (lexer->lookahead == '\"' || lexer->lookahead == '\\'') {\n                        int32_t quote = lexer->lookahead;\n                        skip(lexer);\n                        while (!lexer->eof(lexer) && lexer->lookahead != quote) {\n                            if (lexer->lookahead == '\\\\') skip(lexer);\n                            if (!lexer->eof(lexer)) skip(lexer);\n                        }\n                        if (!lexer->eof(lexer)) skip(lexer);\n                    } else {\n                        if (lexer->lookahead == '(') ++depth;\n                        if (lexer->lookahead == ')') --depth;\n                        skip(lexer);\n                    }\n                }\n                if (depth) return false;\n            }\n            continue;\n        }\n        char word[32] = {0};\n        unsigned length = 0;\n        while (iswalnum(lexer->lookahead) || lexer->lookahead == '_') {\n            if (length + 1 >= sizeof(word)) return false;\n            word[length++] = (char)lexer->lookahead;\n            skip(lexer);\n        }\n        if (!strcmp(word, \"constructor\")) return true;\n        if (strcmp(word, \"internal\") && strcmp(word, \"private\") &&\n            strcmp(word, \"protected\") && strcmp(word, \"public\")) return false;\n    }\n    return false;\n}\n\nstatic bool scan_words(",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "            case '@':\n                if (valid_symbols[CONSTRUCTOR])",
+      "after": "            case '@':\n                if (valid_symbols[PRIMARY_CONSTRUCTOR_SEMI]) {\n                    if (annotated_primary_constructor(lexer)) lexer->result_symbol = PRIMARY_CONSTRUCTOR_SEMI;\n                    return true;\n                }\n                if (valid_symbols[CONSTRUCTOR])",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "        'constructor',\n        'const',",
+      "after": "        'constructor',\n        'context',\n        'const',",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "      $.lambda_literal,\n      $.anonymous_function,",
+      "after": "      $.lambda_literal,\n      $.suspend_lambda,\n      $.anonymous_function,",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "    annotated_expression: $ => seq($.annotation, $.expression),",
+      "after": "    suspend_lambda: $ => seq('suspend', $.lambda_literal),\n\n    annotated_expression: $ => seq($.annotation, $.expression),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "          optional(','),\n        ),\n        'else',",
+      "after": "          optional(','),\n          optional(seq('if', $.expression)),\n        ),\n        'else',",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "  conflicts: $ => [",
+      "after": "  conflicts: $ => [\n    [$.context_parameters, $._reserved_identifier],\n    [$.if_expression, $.parenthesized_expression],",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "                        // skip until the closing parenthesis\n                        while (lexer->lookahead != ')' && !lexer->eof(lexer)) {",
+      "after": "                        skip(lexer);\n                        while (iswspace(lexer->lookahead)) skip(lexer);\n                        // An empty call is an identifier use, never a setter parameter.\n                        if (lexer->lookahead == ')') return true;\n                        // skip until the closing parenthesis\n                        while (lexer->lookahead != ')' && !lexer->eof(lexer)) {",
+      "occurrences": 1
     }
   ]
 }

@@ -1,0 +1,58 @@
+---
+source: crates/kodstar-cli/tests/startup.rs
+expression: stdout
+---
+Create local source history and an initial analysis index. Later runs preserve observed changes and update the analysis incrementally.
+
+First initialization asks you to confirm the target directory; non-interactive use requires --yes. The filesystem root is refused. Existing checkpoint history is preserved when rebuilding analysis.
+
+Usage: kodstar init [OPTIONS] [path]
+
+Arguments:
+  [path]
+          Directory to initialize or update, relative to the current directory or absolute. If --root is also provided, both must resolve to the same directory.
+
+Options:
+      --verbose <true|false>
+          Enable or disable routine progress, stage timings and result counts on stderr. Defaults to true; pass --verbose false to suppress them. Errors and analysis warnings remain visible. This option does not change result output or structured stdio progress frames, and may appear before or after a command.
+          
+          [default: true]
+          [possible values: true, false]
+
+      --yes
+          Confirm the displayed initialization target without prompting
+
+      --full
+          Re-extract every source into a new committed generation
+
+      --verify
+          Verify tracked file content hashes instead of relying only on metadata to detect changes. This does not force re-extraction of unchanged files; use --full for that.
+
+      --config <config>
+          Read this TOML file after ~/.kodstar/config.toml; command-line settings override both. Relative paths are resolved from the current directory. This explicitly selected file must exist.
+
+      --root <root>
+          Select an absolute project directory or a path relative to the current directory. Otherwise project commands discover a registered ancestor root. File arguments remain relative to the current directory, not this option.
+
+      --jobs <jobs>
+          Maximum analysis worker count, from 1 to 64. Built-in default: 2; TOML configuration can override it. Memory settings cover inputs, queued work, and worker stacks. One worker owns C/C++ semantic work with a 16MiB stack; other workers use 2MiB stacks for syntax analysis.
+
+      --memory-budget <memory-budget>
+          Concurrent scheduling memory envelope in bytes or B, KB, KiB, MB, MiB, GB, or GiB. Built-in default: 268435456 bytes; TOML configuration can override it. Each phase owns its buffers and reserves worker stacks before native processing. Work limits reset per file. Clang memory is observed, but untracked allocator overhead remains; this is not an OS-enforced RSS limit.
+
+      --max-file-bytes <max-file-bytes>
+          Positive analysis input limit in bytes per file. Built-in default: 2097152; TOML configuration can override it. Larger inputs are reported as skipped in analysis coverage; this does not discard preserved source history.
+
+      --format <format>
+          Choose text, JSON, newline-delimited JSON, or tab-separated values for results on stdout. Progress and diagnostics go to stderr. The stdio session has its own protocol envelope.
+          
+          [default: text]
+          [possible values: text, json, jsonl, tsv]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  kodstar init .
+  kodstar init /work/project --yes --jobs 2 --memory-budget 256MiB
+  kodstar init . --full

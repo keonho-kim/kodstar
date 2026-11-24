@@ -1,0 +1,172 @@
+{
+  "reason": "Preserve type/template ambiguity until enough input is available, accept standard decltype/default arguments, and expose opaque structural macro positions.",
+  "replacements": [
+    {
+      "before": "  conflicts: $ => [",
+      "after": "  conflicts: $ => [\n    [$.parenthesized_declarator, $.type_specifier, $.expression],\n    [$.parenthesized_declarator, $.type_specifier],\n    [$.type_qualifier, $.macro_type],\n    [$.type_specifier, $._dependent_constructor],\n    [$._class_name, $._dependent_constructor],\n    [$._declarator, $.call_expression],\n    [$.type_qualifier, $.friend_declaration],\n    [$._function_attributes_start, $._function_attributes_end],\n    [$._string, $.concatenated_string],\n    [$.type_qualifier, $.type_specifier],\n    [$.type_qualifier, $.template_instantiation],\n    [$.macro_type, $.template_instantiation],\n    [$.template_function, $.qualified_identifier],",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "decltype: $ => seq(\n      'decltype',\n      '(',\n      $.expression,",
+      "after": "decltype: $ => seq(\n      'decltype',\n      '(',\n      choice($.expression, $.comma_expression),",
+      "occurrences": 1
+    },
+    {
+      "file": "grammar.js",
+      "before": "optional(choice($._declarator, $.abstract_reference_declarator))",
+      "after": "optional(choice($._declarator, $.abstract_reference_declarator, $.abstract_pointer_declarator))",
+      "occurrences": 1
+    },
+    {
+      "before": "    optional_parameter_declaration: $ => seq(\n      $._declaration_specifiers,\n      field('declarator', optional(choice($._declarator, $.abstract_reference_declarator, $.abstract_pointer_declarator))),\n      '=',\n      field('default_value', $.expression),",
+      "after": "    optional_parameter_declaration: $ => seq(\n      $._declaration_specifiers,\n      field('declarator', optional(choice($._declarator, $.abstract_reference_declarator, $.abstract_pointer_declarator))),\n      '=',\n      field('default_value', choice($.expression, $.initializer_list)),",
+      "occurrences": 1
+    },
+    {
+      "before": "prec.dynamic(1, seq(optional('template'), $.identifier))",
+      "after": "seq(optional('template'), $.identifier)",
+      "occurrences": 1
+    },
+    {
+      "before": "prec.dynamic(1, $._type_identifier)",
+      "after": "$._type_identifier",
+      "occurrences": 1
+    },
+    {
+      "before": "    if_statement: $ => prec.right(seq(\n      'if',\n      optional('constexpr'),",
+      "after": "    if_statement: $ => prec.right(seq(\n      'if',\n      optional(choice('constexpr', alias($.modifier_identifier, $.type_qualifier))),",
+      "occurrences": 1
+    },
+    {
+      "before": "    _class_declaration: $ => seq(",
+      "after": "    _class_declaration: $ => seq(\n      repeat(choice(alias($.modifier_identifier, $.type_qualifier), $.macro_type)),",
+      "occurrences": 1
+    },
+    {
+      "before": "    type_specifier: $ => choice(",
+      "after": "    macro_type: $ => seq(field('name', alias($.modifier_identifier, $.identifier)), field('arguments', alias($.macro_arguments, $.argument_list))),\n\n    type_specifier: $ => choice(\n      $.macro_type,",
+      "occurrences": 1
+    },
+    {
+      "before": "field('function', choice($.primitive_type, seq(",
+      "after": "field('function', choice($.primitive_type, $.decltype, $.sized_type_specifier, $.operator_name, alias($._dependent_constructor, $.dependent_type), seq(",
+      "occurrences": 1
+    },
+    {
+      "before": "    call_expression: ($, original) =>",
+      "after": "    _dependent_constructor: $ => seq('typename', alias($.qualified_type_identifier, $.qualified_identifier)),\n\n    call_expression: ($, original) =>",
+      "occurrences": 1
+    },
+    {
+      "before": "        field('body', $.enumerator_list),",
+      "after": "        seq(optional($._enum_base_clause), field('body', $.enumerator_list)),",
+      "occurrences": 1
+    },
+    {
+      "before": "    friend_declaration: $ => seq(",
+      "after": "    friend_declaration: $ => seq(\n      repeat(alias($.modifier_identifier, $.type_qualifier)),",
+      "occurrences": 1
+    },
+    {
+      "before": "    template_declaration: $ => seq(\n      'template',\n      field('parameters', $.template_parameter_list),",
+      "after": "    template_declaration: $ => seq(\n      'template',\n      field('parameters', $.template_parameter_list),\n      repeat($.macro_declaration),",
+      "occurrences": 1
+    },
+    {
+      "before": "    lambda_specifier: $ => choice(",
+      "after": "    lambda_specifier: $ => choice(\n      alias($.modifier_identifier, $.type_qualifier),",
+      "occurrences": 1
+    },
+    {
+      "before": "      choice($.identifier, $.string_literal, $.raw_string_literal),\n      choice($.string_literal, $.raw_string_literal),",
+      "after": "      choice(\n        seq($.identifier, choice($.string_literal, $.raw_string_literal)),\n        seq(choice($.string_literal, $.raw_string_literal), choice($.identifier, $.string_literal, $.raw_string_literal)),\n      ),",
+      "occurrences": 1
+    },
+    {
+      "before": "    template_instantiation: $ => prec(1, seq(\n      optional('extern'),\n      'template',\n      optional($._declaration_specifiers),\n      field('declarator', $._declarator),\n      ';',\n    )),",
+      "after": "    template_instantiation: $ => prec(1, seq(\n      optional('extern'),\n      'template',\n      repeat(alias($.modifier_identifier, $.type_qualifier)),\n      choice(\n        seq(choice('class', 'struct', 'union'), field('declarator', $._class_name)),\n        seq(optional($._declaration_specifiers), field('declarator', $._declarator)),\n      ),\n      ';',\n    )),",
+      "occurrences": 1
+    },
+    {
+      "before": "field('default_type', $.type_specifier)",
+      "after": "field('default_type', $.type_descriptor)",
+      "occurrences": 1
+    },
+    {
+      "before": "optional(choice('namespace', 'enum'))",
+      "after": "optional(choice('namespace', 'enum', 'typename'))",
+      "occurrences": 1
+    },
+    {
+      "before": "      optional(choice('class', 'struct')),\n      choice(",
+      "after": "      optional(choice('class', 'struct')),\n      repeat($.attribute_declaration),\n      choice(",
+      "occurrences": 1
+    },
+    {
+      "before": "    field_expression: $ => seq(\n      prec(PREC.FIELD, seq(\n        field('argument', $.expression),\n        field('operator', choice('.', '.*', '->')),\n      )),\n      field('field', choice(\n        prec.dynamic(1, $._field_identifier),\n        alias($.qualified_field_identifier, $.qualified_identifier),\n        $.destructor_name,\n        $.template_method,\n        alias($.dependent_field_identifier, $.dependent_name),\n        $.operator_name,\n        $.splice_expression,\n      )),\n    ),\n",
+      "after": "    field_expression: $ => choice(\n      prec(PREC.FIELD, seq(field('argument', $.expression), field('operator', choice('.*', '->*')), field('field', $.parenthesized_expression))),\n      seq(\n      prec(PREC.FIELD, seq(\n        field('argument', $.expression),\n        field('operator', choice('.', '.*', '->')),\n      )),\n      field('field', choice(\n        prec.dynamic(1, $._field_identifier),\n        alias($.qualified_field_identifier, $.qualified_identifier),\n        $.destructor_name,\n        $.template_method,\n        alias($.dependent_field_identifier, $.dependent_name),\n        $.operator_name,\n        $.splice_expression,\n      )),\n    )),\n",
+      "occurrences": 1
+    },
+    {
+      "before": "    template_function: $ => seq(\n      field('name', $.identifier),",
+      "after": "    template_function: $ => seq(\n      field('name', choice($.identifier, $.operator_name)),",
+      "occurrences": 1
+    },
+    {
+      "before": "    type_qualifier: (_, original) => choice(\n      original,",
+      "after": "    type_qualifier: ($, original) => choice(\n      original,\n      $.macro_type,",
+      "occurrences": 1
+    },
+    {
+      "before": "field('operator', choice('.', '.*', '->'))",
+      "after": "field('operator', choice('.', '.*', '->', '->*'))",
+      "occurrences": 1
+    },
+    {
+      "before": "    declaration: $ => seq(\n      $._declaration_specifiers,\n      commaSep1(field('declarator', choice(\n        seq(\n          // C uses _declaration_declarator here for some nice macro parsing in function declarators,\n          // but this causes a world of pain for C++ so we'll just stick to the normal _declarator here.\n          optional($.ms_call_modifier),\n          $._declarator,\n          optional($.gnu_asm_expression),\n        ),\n        $.init_declarator,\n      ))),\n      ';',\n    ),\n",
+      "after": "    declaration: $ => choice(\n      seq($._declaration_specifiers, field('declarator', $._declarator), $.delete_method_clause),\n      seq(\n      $._declaration_specifiers,\n      commaSep1(field('declarator', choice(\n        seq(\n          // C uses _declaration_declarator here for some nice macro parsing in function declarators,\n          // but this causes a world of pain for C++ so we'll just stick to the normal _declarator here.\n          optional($.ms_call_modifier),\n          $._declarator,\n          optional($.gnu_asm_expression),\n        ),\n        $.init_declarator,\n      ))),\n      ';',\n    )),\n",
+      "occurrences": 1
+    },
+    {
+      "before": "    field_initializer: $ => prec(1, seq(",
+      "after": "    field_initializer: $ => prec(1, seq(\n      repeat($.macro_type),",
+      "occurrences": 1
+    },
+    {
+      "before": "    _field_declarator: ($, original) => choice(\n      original,",
+      "after": "    _member_pointer_field_declarator: $ => prec.dynamic(1, prec.right(seq($._scope_resolution, \"*\", repeat($.type_qualifier), field(\"declarator\", $._field_declarator)))),\n\n    _field_declarator: ($, original) => choice(\n      original,\n      alias($._member_pointer_field_declarator, $.pointer_declarator),",
+      "occurrences": 1
+    },
+    {
+      "before": "    _expression_not_binary: ($, original) => choice(\n      original,",
+      "after": "    throw_expression: $ => prec.right(PREC.ASSIGNMENT, seq(\"throw\", optional($.expression))),\n\n    _expression_not_binary: ($, original) => choice(\n      original,\n      $.throw_expression,",
+      "occurrences": 1
+    },
+    {
+      "before": "    throw_statement: $ => seq(\n      'throw',\n      optional($.expression),\n      ';',\n    ),",
+      "after": "    throw_statement: $ => prec(1, seq($.throw_expression, ';')),",
+      "occurrences": 1
+    },
+    {
+      "before": "  conflicts: $ => [",
+      "after": "  conflicts: $ => [\n    [$._type_declarator, $.sized_type_specifier],\n    [$._type_declarator, $.type_specifier],\n    [$.parenthesized_type_declarator, $.type_specifier],\n    [$.function_declarator, $.reference_declarator],\n    [$.attributed_declarator, $.reference_declarator],\n    [$.macro_type, $._function_postfix],",
+      "occurrences": 1
+    },
+    {
+      "before": "    _abstract_declarator: ($, original) => choice(\n      original,",
+      "after": "    abstract_pointer_declarator: ($, original) => choice(original, prec.dynamic(1, prec.right(seq($._scope_resolution, \"*\", repeat($.type_qualifier), field(\"declarator\", optional($._abstract_declarator)))))),\n\n    _abstract_declarator: ($, original) => choice(\n      original,",
+      "occurrences": 1
+    },
+    {
+      "before": "    reference_declarator: $ => prec.dynamic(1, prec.right(seq(choice('&', '&&'), $._declarator))),",
+      "after": "    reference_declarator: $ => prec.dynamic(1, seq(choice('&', '&&'), $._declarator)),",
+      "occurrences": 1
+    },
+    {
+      "before": "      repeat1($.virtual_specifier),",
+      "after": "      seq(repeat1($.virtual_specifier), repeat(choice(alias($.modifier_identifier, $.type_qualifier), $.macro_type))),",
+      "occurrences": 1
+    }
+  ]
+}

@@ -4,11 +4,7 @@
 // Related: crates/kodstar-core/src/infrastructure/index/packed/mod.rs.
 
 use super::{Filter, Kind, Rows, codec};
-use rusqlite::{
-    Connection, Result, ffi,
-    types::{Value, ValueRef},
-    vtab::*,
-};
+use rusqlite::{Connection, Result, ffi, types::Value, vtab::*};
 use std::rc::Rc;
 
 #[repr(C)]
@@ -17,6 +13,7 @@ pub(super) struct Cursor {
     connection: Rc<Connection>,
     kind: Kind,
     filters: Vec<Filter>,
+    columns: u64,
     block: i64,
     rows: Rows,
     at: usize,
@@ -30,6 +27,7 @@ impl Cursor {
             connection,
             kind,
             filters: Vec::new(),
+            columns: u64::MAX,
             block: 0,
             rows: Rows::Empty,
             at: 0,
@@ -53,6 +51,12 @@ impl Cursor {
                     self.block,
                     &self.filters,
                     &mut self.routes,
+                    self.columns,
+                )?,
+                Kind::Dependencies => super::super::dependencies::pages::scan(
+                    &self.connection,
+                    self.block,
+                    &self.filters,
                 )?,
             };
             let Some((block, rows)) = next else {
@@ -73,12 +77,17 @@ impl Cursor {
 unsafe impl VTabCursor for Cursor {
     fn filter(&mut self, _: i32, plan: Option<&str>, args: &Filters<'_>) -> Result<()> {
         self.filters.clear();
+        self.columns = u64::MAX;
         if let Some(plan) = plan.filter(|p| !p.is_empty()) {
-            for (at, column) in plan.split(',').enumerate() {
-                self.filters.push((
-                    column.parse().map_err(|_| codec::invalid())?,
-                    args.get::<Value>(at)?,
-                ));
+            let (columns, plan) = plan.split_once(':').ok_or_else(codec::invalid)?;
+            self.columns = columns.parse().map_err(|_| codec::invalid())?;
+            if !plan.is_empty() {
+                for (at, column) in plan.split(',').enumerate() {
+                    self.filters.push((
+                        column.parse().map_err(|_| codec::invalid())?,
+                        args.get::<Value>(at)?,
+                    ));
+                }
             }
         }
         self.block = 0;
@@ -100,9 +109,6 @@ unsafe impl VTabCursor for Cursor {
         ))
     }
     fn rowid(&self) -> Result<i64> {
-        match self.rows.value(self.at, 0) {
-            ValueRef::Integer(id) => Ok(id),
-            _ => Err(codec::invalid()),
-        }
+        self.rows.rowid(self.at)
     }
 }

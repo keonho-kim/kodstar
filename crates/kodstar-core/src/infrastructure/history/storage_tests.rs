@@ -71,7 +71,12 @@ fn small_payloads_are_stored_raw_without_changing_their_bytes() -> Result<()> {
     let mut writer = blobs::Writer::new(&connection)?;
     for length in [1, 31, 64, 127] {
         let raw = vec![b'a'; length];
-        let id = writer.put(Cursor::new(&raw), None, &Cancellation::default())?;
+        let id = writer.put(
+            Cursor::new(&raw),
+            raw.len() as u64,
+            None,
+            &Cancellation::default(),
+        )?;
         let codec: u8 = connection.query_row(
             "SELECT d.codec FROM chunk_refs r JOIN chunk_data d ON d.id=r.chunk WHERE r.blob=?1",
             [id],
@@ -91,13 +96,23 @@ fn thousand_small_edits_preserve_every_version_with_one_level_deltas() -> Result
     let connection = database()?;
     let cancel = Cancellation::default();
     let original = noise(8192);
-    let first = blobs::Writer::new(&connection)?.put(Cursor::new(&original), None, &cancel)?;
+    let first = blobs::Writer::new(&connection)?.put(
+        Cursor::new(&original),
+        original.len() as u64,
+        None,
+        &cancel,
+    )?;
     let mut previous = Some(first);
     let mut versions = Vec::new();
     for index in 0..1000usize {
         let mut changed = original.clone();
         changed[index..index + 4].copy_from_slice(&(index as u32).to_le_bytes());
-        let id = blobs::Writer::new(&connection)?.put(Cursor::new(&changed), previous, &cancel)?;
+        let id = blobs::Writer::new(&connection)?.put(
+            Cursor::new(&changed),
+            changed.len() as u64,
+            previous,
+            &cancel,
+        )?;
         assert_eq!(blobs::read(&connection, id, 8192, &cancel)?, changed);
         versions.push(id);
         previous = Some(id);
@@ -123,14 +138,23 @@ fn large_insertions_share_content_and_random_reads_cross_variable_boundaries() -
     let connection = database()?;
     let cancel = Cancellation::default();
     let original = noise(1024 * 1024);
-    let first = blobs::Writer::new(&connection)?.put(Cursor::new(&original), None, &cancel)?;
+    let first = blobs::Writer::new(&connection)?.put(
+        Cursor::new(&original),
+        original.len() as u64,
+        None,
+        &cancel,
+    )?;
     let before: u64 =
         connection.query_row("SELECT sum(length(content)) FROM chunk_data", [], |r| {
             r.get(0)
         })?;
     let changed = [b"inserted prefix\n".as_slice(), &original].concat();
-    let second =
-        blobs::Writer::new(&connection)?.put(Cursor::new(&changed), Some(first), &cancel)?;
+    let second = blobs::Writer::new(&connection)?.put(
+        Cursor::new(&changed),
+        changed.len() as u64,
+        Some(first),
+        &cancel,
+    )?;
     let after: u64 =
         connection.query_row("SELECT sum(length(content)) FROM chunk_data", [], |r| {
             r.get(0)
@@ -160,11 +184,20 @@ fn invalid_delta_base_is_rejected_without_following_a_chain() -> Result<()> {
     let connection = database()?;
     let cancel = Cancellation::default();
     let original = noise(8192);
-    let first = blobs::Writer::new(&connection)?.put(Cursor::new(&original), None, &cancel)?;
+    let first = blobs::Writer::new(&connection)?.put(
+        Cursor::new(&original),
+        original.len() as u64,
+        None,
+        &cancel,
+    )?;
     let mut changed = original.clone();
     changed[42] ^= 1;
-    let second =
-        blobs::Writer::new(&connection)?.put(Cursor::new(&changed), Some(first), &cancel)?;
+    let second = blobs::Writer::new(&connection)?.put(
+        Cursor::new(&changed),
+        changed.len() as u64,
+        Some(first),
+        &cancel,
+    )?;
     connection.execute_batch(
         "PRAGMA ignore_check_constraints=ON;
         UPDATE chunk_data SET base=id WHERE codec=2;",

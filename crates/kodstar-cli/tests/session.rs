@@ -75,15 +75,21 @@ fn sessions_share_named_history_and_revision_queries_with_the_cli() -> TestResul
     let project = Project::new()?;
     project.write("fn saved() {}")?;
     assert!(project.run(&["init"])?.status.success());
-    let output = session(
+    let mut output = session(
         &project,
         &[
             json!({"protocol_version":1,"id":"old","method":"init"}),
             json!({"protocol_version":2,"id":"save","method":"history","params":{"request":{"action":"save","name":"saved"}}}),
+        ],
+    )?;
+    // Dependent requests follow save completion; three queued jobs can legitimately exceed the two pending slots.
+    output.extend(session(
+        &project,
+        &[
             json!({"protocol_version":2,"id":"list","method":"history","params":{"request":{"action":"list","refresh":"none"}}}),
             json!({"protocol_version":2,"id":"past","method":"query","params":{"query":{"kind":"symbols","file":"main.rs"},"options":{"revision":"saved"}}}),
         ],
-    )?;
+    )?);
     assert!(
         output
             .iter()
@@ -92,9 +98,12 @@ fn sessions_share_named_history_and_revision_queries_with_the_cli() -> TestResul
     assert!(output.iter().any(|event| event["id"] == "list"
         && event["type"] == "result"
         && event["data"]["name"] == "saved"));
-    assert!(output.iter().any(|event| event["id"] == "past"
-        && event["type"] == "metadata"
-        && event["data"]["history"]["checkpoint"] == "c1"));
+    assert!(
+        output.iter().any(|event| event["id"] == "past"
+            && event["type"] == "metadata"
+            && event["data"]["history"]["checkpoint"] == "c1"),
+        "{output:?}"
+    );
     assert!(output.iter().any(|event| event["id"] == "past"
         && event["type"] == "result"
         && event["data"]["name"] == "saved"));

@@ -6,7 +6,7 @@
 use crate::application::analysis::resolve::{Binding, FileContext, Lookup};
 use crate::domain::diagnostics::Result;
 use crate::domain::languages::Language;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::params;
 
 impl Lookup<'_, '_> {
     pub(super) fn binding(
@@ -17,13 +17,7 @@ impl Lookup<'_, '_> {
         name: &str,
     ) -> Result<Option<Binding>> {
         let key = context.language.lookup_key(name);
-        let pascal_class: Option<u32> = if context.language == Language::Pascal {
-            self.connection.cached_row("SELECT CASE WHEN o.file_id=?1 AND o.kind IN ('class','interface','type') THEN o.local_id END FROM facts f JOIN symbols s ON s.id=f.source_id LEFT JOIN symbols o ON o.id=s.owner_id WHERE f.id=?2",params![context.id,self.fact],|r|r.get(0)).optional()?.flatten()
-        } else {
-            None
-        };
-        let mut class_visited = false;
-        let ruby_method=context.language==Language::Ruby && self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM facts f JOIN symbols s ON s.id=f.source_id WHERE f.id=?1 AND s.kind IN ('method','function'))",[self.fact],|r|r.get::<_,bool>(0))?;
+        let ruby_method=context.language==Language::Ruby && self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM symbols s WHERE s.id=?1 AND s.kind IN ('method','function'))",[self.source],|r|r.get::<_,bool>(0))?;
         let module = if context.language == Language::Elixir {
             crate::application::analysis::resolve::namespaces::nearest_module(
                 self.connection,
@@ -35,34 +29,38 @@ impl Lookup<'_, '_> {
             None
         };
         for _ in 0..1025 {
-            if Some(scope) == pascal_class {
-                class_visited = true;
-            }
-            if scope == 0
-                && !class_visited
-                && let Some(class) = pascal_class
-            {
-                scope = class;
-                class_visited = true;
-            }
             if let Some(target) = self.python_scope(context, scope, &key)? {
                 let Some(target) = target else {
                     return Ok(None);
                 };
                 scope = target;
             }
-            let binding = self.prepared.binding(
-                params![
-                    context.id,
+            let binding = self.prepared.reuse.borrow_mut().binding(
+                self.connection.connection(),
+                context.id,
+                super::reuse::Key {
                     scope,
-                    key,
                     position,
-                    context.language.as_str(),
-                    self.namespace.as_str(),
-                    key.trim_end_matches('!'),
-                    ruby_method
-                ],
-                context.language != Language::Php && self.namespace.as_str() != "macro",
+                    language: context.language.as_str(),
+                    namespace: self.namespace.as_str(),
+                    ruby_method,
+                    name: &key,
+                },
+                || {
+                    self.prepared.binding(
+                        params![
+                            context.id,
+                            scope,
+                            key,
+                            position,
+                            context.language.as_str(),
+                            self.namespace.as_str(),
+                            key.trim_end_matches('!'),
+                            ruby_method
+                        ],
+                        context.language != Language::Php && self.namespace.as_str() != "macro",
+                    )
+                },
             )?;
             self.dependency(
                 &format!("scope:{}", self.namespace.as_str()),

@@ -20,20 +20,37 @@ pub(super) fn validate(tree: &Tree, path: &Path, cancel: &Cancellation) -> Resul
         }
         steps += 1;
         let node = cursor.node();
-        if node.is_error() || node.is_missing() {
-            return Err(Error::operation(format!(
-                "syntax error in {} at {}:{}; previous generation preserved",
-                path.display(),
-                node.start_position().row + 1,
-                node.start_position().column + 1
-            )));
+        let mut children = node.walk();
+        let child_error = node
+            .children(&mut children)
+            .any(|n| n.has_error() || n.is_error() || n.is_missing());
+        if node.is_missing() || node.is_error() && !child_error {
+            return Err(Error::input(
+                "source_syntax_error",
+                format!(
+                    "syntax error in {} at {}:{} ({})",
+                    path.display(),
+                    node.start_position().row + 1,
+                    node.start_position().column + 1,
+                    if node.is_missing() {
+                        node.kind()
+                    } else {
+                        "ERROR"
+                    }
+                ),
+                Some(node.start_position().row + 1),
+            ));
         } else if node.has_error() {
             let mut children = node.walk();
-            if !node.children(&mut children).any(|n| n.has_error()) {
-                return Err(Error::operation(format!(
-                    "incomplete parse in {}",
-                    path.display()
-                )));
+            if !node
+                .children(&mut children)
+                .any(|n| n.has_error() || n.is_missing() || n.is_error())
+            {
+                return Err(Error::input(
+                    "source_syntax_error",
+                    format!("incomplete parse in {}", path.display()),
+                    Some(node.start_position().row + 1),
+                ));
             }
         }
         if cursor.goto_first_child() {
@@ -44,10 +61,11 @@ pub(super) fn validate(tree: &Tree, path: &Path, cancel: &Cancellation) -> Resul
                 break;
             }
             if !cursor.goto_parent() {
-                return Err(Error::operation(format!(
-                    "incomplete parse in {}",
-                    path.display()
-                )));
+                return Err(Error::input(
+                    "source_syntax_error",
+                    format!("incomplete parse in {}", path.display()),
+                    Some(1),
+                ));
             }
         }
     }
@@ -87,12 +105,16 @@ pub(super) fn validate_rendered_names(
                 .is_some_and(|p| matches!(p.kind(), "import_specifier" | "export_specifier")))
             && contains_rendering(source, node.byte_range())
         {
-            return Err(Error::operation(format!(
-                "runtime-generated client identifier in {} at {}:{}; previous generation preserved",
-                path.display(),
-                node.start_position().row + 1,
-                node.start_position().column + 1
-            )));
+            return Err(Error::input(
+                "unsupported_source_construct",
+                format!(
+                    "runtime-generated client identifier in {} at {}:{}",
+                    path.display(),
+                    node.start_position().row + 1,
+                    node.start_position().column + 1
+                ),
+                Some(node.start_position().row + 1),
+            ));
         }
         if cursor.goto_first_child() {
             continue;

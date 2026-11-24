@@ -3,8 +3,11 @@
 // Usage: 공통 참조 walker가 각 opening/self-closing 태그에서 호출.
 // Related: crates/kodstar-core/src/infrastructure/parse/references.rs, crates/kodstar-core/src/application/analysis/resolve/modules/exports.rs.
 
+mod classes;
 pub(super) mod commonjs;
 pub(super) mod ejs;
+pub(super) mod hono;
+mod htmx;
 pub(super) mod imports;
 
 pub(super) mod decorators;
@@ -34,6 +37,7 @@ impl Extractor<'_> {
         };
         let spelling = text(name, self.source);
         if spelling.chars().next().is_some_and(char::is_uppercase) || spelling.contains('.') {
+            self.hono_response(node, spelling, context)?;
             self.usage(
                 context,
                 self.reference_text(name)?,

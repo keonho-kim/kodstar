@@ -132,24 +132,7 @@ impl Settings {
                 "input, batch, queue, cache, and default query limits must be positive",
             ));
         }
-        let controlled = self
-            .input_per_worker()?
-            .checked_mul(self.jobs)
-            .and_then(|bytes| bytes.checked_add(self.queue_bytes))
-            .and_then(|bytes| bytes.checked_add(self.fact_batch_bytes))
-            .and_then(|bytes| {
-                self.db_cache_bytes
-                    .checked_mul(3)
-                    .and_then(|cache| bytes.checked_add(cache))
-            })
-            .and_then(|bytes| {
-                bytes.checked_add(
-                    crate::infrastructure::history::CACHE_BYTES
-                        + crate::infrastructure::history::SNAPSHOT_CACHE_BYTES
-                        + 512 * 1024,
-                )
-            })
-            .ok_or_else(|| Error::argument("resource settings overflow the host address space"))?;
+        let controlled = self.controlled_bytes()?;
         if controlled > self.memory_budget {
             return Err(Error::argument(
                 "memory_budget must cover worker inputs, queued facts, three analysis DB caches, history/snapshot caches and storage buffers; AST/RSS are additional runtime costs",
@@ -168,12 +151,51 @@ impl Settings {
         Ok(())
     }
 
+    fn controlled_bytes(&self) -> Result<usize> {
+        self.input_per_worker()?
+            .checked_mul(self.jobs)
+            .and_then(|bytes| bytes.checked_add(self.queue_bytes))
+            .and_then(|bytes| bytes.checked_add(self.fact_batch_bytes))
+            .and_then(|bytes| {
+                self.db_cache_bytes
+                    .checked_mul(3)
+                    .and_then(|cache| bytes.checked_add(cache))
+            })
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    crate::infrastructure::history::CACHE_BYTES
+                        + crate::infrastructure::history::SNAPSHOT_CACHE_BYTES
+                        + 512 * 1024,
+                )
+            })
+            .ok_or_else(|| Error::argument("resource settings overflow the host address space"))
+    }
+
+    pub(crate) fn native_phase_bytes(&self) -> Result<usize> {
+        // Native workspace excludes inputs, queued work and owned worker stacks; parsing releases it before resolution.
+        let stacks = self
+            .jobs
+            .saturating_sub(1)
+            .checked_mul(crate::application::analysis::resources::GENERAL_STACK_BYTES)
+            .and_then(|bytes| {
+                bytes.checked_add(crate::application::analysis::resources::WORKER_STACK_BYTES)
+            })
+            .ok_or_else(|| Error::argument("analysis stack reservation overflow"))?;
+        self.memory_budget
+            .checked_sub(self.controlled_bytes()?.saturating_add(stacks))
+            .ok_or_else(|| {
+                Error::argument("analysis memory budget must also cover the owned worker stacks")
+            })
+    }
+
     pub(crate) fn fingerprint(&self) -> Result<String> {
-        let data =
-            serde_json::to_vec(&(&self.exclude, &self.language_overrides, self.max_file_bytes))
-                .map_err(|error| {
-                    Error::caused_by("encode analysis configuration fingerprint", error)
-                })?;
+        let data = serde_json::to_vec(&(
+            &self.exclude,
+            &self.language_overrides,
+            self.max_file_bytes,
+            self.fact_batch_bytes,
+        ))
+        .map_err(|error| Error::caused_by("encode analysis configuration fingerprint", error))?;
         Ok(blake3::hash(&data).to_hex().to_string())
     }
 }

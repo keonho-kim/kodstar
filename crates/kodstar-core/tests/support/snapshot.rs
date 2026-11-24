@@ -1,4 +1,4 @@
-// Purpose: 소형 인덱스의 일곱 저장 계약을 ID와 무관하게 비교.
+// Purpose: 소형 인덱스의 의미·native 관측 저장 계약을 ID와 무관하게 비교.
 // Pattern: Test Snapshot.
 // Usage: 증분 최적화 회귀 사례가 동일 입력의 full build와 대조.
 // Related: crates/kodstar-core/tests/cases/optimization.rs, scripts/benchmarks/analysis.py.
@@ -48,6 +48,8 @@ pub fn normalized_index(report: &InitReport) -> Result<Vec<String>, Box<dyn Erro
             ORDER BY 1,2
         "),
         ("lookups", include_str!("../../../../scripts/benchmarks/lookups.sql")),
+        ("native_analysis", "SELECT hex(f.path),hex(n.environment),n.status,n.detail FROM native_analysis n JOIN files f ON f.id=n.file_id ORDER BY 1,2,3,4"),
+        ("native_inputs", "SELECT hex(f.path),n.path,n.kind,hex(n.hash) FROM native_inputs n JOIN files f ON f.id=n.file_id ORDER BY 1,2,3,4"),
     ] {
         result.push(name.into());
         let mut statement = connection.prepare(sql)?;

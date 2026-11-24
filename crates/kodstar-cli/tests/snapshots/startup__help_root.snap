@@ -1,0 +1,56 @@
+---
+source: crates/kodstar-cli/tests/startup.rs
+expression: stdout
+---
+Explore code relationships and preserve observed source changes as local checkpoints.
+
+Run init in a project first. Regular project queries synchronize changes before reading the index; --no-refresh skips that synchronization. Help and version output do not initialize a project or create application data.
+
+Use -h for a summary and --help for detailed behavior, options, and examples. Progress and stage timings are enabled by default; use --verbose false for quiet stderr.
+
+Usage: kodstar [OPTIONS] [COMMAND]
+
+Commands:
+  init       Initialize local history and analyze the captured source state
+  uninstall  Remove installation, settings, caches and registered project histories
+  serve      Serve versioned stdio requests for external tools
+  watch      Watch saved files and publish successful updates until interrupted
+  cache      Inspect and manage project caches
+  symbols    List definitions in a file
+  list       List directly connected files
+  search     Find object definitions by name
+  overview   Summarize project structure and important dependencies
+  related    Show incoming and outgoing relationships
+  deps       Show outgoing dependencies
+  refs       Show incoming references
+  explain    Explain definitions and relationship evidence
+  impact     Find incoming static impact candidates
+  path       Find a shortest directed relationship path
+  history    List local source checkpoints
+  branch     List local branches
+  languages  Show actual language capabilities and limitations
+  status     Show project history, analysis state, and freshness
+  doctor     Check history and analysis integrity and report diagnostics
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --verbose <true|false>
+          Enable or disable routine progress, stage timings and result counts on stderr. Defaults to true; pass --verbose false to suppress them. Errors and analysis warnings remain visible. This option does not change result output or structured stdio progress frames, and may appear before or after a command.
+          
+          [default: true]
+          [possible values: true, false]
+
+      --licenses
+          Print bundled third-party license notices
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Examples:
+  kodstar init .
+  kodstar deps src/api.rs caller --sites
+  kodstar --verbose false symbols src/api.rs
+  kodstar history --help

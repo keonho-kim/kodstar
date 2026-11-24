@@ -21,6 +21,7 @@ pub(super) struct Work {
     pub(super) source: Vec<u8>,
     pub(super) _input: Permit,
     pub(super) previous: Option<Fingerprints>,
+    pub(super) prefix: Option<crate::domain::facts::append::Prefix>,
 }
 #[derive(Clone, Copy)]
 pub(super) enum InputKind {
@@ -28,13 +29,25 @@ pub(super) enum InputKind {
     Auxiliary,
     Configuration,
 }
+impl InputKind {
+    pub const fn is_native(self) -> bool {
+        matches!(self, Self::Code(Language::C | Language::Cpp))
+    }
+}
+pub(super) enum FileChange {
+    Replace,
+    Body,
+    Append(crate::domain::facts::append::Candidate),
+}
 pub(super) enum Event {
+    Progress(crate::domain::results::Progress),
     Remove {
         path: PathBuf,
     },
     Begin {
         record: FileRecord,
-        preserve: bool,
+        change: FileChange,
+        partial: Option<SourceSpan>,
     },
     Facts {
         path: Arc<PathBuf>,
@@ -43,11 +56,17 @@ pub(super) enum Event {
     End {
         path: Arc<PathBuf>,
         fingerprints: Fingerprints,
+        native: Option<Arc<crate::domain::native::Report>>,
+        fragments: Vec<usize>,
+        partial: Option<SourceSpan>,
     },
     UnchangedFacts {
         record: FileRecord,
         span: SourceSpan,
         scope_ends: Vec<(u32, usize)>,
+        native: Option<Arc<crate::domain::native::Report>>,
+        fragments: Vec<usize>,
+        partial: Option<SourceSpan>,
     },
     Reuse {
         record: FileRecord,
@@ -56,6 +75,12 @@ pub(super) enum Event {
     Skip {
         record: FileRecord,
         reason: &'static str,
+    },
+    Failed {
+        record: FileRecord,
+        issue: crate::domain::diagnostics::InputIssue,
+        message: String,
+        native: Option<Arc<crate::domain::native::Report>>,
     },
 }
 pub(super) struct Message {
@@ -84,6 +109,7 @@ pub(super) struct Events {
 impl Events {
     pub(super) fn send(&self, event: Event) -> Result<()> {
         let size = match &event {
+            Event::Progress(value) => value.owned_bytes(),
             Event::Remove { path } => path.capacity(),
             Event::Facts { facts, .. } => {
                 facts.capacity() * std::mem::size_of::<(Language, Fact)>()
@@ -93,15 +119,37 @@ impl Events {
                         .sum::<usize>()
             }
             Event::UnchangedFacts {
-                record, scope_ends, ..
-            } => record.owned_bytes() + scope_ends.capacity() * std::mem::size_of::<(u32, usize)>(),
-            Event::Begin { record, .. }
-            | Event::Reuse { record, .. }
-            | Event::Skip { record, .. } => record.owned_bytes(),
-            Event::End { fingerprints, .. } => {
-                fingerprints.all.capacity() + fingerprints.environment.capacity()
+                record,
+                scope_ends,
+                fragments,
+                ..
+            } => {
+                record.owned_bytes()
+                    + scope_ends.capacity() * std::mem::size_of::<(u32, usize)>()
+                    + fragments.capacity() * std::mem::size_of::<usize>()
             }
-        } + std::mem::size_of::<Message>();
+            Event::Begin { record, change, .. } => {
+                record.owned_bytes()
+                    + match change {
+                        FileChange::Append(a) => {
+                            a.names.capacity() * std::mem::size_of::<String>()
+                                + a.names.iter().map(String::capacity).sum::<usize>()
+                        }
+                        _ => 0,
+                    }
+            }
+            Event::Reuse { record, .. } | Event::Skip { record, .. } => record.owned_bytes(),
+            Event::Failed {
+                record, message, ..
+            } => record.owned_bytes() + message.capacity(),
+            Event::End { fragments, .. } => fragments.capacity() * std::mem::size_of::<usize>(),
+        } + std::mem::size_of::<Message>()
+            + match &event {
+                Event::End { native, .. }
+                | Event::UnchangedFacts { native, .. }
+                | Event::Failed { native, .. } => native.as_ref().map_or(0, |r| r.owned_bytes()),
+                _ => 0,
+            };
         let permit = Some(self.bytes.reserve(size, &self.cancel)?);
         let mut message = Message {
             event,
@@ -131,95 +179,4 @@ impl Events {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::thread;
-
-    #[test]
-    fn cancellation_releases_a_full_queue_without_waiting_for_the_receiver() -> Result<()> {
-        let (sender, receiver) = channel::bounded(1);
-        let bytes = ByteBudget::new(4096)?;
-        let cancel = Cancellation::default();
-        let events = Events {
-            sender,
-            bytes: Arc::clone(&bytes),
-            cancel: cancel.clone(),
-            failure: Arc::default(),
-        };
-        let event = || Event::End {
-            path: Arc::default(),
-            fingerprints: Fingerprints {
-                all: String::new(),
-                environment: String::new(),
-            },
-        };
-        events.send(event())?;
-        let (done, finished) = channel::bounded(1);
-        let worker = thread::spawn(move || {
-            let _ = done.send(events.send(event()));
-        });
-        cancel.cancel();
-        let result = finished.recv_timeout(Duration::from_secs(2));
-        drop(receiver);
-        worker
-            .join()
-            .map_err(|_| Error::operation("test producer panicked"))?;
-        let error = result
-            .map_err(|e| Error::caused_by("cancelled producer did not stop", e))?
-            .expect_err("cancelled send succeeded");
-        assert!(matches!(
-            error.kind,
-            crate::domain::diagnostics::ErrorKind::Cancelled
-        ));
-        let _all = bytes.reserve(4096, &Cancellation::default())?;
-        Ok(())
-    }
-
-    #[test]
-    fn closing_the_writer_releases_queued_and_waiting_producers() -> Result<()> {
-        let (sender, receiver) = channel::bounded(1);
-        let cancel = Cancellation::default();
-        let bytes = ByteBudget::new(4096)?;
-        let events = Events {
-            sender,
-            bytes: Arc::clone(&bytes),
-            cancel: cancel.clone(),
-            failure: Arc::default(),
-        };
-        let inbox = Inbox {
-            receiver,
-            cancel: cancel.clone(),
-        };
-        let (started, ready) = std::sync::mpsc::channel();
-        let worker = thread::spawn(move || {
-            events.send(Event::End {
-                path: Arc::default(),
-                fingerprints: Fingerprints {
-                    all: String::new(),
-                    environment: String::new(),
-                },
-            })?;
-            started
-                .send(())
-                .map_err(|error| Error::caused_by("test producer ready", error))?;
-            events.send(Event::End {
-                path: Arc::default(),
-                fingerprints: Fingerprints {
-                    all: String::new(),
-                    environment: String::new(),
-                },
-            })
-        });
-        ready
-            .recv()
-            .map_err(|error| Error::caused_by("wait for test producer", error))?;
-        drop(inbox);
-        let result = worker
-            .join()
-            .map_err(|_| Error::operation("test producer panicked"))?;
-        assert!(result.is_err());
-        assert!(cancel.is_cancelled());
-        let _all = bytes.reserve(4096, &Cancellation::default())?;
-        Ok(())
-    }
-}
+mod tests;

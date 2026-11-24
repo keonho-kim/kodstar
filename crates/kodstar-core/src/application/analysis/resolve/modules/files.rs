@@ -22,13 +22,14 @@ impl Lookup<'_, '_> {
         raw: &str,
         depth: usize,
     ) -> Result<Location> {
+        // A depth is a lookup frame, never an accumulator shared by sibling requests.
+        self.connection
+            .cached_execute("DELETE FROM resolution_modules WHERE depth=?1", [depth])?;
+        self.connection.cached_execute(
+            "DELETE FROM resolution_module_owners WHERE depth=?1",
+            [depth],
+        )?;
         let parent = context.path.parent().unwrap_or_else(|| Path::new(""));
-        if let Some(path) = raw.strip_prefix("@pascal-file:") {
-            if let Some(path) = normalize(parent, path) {
-                self.indexed_path(&path, PathKind::Pascal, depth)?;
-            }
-            return Ok(Location::Project);
-        }
         if context.language == Language::Zig && raw == "root" {
             self.reason = Some("Zig root module depends on an unconfigured build entry");
             return Ok(Location::Project);
@@ -93,23 +94,15 @@ impl Lookup<'_, '_> {
                 | Language::Kotlin
                 | Language::Scala
                 | Language::Java
-                | Language::Pascal
                 | Language::Swift
                 | Language::CommonLisp
         ) {
-            let module_filter = if context.language == Language::Pascal {
-                "lower(module)=lower(?3)"
-            } else {
-                "module_id=(SELECT id FROM atoms WHERE value=?3)"
-            };
             self.connection.cached_execute(
-                &format!(
-                    "INSERT OR IGNORE INTO resolution_modules
+                "INSERT OR IGNORE INTO resolution_modules
                 SELECT ?4,id FROM files
                 WHERE language_id=(SELECT id FROM atoms WHERE value=?1)
                   AND package_id=(SELECT id FROM atoms WHERE value=?2)
-                  AND {module_filter} AND status_id=(SELECT id FROM atoms WHERE value='analyzed')"
-                ),
+                  AND module_id=(SELECT id FROM atoms WHERE value=?3) AND status_id=(SELECT id FROM atoms WHERE value='analyzed')",
                 params![context.language.as_str(), context.package, module, depth],
             )?;
             if matches!(context.language, Language::Python | Language::Rust) {

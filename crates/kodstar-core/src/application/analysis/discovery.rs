@@ -9,12 +9,10 @@ use super::module_identity::{module_identity, package_path};
 use crate::application::workspace::SelectedProject;
 use crate::domain::diagnostics::{Error, Result};
 use crate::infrastructure::index::{self, FileRecord};
-use crate::infrastructure::{formats, history::inputs};
-use crossbeam_channel as channel;
+use crate::infrastructure::{formats, history::inputs, languages};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub(super) struct Pipeline<'a> {
     pub(super) selected: &'a SelectedProject,
@@ -31,7 +29,7 @@ pub(super) struct Inventory {
 }
 
 impl Pipeline<'_> {
-    pub(super) fn produce(&self, sender: channel::Sender<Work>) -> Result<Inventory> {
+    pub(super) fn produce(&self, sender: super::routing::Router) -> Result<Inventory> {
         let reader = index::open(
             self.database,
             &self.selected.root,
@@ -61,7 +59,23 @@ impl Pipeline<'_> {
         let mut touched = 0u64;
         let mut emit = |mut entry: inputs::Entry| {
             let previous = previous_query.get(&entry.relative)?;
+            let native_changed = !self.full
+                && previous.is_some()
+                && matches!(
+                    entry.language,
+                    Some(
+                        crate::domain::languages::Language::C
+                            | crate::domain::languages::Language::Cpp
+                    )
+                )
+                && super::native_inputs::changed(
+                    &reader,
+                    &selection.connection,
+                    &entry.relative,
+                    &self.events.cancel,
+                )?;
             touched += u64::from(previous.is_some());
+            let mut detected_input = None;
             if entry.detect_prefix {
                 entry.language = if !self.full
                     && !self.verify
@@ -69,6 +83,21 @@ impl Pipeline<'_> {
                         old.hash == entry.content_hash() && old.size == entry.size()
                     }) {
                     previous.as_ref().and_then(|old| old.language.parse().ok())
+                } else if entry
+                    .relative
+                    .extension()
+                    .is_some_and(|extension| extension == "h")
+                    && entry.size() <= self.selected.settings.max_file_bytes as u64
+                {
+                    let input = self.inputs.reserve(
+                        self.selected.settings.input_per_worker()?,
+                        &self.events.cancel,
+                    )?;
+                    let source =
+                        entry.read(self.selected.settings.max_file_bytes, &self.events.cancel)?;
+                    let language = languages::detect(&entry.relative, &source);
+                    detected_input = Some((input, source));
+                    language
                 } else {
                     entry.detect_from_prefix()?
                 };
@@ -107,7 +136,7 @@ impl Pipeline<'_> {
                 language: language.into(),
                 module,
                 package,
-                content_hash: entry.content_hash().to_owned(),
+                content_hash: entry.content_hash(),
                 size: entry.size(),
                 status: if auxiliary { "auxiliary" } else { "analyzed" },
             };
@@ -146,6 +175,7 @@ impl Pipeline<'_> {
                 });
             }
             if !self.full
+                && !native_changed
                 && !self.verify
                 && previous
                     .as_ref()
@@ -156,11 +186,18 @@ impl Pipeline<'_> {
                     update: false,
                 });
             }
-            let input = self.inputs.reserve(
-                self.selected.settings.input_per_worker()?,
-                &self.events.cancel,
-            )?;
-            let source = entry.read(self.selected.settings.max_file_bytes, &self.events.cancel)?;
+            let (input, source) = match detected_input {
+                Some(input) => input,
+                None => {
+                    let input = self.inputs.reserve(
+                        self.selected.settings.input_per_worker()?,
+                        &self.events.cancel,
+                    )?;
+                    let source =
+                        entry.read(self.selected.settings.max_file_bytes, &self.events.cancel)?;
+                    (input, source)
+                }
+            };
             record.size = source.len() as u64;
             if source.len() > self.selected.settings.max_file_bytes {
                 record.status = "skipped";
@@ -169,8 +206,9 @@ impl Pipeline<'_> {
                     reason: "file_size_limit",
                 });
             }
-            record.content_hash = entry.content_hash().to_owned();
+            record.content_hash = entry.content_hash();
             if !self.full
+                && !native_changed
                 && previous
                     .as_ref()
                     .is_some_and(|old| old.hash == record.content_hash && old.same_context(&record))
@@ -180,12 +218,21 @@ impl Pipeline<'_> {
                     update: true,
                 });
             }
+            let prefix = previous
+                .as_ref()
+                .filter(|old| !self.full && old.same_context(&record))
+                .and_then(|old| {
+                    usize::try_from(old.size).ok().map(|bytes| {
+                        crate::domain::facts::append::Prefix {
+                            bytes,
+                            hash: old.hash,
+                        }
+                    })
+                });
             let previous = previous
-                .filter(|old| {
-                    !self.full && old.same_context(&record) && !old.fingerprints.all.is_empty()
-                })
-                .map(|old| old.fingerprints);
-            let mut work = Work {
+                .filter(|old| !self.full && old.same_context(&record))
+                .and_then(|old| old.fingerprints);
+            let work = Work {
                 record,
                 kind: entry
                     .language
@@ -197,22 +244,10 @@ impl Pipeline<'_> {
                     }),
                 source,
                 previous,
+                prefix,
                 _input: input,
             };
-            loop {
-                self.events.cancel.check()?;
-                match sender.send_timeout(work, Duration::from_millis(25)) {
-                    Ok(()) => return Ok(()),
-                    Err(channel::SendTimeoutError::Timeout(pending)) => {
-                        work = pending;
-                    }
-                    Err(channel::SendTimeoutError::Disconnected(_)) => {
-                        return Err(Error::operation(
-                            "analysis workers terminated before scan completed",
-                        ));
-                    }
-                }
-            }
+            sender.send(work, &self.events.cancel)
         };
         inputs::walk(
             Rc::clone(&selection.connection),

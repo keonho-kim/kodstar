@@ -25,6 +25,14 @@ pub(super) fn validate(options: &QueryOptions, query: &Query) -> Result<()> {
         }
         Query::Symbols { file } | Query::Files { file } => path(file)?,
         Query::Search { name: value, .. } => name(value)?,
+        Query::RankedSearch { text } => {
+            if text.len() > 256 || text.contains('\0') || !text.chars().any(char::is_alphanumeric) {
+                return Err(Error::argument(
+                    "ranked search requires letters or digits in at most 256 bytes",
+                ));
+            }
+        }
+        Query::Overview => {}
         Query::Related { selector }
         | Query::Deps { selector }
         | Query::Refs { selector }
@@ -49,6 +57,11 @@ pub(super) fn validate(options: &QueryOptions, query: &Query) -> Result<()> {
             position(*at)?;
         }
     }
+    if options.direction == Some(Direction::Undirected) && !matches!(query, Query::Path { .. }) {
+        return Err(Error::argument(
+            "undirected traversal is only available for path",
+        ));
+    }
     if matches!(query, Query::Deps { .. })
         && options
             .direction
@@ -69,7 +82,10 @@ pub(super) fn validate(options: &QueryOptions, query: &Query) -> Result<()> {
             "refs and impact cannot traverse outgoing relationships",
         ));
     }
-    let definitions = matches!(query, Query::Symbols { .. } | Query::Search { .. });
+    let definitions = matches!(
+        query,
+        Query::Symbols { .. } | Query::Search { .. } | Query::Overview
+    );
     let traversal = matches!(
         query,
         Query::Related { .. }
@@ -89,12 +105,14 @@ pub(super) fn validate(options: &QueryOptions, query: &Query) -> Result<()> {
             "relationship filters do not apply to definition queries",
         ));
     }
-    if !traversal
-        && (!matches!(options.depth, Depth::Default)
-            || !matches!(options.max_nodes, Limit::Default))
-    {
+    if !traversal && !matches!(options.depth, Depth::Default) {
+        return Err(Error::argument("depth requires a traversal query"));
+    }
+    let supports_visits =
+        traversal || matches!(query, Query::Overview | Query::RankedSearch { .. });
+    if !supports_visits && !matches!(options.max_nodes, Limit::Default) {
         return Err(Error::argument(
-            "depth and visited-node limits require a traversal query",
+            "this query does not accept a visited-item limit",
         ));
     }
     if options.sites && (definitions || matches!(query, Query::Files { .. })) {

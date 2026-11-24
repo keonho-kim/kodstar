@@ -1,12 +1,13 @@
-// Purpose: 분석 성공과 독립적인 이력 명령 조정.
+// Purpose: 로컬 이력 요청의 체크포인트 선택과 실행 조정.
 // Pattern: Use Case.
 // Usage: 공통 명령 실행기가 history 준비 정책으로 호출.
-// Related: crates/kodstar-core/src/application/history/compare.rs, crates/kodstar-core/src/application/history/branches.rs.
+// Related: crates/kodstar-core/src/application/history/compare.rs, crates/kodstar-core/src/application/history/graph.rs, crates/kodstar-core/src/application/history/branches.rs.
 
 mod analysis_state;
 mod branches;
 pub(crate) mod capture;
 mod compare;
+mod graph;
 pub(crate) mod impact;
 mod listing;
 mod text;
@@ -33,10 +34,17 @@ pub(crate) fn validate(request: &HistoryRequest) -> Result<()> {
         | HistoryRequest::CreateBranch { name }
         | HistoryRequest::SwitchBranch { name }
         | HistoryRequest::DeleteBranch { name } => crate::domain::history::validate_name(name),
-        HistoryRequest::Diff { from, to, .. } if from.is_some() != to.is_some() => {
+        HistoryRequest::Diff { from, to, .. } | HistoryRequest::GraphDiff { from, to, .. }
+            if from.is_some() != to.is_some() =>
+        {
             Err(Error::argument("--from and --to must be supplied together"))
         }
         HistoryRequest::Diff {
+            from: Some(_),
+            refresh: Refresh::Verify,
+            ..
+        }
+        | HistoryRequest::GraphDiff {
             from: Some(_),
             refresh: Refresh::Verify,
             ..
@@ -55,7 +63,7 @@ pub(crate) fn run(
     sink: &mut dyn QuerySink,
 ) -> Result<QuerySummary> {
     validate(request)?;
-    let selected = workspace::select(store, options, Selection::Existing, cancel)?;
+    let mut selected = workspace::select(store, options, Selection::Existing, cancel)?;
     let _installation = if !store.home.exists() && Repository::exists(&selected.root) {
         crate::infrastructure::installation::lease(store, true, cancel)?
     } else {
@@ -70,6 +78,11 @@ pub(crate) fn run(
     let refresh = match request {
         HistoryRequest::List { refresh }
         | HistoryRequest::Diff {
+            from: None,
+            refresh,
+            ..
+        }
+        | HistoryRequest::GraphDiff {
             from: None,
             refresh,
             ..
@@ -143,21 +156,25 @@ pub(crate) fn run(
             state.created = false;
         }
     }
-    if let HistoryRequest::Diff { from, to, .. } = request {
-        let to = to
-            .as_deref()
-            .map(|s| checkpoints::resolve(&repository.connection, s))
-            .transpose()?
-            .unwrap_or(head);
-        let from = if let Some(from) = from {
-            Some(checkpoints::resolve(&repository.connection, from)?)
-        } else {
-            repository.connection.query_row(
-                "SELECT parent FROM checkpoints WHERE id=?1",
-                [to],
-                |r| r.get(0),
-            )?
-        };
+    let comparison = match request {
+        HistoryRequest::Diff { from, to, .. } | HistoryRequest::GraphDiff { from, to, .. } => Some(
+            compare::checkpoints(&repository, head, from.as_deref(), to.as_deref())?,
+        ),
+        _ => None,
+    };
+    if let Some((from, to)) = comparison {
+        if let HistoryRequest::GraphDiff { limit, .. } = request {
+            selected.history = Some(state);
+            return graph::run(
+                store,
+                &mut repository,
+                selected,
+                (from, to),
+                *limit,
+                cancel,
+                sink,
+            );
+        }
         state.comparison = Some(crate::domain::history::Comparison {
             before_coverage: None,
             after_coverage: None,
@@ -173,8 +190,9 @@ pub(crate) fn run(
     metadata.root_encoding = encoding(&selected.root);
     metadata.freshness = refresh.as_str();
     metadata.history = Some(state.clone());
-    sink.begin(&metadata)?;
     let count = if let Some(operation) = operation {
+        repository.release();
+        sink.begin(&metadata)?;
         sink.row(&QueryRow::History(HistoryRow::Operation {
             operation: operation.into(),
             checkpoint: state.checkpoint,
@@ -183,20 +201,23 @@ pub(crate) fn run(
         }))?;
         1
     } else {
-        match request {
-            HistoryRequest::List { .. } => listing::checkpoints(&repository, head, cancel, sink)?,
-            HistoryRequest::Branches => listing::branches(&repository, cancel, sink)?,
-            HistoryRequest::Diff { from, to, .. } => compare::run(
-                &repository,
-                head,
-                from.as_deref(),
-                to.as_deref(),
+        let snapshot = repository.query_snapshot()?;
+        sink.begin(&metadata)?;
+        let count = match request {
+            HistoryRequest::List { .. } => listing::checkpoints(&snapshot, head, cancel, sink)?,
+            HistoryRequest::Branches => listing::branches(&snapshot, cancel, sink)?,
+            HistoryRequest::Diff { .. } => compare::run(
+                &snapshot,
+                comparison
+                    .ok_or_else(|| Error::operation("missing source comparison checkpoints"))?,
                 selected.settings.max_file_bytes,
                 cancel,
                 sink,
             )?,
             _ => 0,
-        }
+        };
+        snapshot.finish()?;
+        count
     };
     let summary = QuerySummary {
         complete: true,

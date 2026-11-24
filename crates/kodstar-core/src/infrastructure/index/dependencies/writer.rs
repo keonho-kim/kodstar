@@ -21,6 +21,7 @@ pub(super) struct Writer<'a> {
     consume_prefix: Statement<'a>,
     next: Statement<'a>,
     store: Statement<'a>,
+    update: Statement<'a>,
     remove: Statement<'a>,
 }
 
@@ -40,9 +41,8 @@ impl<'a> Writer<'a> {
             consume_prefix: c.prepare("DELETE FROM dependency_rows WHERE key_id=?1 AND file_id=?2 AND fact_id<=?3")?,
             next: c.prepare("SELECT part,count,payload FROM lookup_rows WHERE key_id=?1 AND file_id=?2
                 AND part>?3 AND (?4=0 OR count<128) ORDER BY part LIMIT 1")?,
-            store: c.prepare("INSERT INTO lookup_rows(key_id,file_id,part,count,payload) VALUES(?1,?2,?3,?4,?5)
-                ON CONFLICT(key_id,file_id,part) DO UPDATE SET count=excluded.count,payload=excluded.payload
-                WHERE lookup_rows.count<>excluded.count OR lookup_rows.payload<>excluded.payload")?,
+            store: c.prepare("INSERT INTO lookup_rows(key_id,file_id,part,count,payload) SELECT ?1,?2,?3,?4,?5 WHERE NOT EXISTS(SELECT 1 FROM lookup_rows WHERE key_id=?1 AND file_id=?2 AND part=?3)")?,
+            update: c.prepare("UPDATE lookup_rows SET count=?4,payload=?5 WHERE key_id=?1 AND file_id=?2 AND part=?3 AND (count<>?4 OR payload<>?5)")?,
             remove: c.prepare("DELETE FROM lookup_rows WHERE key_id=?1 AND file_id=?2 AND part=?3")?,
         })
     }
@@ -146,6 +146,8 @@ impl<'a> Writer<'a> {
                 codec::push(&mut bytes, id, previous, found)?;
                 previous = id;
             }
+            self.update
+                .execute(params![key, file, part, rows.len(), bytes])?;
             self.store
                 .execute(params![key, file, part, rows.len(), bytes])?;
         }

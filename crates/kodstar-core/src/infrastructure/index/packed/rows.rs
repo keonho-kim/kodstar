@@ -16,6 +16,12 @@ pub(in crate::infrastructure::index) enum Rows {
         keys: Vec<(i64, String)>,
     },
     Relations(Vec<Relation>),
+    Lookups {
+        group: i64,
+        file: i64,
+        page: i64,
+        rows: Vec<super::super::dependencies::pages::Row>,
+    },
 }
 
 impl Rows {
@@ -24,6 +30,7 @@ impl Rows {
             Self::Empty => 0,
             Self::Keys { keys, .. } => keys.len(),
             Self::Relations(rows) => rows.len(),
+            Self::Lookups { rows, .. } => rows.len(),
         }
     }
 
@@ -37,6 +44,19 @@ impl Rows {
                 _ => ValueRef::Null,
             },
             Self::Relations(rows) => rows[at].value(column),
+            Self::Lookups {
+                group, file, rows, ..
+            } => super::super::dependencies::pages::value_at(*group, *file, &rows[at], column),
+        }
+    }
+
+    pub fn rowid(&self, at: usize) -> rusqlite::Result<i64> {
+        if let Self::Lookups { page, rows, .. } = self {
+            return super::super::dependencies::pages::identity(*page, &rows[at]);
+        }
+        match self.value(at, 0) {
+            ValueRef::Integer(id) => Ok(id),
+            _ => Err(super::codec::invalid()),
         }
     }
 }

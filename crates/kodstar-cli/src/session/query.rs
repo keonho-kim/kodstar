@@ -56,7 +56,10 @@ pub(super) enum QueryInput {
         name: String,
         #[serde(default)]
         prefix: bool,
+        #[serde(default)]
+        ranked: bool,
     },
+    Overview,
 }
 
 #[derive(Default, Deserialize)]
@@ -99,7 +102,18 @@ pub(super) fn parse(query: QueryInput, raw: OptionsInput) -> Result<QueryRequest
             from: Selector::parse(&from)?,
             to: Selector::parse(&to)?,
         },
-        QueryInput::Search { name, prefix } => Query::Search { name, prefix },
+        QueryInput::Search {
+            prefix: true,
+            ranked: true,
+            ..
+        } => {
+            return Err(Error::argument("ranked and prefix search conflict"));
+        }
+        QueryInput::Search {
+            name, ranked: true, ..
+        } => Query::RankedSearch { text: name },
+        QueryInput::Search { name, prefix, .. } => Query::Search { name, prefix },
+        QueryInput::Overview => Query::Overview,
     };
     if raw.depth.is_some() && raw.transitive || raw.limit.is_some() && raw.all {
         return Err(Error::argument(

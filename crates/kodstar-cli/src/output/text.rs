@@ -29,12 +29,53 @@ pub(super) fn begin(writer: &mut impl Write, metadata: &QueryMetadata) -> io::Re
             )?;
         }
     }
+    let c = &metadata.coverage;
+    if c.skipped_files > 0
+        || c.partial_files > 0
+        || c.fragment_files > 0
+        || c.configuration_incomplete_files > 0
+        || c.native_incomplete_files > 0
+        || c.native_limited_files > 0
+    {
+        writeln!(
+            writer,
+            "analysis coverage | skipped {} (failed {}) | syntax partial {} | fragments {} | configuration incomplete {} | native incomplete {} | native limited {}",
+            c.skipped_files,
+            c.failed_files,
+            c.partial_files,
+            c.fragment_files,
+            c.configuration_incomplete_files,
+            c.native_incomplete_files,
+            c.native_limited_files
+        )?;
+    }
     Ok(())
 }
 
 pub(super) fn row(writer: &mut impl Write, row: &QueryRow) -> io::Result<()> {
     match row {
         QueryRow::History(row) => super::history::row(writer, row),
+        QueryRow::Overview(row) => super::overview::row(writer, row),
+        QueryRow::Documentation(reference) => {
+            write!(
+                writer,
+                "{} {} | use {}:{}:{}",
+                reference.document_kind,
+                reference.reference,
+                reference.source.file,
+                reference.source.span.line,
+                reference.source.span.column
+            )?;
+            if let Some(target) = &reference.target {
+                writeln!(
+                    writer,
+                    " -> {}:{}:{}",
+                    target.file, target.span.line, target.span.column
+                )
+            } else {
+                writeln!(writer, " | {}", reference.reason.unwrap_or("unresolved"))
+            }
+        }
         QueryRow::Init(report) => writeln!(
             writer,
             "indexed generation {} | parsed {} | reused {} | skipped {} | {} ms",

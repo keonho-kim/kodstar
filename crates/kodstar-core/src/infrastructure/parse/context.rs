@@ -4,13 +4,15 @@
 // Related: crates/kodstar-core/src/infrastructure/parse/mod.rs, crates/kodstar-core/src/infrastructure/parse/declarations.rs, crates/kodstar-core/src/infrastructure/parse/bindings.rs.
 
 use crate::domain::diagnostics::{Error, ErrorKind, Result};
+use smallvec::SmallVec;
+use smol_str::SmolStr;
 use std::sync::Arc;
 
 #[derive(Clone, Default)]
 pub(super) struct NamePath(Option<Arc<Segment>>);
 struct Segment {
     parent: NamePath,
-    name: Arc<str>,
+    name: SmolStr,
     length: usize,
 }
 
@@ -33,12 +35,12 @@ impl NamePath {
             })?;
         Ok(Self(Some(Arc::new(Segment {
             parent: self.clone(),
-            name: Arc::from(name),
+            name: SmolStr::new(name),
             length,
         }))))
     }
     pub(super) fn render(&self) -> Result<String> {
-        let mut parts = Vec::new();
+        let mut parts = SmallVec::<[&str; 4]>::new();
         let mut next = self.0.as_deref();
         while let Some(segment) = next {
             parts.push(segment.name.as_ref());
@@ -63,6 +65,7 @@ impl NamePath {
 
 #[derive(Clone, Default)]
 pub(super) struct Context {
+    pub htmx_disabled: bool,
     pub python_comprehension:
         Option<crate::infrastructure::parse::python::comprehensions::Comprehension>,
     pub ruby_singleton_depth: u16,
@@ -78,6 +81,7 @@ pub(super) struct Context {
     pub member_scope: bool,
     pub member_outer: u32,
     pub condition: Option<Arc<str>>,
+    pub projection_guard: Option<Arc<str>>,
     pub declaration_name: Option<(usize, usize)>,
     pub implementation_owner: Option<NamePath>,
 }

@@ -36,7 +36,7 @@ impl Cursor {
         let start = self.page.map_or(after / codec::WIDTH, |page| {
             (page + 1).max(after / codec::WIDTH)
         });
-        let page = c.query_row(
+        let page = super::super::super::packed::statements::row(c,
             "SELECT page,payload FROM relation_route_pages WHERE kind=?1 AND entity=?2 AND page>=?3 ORDER BY page LIMIT 1",
             params![kind,value,start], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,Vec<u8>>(1)?))).optional()?;
         let Some((page, bytes)) = page else {

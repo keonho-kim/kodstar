@@ -42,15 +42,24 @@ pub(crate) fn command() -> Command {
             init in a project first. Regular project queries synchronize changes before reading the index; \
             --no-refresh skips that synchronization. Help and version output do not initialize a project or \
             create application data.\n\nUse -h for a summary and --help for detailed behavior, options, and \
-            examples.")
-        .after_long_help("Examples:\n  kodstar init .\n  kodstar deps src/api.rs caller --sites\n  kodstar history --help")
+            examples. Progress and stage timings are enabled by default; use --verbose false for quiet stderr.")
+        .after_long_help("Examples:\n  kodstar init .\n  kodstar deps src/api.rs caller --sites\n  kodstar --verbose false symbols src/api.rs\n  kodstar history --help")
         .version(format!(
             "{} (engine {})",
             env!("CARGO_PKG_VERSION"),
             kodstar_core::VERSION
         ))
         .arg_required_else_help(true)
-        .subcommand_required(true)
+        .subcommand_required(false)
+        .arg(clap::Arg::new("verbose").long("verbose").global(true)
+            .action(clap::ArgAction::Set).num_args(1).value_name("true|false")
+            .value_parser(clap::value_parser!(bool)).default_value("true")
+            .help("Show progress, stage timings and result counts")
+            .long_help("Enable or disable routine progress, stage timings and result counts on stderr. Defaults to true; \
+                pass --verbose false to suppress them. Errors and analysis warnings remain visible. This option \
+                does not change result output or structured stdio progress frames, and may appear before or after a command."))
+        .arg(clap::Arg::new("licenses").long("licenses").action(clap::ArgAction::SetTrue)
+            .help("Print bundled third-party license notices"))
         .subcommand(initialize)
         .subcommand(Command::new("__install").hide(true))
         .subcommand(

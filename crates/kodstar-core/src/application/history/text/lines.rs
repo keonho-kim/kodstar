@@ -1,7 +1,7 @@
 // Purpose: 선택한 보존 구간을 원본 행 번호와 한 행 버퍼로 출력.
 // Pattern: Streaming Output.
-// Usage: 텍스트 diff가 before·after의 완전한 행 범위를 전달.
-// Related: crates/kodstar-core/src/application/history/text.rs, crates/kodstar-core/src/infrastructure/history/content/reader.rs.
+// Usage: 텍스트 diff가 완전한 행 범위 또는 정렬한 원본 행을 전달.
+// Related: crates/kodstar-core/src/application/history/text.rs, crates/kodstar-core/src/application/history/text/alignment.rs, crates/kodstar-core/src/infrastructure/history/content/reader.rs.
 
 use crate::domain::{
     cancellation::Cancellation,
@@ -47,23 +47,29 @@ impl Lines<'_> {
                 text.extend_from_slice(&bytes[..take]);
                 bytes = &bytes[take..];
                 if text.last() == Some(&b'\n') {
-                    self.emit(&mut text)?;
+                    self.buffer(&mut text)?;
                     count += 1;
                 }
             }
             offset += read as u64;
         }
         if !text.is_empty() {
-            self.emit(&mut text)?;
+            self.buffer(&mut text)?;
             count += 1;
         }
         Ok(count)
     }
 
-    fn emit(&mut self, buffer: &mut Vec<u8>) -> Result<()> {
-        self.cancel.check()?;
+    fn buffer(&mut self, buffer: &mut Vec<u8>) -> Result<()> {
         let text = String::from_utf8(std::mem::take(buffer))
             .map_err(|e| Error::caused_by("invalid text diff boundary", e))?;
+        *buffer = self.emit(text)?.into_bytes();
+        buffer.clear();
+        Ok(())
+    }
+
+    pub(super) fn emit(&mut self, text: String) -> Result<String> {
+        self.cancel.check()?;
         let row = QueryRow::History(HistoryRow::DiffLine {
             path: self.path.to_string_lossy().into_owned(),
             path_encoding: encoding(self.path),
@@ -73,10 +79,9 @@ impl Lines<'_> {
         });
         self.sink.row(&row)?;
         if let QueryRow::History(HistoryRow::DiffLine { text, .. }) = row {
-            *buffer = text.into_bytes();
-            buffer.clear();
+            self.line += 1;
+            return Ok(text);
         }
-        self.line += 1;
-        Ok(())
+        unreachable!("the emitted row is a diff line")
     }
 }

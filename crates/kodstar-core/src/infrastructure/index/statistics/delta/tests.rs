@@ -14,6 +14,7 @@ use std::sync::{
 #[test]
 fn small_changes_match_full_counts_without_reading_unrelated_facts() -> Result<()> {
     let c = Connection::open_in_memory()?;
+    super::super::tests::diagnostic_schema(&c)?;
     let forbid = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&forbid);
     c.create_scalar_function(

@@ -45,16 +45,17 @@ fn metadata_commands_share_synchronization_and_keep_explicit_recovery_paths() ->
         assert_eq!(
             result.status.code(),
             Some(if matches!(args[0], "status" | "doctor") {
-                0
+                3
             } else {
-                1
+                0
             })
         );
         if matches!(args[0], "status" | "doctor") {
             let diagnostic = project.run(&[args[0], "--format", "json"])?;
             let data: Value = serde_json::from_slice(&diagnostic.stdout)?;
-            assert!(data["history"]["analysis_error"].is_string());
-            assert_ne!(
+            assert!(data["history"]["analysis_error"].is_null());
+            assert_eq!(data["coverage"]["partial_files"], 1);
+            assert_eq!(
                 data["history"]["checkpoint"],
                 data["history"]["analysis_checkpoint"]
             );
@@ -63,7 +64,12 @@ fn metadata_commands_share_synchronization_and_keep_explicit_recovery_paths() ->
         args.extend(["--no-refresh", "--format", "json"]);
         let result = project.run(&args)?;
         assert!(
-            result.status.success(),
+            result.status.code()
+                == Some(if matches!(args[0], "status" | "doctor") {
+                    3
+                } else {
+                    0
+                }),
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );

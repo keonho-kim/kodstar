@@ -43,7 +43,9 @@ impl Namespace {
             return match kind {
                 "type" | "type_parameter" => Self::Types,
                 "function" | "local" | "parameter" | "parameter_default" | "field" | "value"
-                | "call_result" | "value_object" | "alias" | "scala_self" => Self::Values,
+                | "call_result" | "scala_object" | "scala_given" | "alias" | "scala_self" => {
+                    Self::Values
+                }
                 _ => Self::Any,
             };
         }

@@ -72,13 +72,13 @@ fn ejs_script_boundaries_do_not_merge_line_comments_or_incomplete_syntax() -> Te
         "Main.ejs",
         "<script>function broken(){</script><script>}</script>",
     )?;
-    assert!(p.build(false).is_err());
+    assert_eq!(p.build(false)?.coverage.partial_files, 1);
     let rows = p.query(Query::Symbols {
         file: "Main.ejs".into(),
     })?;
     assert_eq!(
         rows.metadata.ok_or("metadata")?.generation,
-        Some(before.generation)
+        Some(before.generation + 1)
     );
     Ok(())
 }

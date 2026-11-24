@@ -5,6 +5,9 @@
 
 use rusqlite::{Error, Result};
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn invalid() -> Error {
     Error::ModuleError("invalid packed index block".into())
 }

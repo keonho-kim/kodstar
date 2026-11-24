@@ -79,21 +79,65 @@ fn java_return_annotation_changes_invalidate_unmodified_callers() -> TestResult 
 }
 
 #[test]
-fn unselected_overload_return_types_do_not_create_false_receiver_certainty() -> TestResult {
+fn java_argument_count_selects_the_overload_before_resolving_return_members() -> TestResult {
     let p = Project::new()?;
-    p.write("Main.java","class Item { void run() {} } class Factory { static Item make() { return new Item(); } static Object make(int value) { return null; } void caller() { make(1).run(); } }")?;
+    p.write("Main.java","class Item { void run() {} } class Factory { static Item make() { return new Item(); } static Object make(int value) { return null; } void caller() { make(1).run(); } void valid() { make().run(); } }")?;
     p.build(false)?;
     let rows = p.query(Query::Explain {
         selector: selector("Main.java", "Factory::caller"),
     })?;
     assert!(
-        relationships(&rows).iter().any(|e| e
+        !relationships(&rows).iter().any(|e| e
             .target
             .as_ref()
-            .is_some_and(|t| t.qualified_name == "Item::run")
-            && e.resolution == "candidate"),
+            .is_some_and(|t| t.qualified_name == "Item::run")),
         "{:?}",
         rows.rows
     );
+    assert!(
+        relationships(&rows).iter().any(|e| {
+            e.resolution == "resolved"
+                && e.target.as_ref().is_some_and(|t| {
+                    t.qualified_name == "Factory::make" && t.signature.contains("value:int")
+                })
+        }),
+        "{:?}",
+        rows.rows
+    );
+    let valid = p.query(Query::Explain {
+        selector: selector("Main.java", "Factory::valid"),
+    })?;
+    assert!(
+        relationships(&valid).iter().any(|e| {
+            e.resolution == "resolved"
+                && e.target
+                    .as_ref()
+                    .is_some_and(|t| t.qualified_name == "Item::run")
+        }),
+        "{:?}",
+        valid.rows
+    );
+    Ok(())
+}
+
+#[test]
+fn java_same_arity_and_applicable_varargs_remain_ambiguous() -> TestResult {
+    let p = Project::new()?;
+    p.write("Main.java", "class X { void run(int v) {} void run(String v) {} void run(int... v) {} void caller() { run(1); } }")?;
+    p.build(false)?;
+    let rows = p.query(Query::Explain {
+        selector: selector("Main.java", "X::caller"),
+    })?;
+    let alternatives: Vec<_> = relationships(&rows)
+        .into_iter()
+        .filter(|e| {
+            e.relation == "calls"
+                && e.target
+                    .as_ref()
+                    .is_some_and(|t| t.qualified_name == "X::run")
+        })
+        .collect();
+    assert_eq!(alternatives.len(), 3, "{:?}", rows.rows);
+    assert!(alternatives.iter().all(|e| e.resolution == "ambiguous"));
     Ok(())
 }

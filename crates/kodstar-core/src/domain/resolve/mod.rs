@@ -5,6 +5,8 @@
 
 //! Reference spelling is preserved; this only separates static qualification from dynamic syntax.
 
+pub(crate) mod documentation;
+pub(crate) mod java;
 mod kotlin;
 pub(crate) mod lisp;
 pub(crate) mod lookup_keys;
@@ -88,3 +90,5 @@ pub(crate) fn reference(language: Language, expression: &str) -> Reference {
         _ => Reference::Dynamic,
     }
 }
+
+pub(crate) mod native;

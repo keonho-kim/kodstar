@@ -1,0 +1,29 @@
+{
+  "reason": "Accept region directives at end of file as well as before a newline.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "      optional(field('content', $.preproc_arg)),\n      /\\n/,",
+      "after": "      optional(field('content', $.preproc_arg)),\n      $._directive_end,",
+      "occurrences": 2
+    },
+    {
+      "file": "grammar.js",
+      "before": "    $._lambda_paren_open,\n  ],",
+      "after": "    $._lambda_paren_open,\n    $._directive_end,\n  ],",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "    LAMBDA_PAREN_OPEN,",
+      "after": "    LAMBDA_PAREN_OPEN,\n    DIRECTIVE_END,",
+      "occurrences": 1
+    },
+    {
+      "file": "src/scanner.c",
+      "before": "bool tree_sitter_c_sharp_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {\n    Scanner *scanner = (Scanner *)payload;",
+      "after": "bool tree_sitter_c_sharp_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {\n    if (valid_symbols[DIRECTIVE_END] && (lexer->eof(lexer) || lexer->lookahead == '\\n')) {\n        if (!lexer->eof(lexer)) advance(lexer);\n        lexer->mark_end(lexer);\n        lexer->result_symbol = DIRECTIVE_END;\n        return true;\n    }\n    Scanner *scanner = (Scanner *)payload;",
+      "occurrences": 1
+    }
+  ]
+}

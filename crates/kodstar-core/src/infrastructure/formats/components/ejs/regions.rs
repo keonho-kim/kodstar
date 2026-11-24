@@ -46,7 +46,7 @@ impl<'a> Tags<'a> {
             }));
         }
         let closing = find(self.source, start + 2, b"%>")
-            .ok_or_else(|| Error::operation("EJS tag is incomplete"))?;
+            .ok_or_else(|| Error::input("source_syntax_error", "EJS tag is incomplete", None))?;
         let kind = match marker {
             Some(b'=' | b'-') => Kind::Output,
             Some(b'#') => Kind::Comment,

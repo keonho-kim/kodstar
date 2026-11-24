@@ -21,9 +21,16 @@ impl Lookup<'_, '_> {
         depth: usize,
     ) -> Result<()> {
         let frame = self.external_scope()?;
-        self.expression_inner(context, scope, position, expression, depth)?;
+        let java = (context.language == Language::Java)
+            .then(|| crate::domain::resolve::java::call(expression))
+            .flatten();
+        let spelling = java.map_or(expression, |(_, spelling)| spelling);
+        self.expression_inner(context, scope, position, spelling, depth)?;
         self.kotlin_call_targets()?;
         self.scala_call_targets(expression)?;
+        if let Some((count, _)) = java {
+            self.java_call_targets(count)?;
+        }
         self.finish_external_scope(frame, true)
     }
 

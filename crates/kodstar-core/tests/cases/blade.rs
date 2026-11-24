@@ -197,13 +197,13 @@ fn blade_php_and_directive_arguments_cannot_start_fake_comments_or_nested_templa
         rows.rows
     );
     p.write("Main.blade.php", "{{-- incomplete")?;
-    assert!(p.build(false).is_err());
+    assert_eq!(p.build(false)?.coverage.failed_files, 1);
     let rows = p.query(Query::Symbols {
         file: "Main.blade.php".into(),
     })?;
     assert_eq!(
         rows.metadata.ok_or("metadata")?.generation,
-        Some(before.generation)
+        Some(before.generation + 1)
     );
     Ok(())
 }

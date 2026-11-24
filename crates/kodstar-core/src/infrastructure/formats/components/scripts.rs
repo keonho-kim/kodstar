@@ -67,7 +67,7 @@ impl ScriptCursor {
                 continue;
             }
             let mut executable = true;
-            crate::infrastructure::formats::components::events::attributes(
+            crate::infrastructure::formats::markup::attributes(
                 source,
                 name_end..opening,
                 &mut |attribute| {
@@ -126,8 +126,10 @@ fn closing(
         }
         at = after;
     }
-    Err(Error::operation(
+    Err(Error::input(
+        "source_syntax_error",
         "component script/style has no closing tag",
+        None,
     ))
 }
 

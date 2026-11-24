@@ -27,6 +27,12 @@ impl Lookup<'_, '_> {
             return Ok(false);
         };
         self.load_javascript_configuration(root, root, 0)?;
+        let incomplete: bool = self.connection.cached_row("SELECT EXISTS(SELECT 1 FROM resolution_configuration_seen s JOIN diagnostics d ON d.file_id=s.id WHERE s.root=?1 AND d.code IN ('configuration_incomplete','external_configuration'))", [root], |r| r.get(0))?;
+        if incomplete {
+            self.dependency("configuration", &root.to_string(), false)?;
+            self.reason = Some("configuration dependency is unavailable");
+            return Ok(true);
+        }
         let mut best: Option<(String, i64, u8, usize)> = None;
         let mut patterns=self.connection.cached_prepare("SELECT pattern,configuration FROM resolution_path_patterns WHERE root=?1 ORDER BY rowid")?;
         let records = patterns.query_map([root], |r| {

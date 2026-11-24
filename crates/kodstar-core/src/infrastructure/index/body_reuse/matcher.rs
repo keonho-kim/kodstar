@@ -15,7 +15,7 @@ impl<'a> Matcher<'a> {
     pub fn new(c: &'a Connection, budget: usize) -> Result<Self> {
         let matcher = Self {
             find: c.prepare(&format!(
-                "SELECT b.fact_id,{} FROM body_original b
+                "SELECT b.fact_id,{},b.native_module FROM body_original b
                 CROSS JOIN facts_rows f ON f.id=b.fact_id
                 WHERE b.file_id=?1 AND b.digest=?2 ORDER BY b.fact_id LIMIT 1",
                 super::FIELDS
@@ -35,7 +35,7 @@ impl<'a> Matcher<'a> {
         Ok(matcher)
     }
 
-    pub fn matches(&mut self, values: &[i64; 14]) -> Result<bool> {
+    pub fn matches(&mut self, values: &[i64; 15]) -> Result<bool> {
         let digest = super::digest(values);
         let found = self
             .find

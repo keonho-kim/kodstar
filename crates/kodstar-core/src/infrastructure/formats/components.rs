@@ -8,8 +8,8 @@ mod blade;
 mod ejs;
 mod events;
 mod razor;
-mod references;
-mod regions;
+pub(in crate::infrastructure::formats) mod references;
+pub(in crate::infrastructure::formats) mod regions;
 mod script_facts;
 mod scripts;
 
@@ -31,8 +31,13 @@ pub(crate) fn extract(
     cancel: &Cancellation,
     emit: &mut dyn FnMut(Language, Fact) -> Result<()>,
 ) -> Result<()> {
-    std::str::from_utf8(source)
-        .map_err(|error| Error::caused_by("non-UTF-8 component input", error))?;
+    std::str::from_utf8(source).map_err(|error| {
+        Error::input(
+            "source_encoding_error",
+            format!("non-UTF-8 component input: {error}"),
+            None,
+        )
+    })?;
     file_root(path, source, &mut |fact| emit(format, fact))?;
     if format == Language::Ejs {
         return crate::infrastructure::formats::components::ejs::extract(
@@ -92,7 +97,8 @@ pub(crate) fn extract(
     let whole = SourceSpan::at(source, 0, source.len());
     let mut synthetic_owner = None;
     if parts > 0 {
-        parser.extract_with_syntax(
+        let earlier = parser.partial.take();
+        let result = parser.extract_with_syntax(
             ParseSyntax {
                 language: syntax,
                 jsx,
@@ -149,7 +155,9 @@ pub(crate) fn extract(
                 }
                 emit(syntax, fact)
             },
-        )?;
+        );
+        parser.remap_partial(earlier, |span| rebase(span, prefix.len(), whole));
+        result?;
     }
     Ok(())
 }

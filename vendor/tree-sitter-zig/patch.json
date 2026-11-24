@@ -1,0 +1,11 @@
+{
+  "reason": "Allow empty container bodies without fabricating a missing field.",
+  "replacements": [
+    {
+      "file": "grammar.js",
+      "before": "      '{',\n      $._container_members,\n      '}',",
+      "after": "      '{',\n      optional($._container_members),\n      '}',",
+      "occurrences": 4
+    }
+  ]
+}

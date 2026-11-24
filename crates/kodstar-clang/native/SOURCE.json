@@ -1,0 +1,36 @@
+{
+  "upstream": "https://github.com/llvm/llvm-project",
+  "revision": "llvmorg-23.1.4",
+  "version": "23.1.4",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "build_input": "Matching installed LLVM development headers and static archives, selected by LLVM_CONFIG_PATH; no network downloads during build",
+  "builtin_headers": "Compiler-owned resource tree from the same LLVM installation, compressed per file at build time; content identity becomes part of the analysis fingerprint",
+  "modifications": "LLVM sources are not modified. Native bridge, frontend, filesystem, visitor and per-TU resource guards are KodStar-owned adapters.",
+  "licenses": [
+    {
+      "path": "LICENSES/native/LLVM-LICENSE.txt",
+      "origin": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-23.1.4/llvm/LICENSE.TXT",
+      "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+    },
+    {
+      "path": "LICENSES/native/LLVM-Support-LICENSE.txt",
+      "origin": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-23.1.4/llvm/include/llvm/Support/LICENSE.TXT",
+      "sha256": "54cbc326a78b9400065bfc5830a57fdcdaf808286d4ac35d8a9e324aa77b7241"
+    }
+  ],
+  "standard_headers": {
+    "cxx": {
+      "revision": "llvmorg-23.1.4",
+      "source": "LLVM installation include/c++/v1, including its generated target ABI __config_site",
+      "license": "Apache-2.0 WITH LLVM-exception"
+    },
+    "darwin": {
+      "revision": "0.17.0",
+      "source": "https://github.com/ziglang/zig/tree/0.17.0/lib/libc/include/any-darwin-any",
+      "build_input": "KODSTAR_ZIG_LIB_PATH or Homebrew Zig 0.17.0; raw files are not modified",
+      "license": "Original file-level APSL-2.0, BSD and MIT notices; LICENSES/native/Apple-APSL-2.0.txt and Zig-LICENSE.txt",
+      "tree_blake3": "08147105c1fa85023262c776f59cc4672d4f01b25f59ee6248eaec6f158cbe38",
+      "digest_contract": "Sorted virtual system/ paths: u64 little-endian UTF-8 name length, name bytes, BLAKE3 of unmodified file bytes"
+    }
+  }
+}

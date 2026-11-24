@@ -38,3 +38,29 @@ fn small_body_changes_publish_the_same_coverage_as_full_analysis() -> TestResult
     }
     Ok(())
 }
+
+#[test]
+fn declaration_additions_do_not_count_retained_import_relationships_twice() -> TestResult {
+    let p = Project::new()?;
+    p.write("api.py", "def original(): pass\n")?;
+    p.write(
+        "stable.py",
+        &format!(
+            "from api import *\ndef stable():\n{}",
+            "    original()\n".repeat(700)
+        ),
+    )?;
+    let initial = p.build(false)?;
+    assert!(initial.coverage.relationships >= 512);
+    p.write("api.py", "def original(): pass\ndef kodstar_added_leaf(): pass\ndef kodstar_added_caller(): kodstar_added_leaf()\n")?;
+    let incremental = p.build(false)?;
+    let snapshot = normalized_index(&incremental)?;
+    let full = p.build(true)?;
+    assert_eq!(snapshot, normalized_index(&full)?);
+    assert_eq!(
+        incremental.coverage.relationships,
+        full.coverage.relationships
+    );
+    assert_eq!(incremental.coverage.unresolved, full.coverage.unresolved);
+    Ok(())
+}
