@@ -86,3 +86,19 @@ cargo build --workspace --locked
 검증용 예제는 독립한 프로젝트에서 실행한다. 테스트 구조·임시 자원 정리와 성능 비교 방법은
 [검증 문서](development/verification.md), parser 재생성과 원본 기록은
 [의존성 문서](development/dependencies.md)에 있다.
+
+## GitHub 릴리스
+
+[Release 워크플로](../.github/workflows/release.yml)는 macOS ARM64와 Ubuntu 24.04 x86-64 러너에서
+각각 같은 커밋의 `dist` 바이너리를 빌드한다. [도구 준비 스크립트](../scripts/release/toolchain.sh)는
+공식 LLVM 23.1.4와 macOS용 Zig 0.17.0 배포 파일의 SHA-256을 확인한다.
+[패키징 검사](../scripts/release/package.py)는 격리한 홈에서 설치하고 내장 Clang 호출이 해석되는지 확인한 뒤
+바이너리·설치 스크립트·라이선스 고지를 아카이브에 담는다.
+
+`main`에서 **Release**를 실행하고 `publish`를 켜면 두 빌드가 성공한 뒤 `Cargo.toml`의 workspace
+버전으로 태그와 GitHub Release를 만들고 아카이브 두 개와 `SHA256SUMS`를 첨부한다.
+`publish`의 기본 실행은 검증한 패키지를 워크플로 산출물로 올린다. 같은 이름의 태그가 이미 있으면 게시를 중단한다.
+
+```bash
+gh workflow run release.yml --ref main -f publish=true
+```

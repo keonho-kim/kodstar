@@ -121,10 +121,16 @@ pub(super) fn compile(llvm: &Llvm) -> Result<(), Box<dyn std::error::Error>> {
     }
     archives.finish()?;
     for library in output(&llvm.config, &["--link-static", "--system-libs"])?.split_whitespace() {
+        let path = Path::new(library);
+        let archive = path.file_name().and_then(|name| name.to_str());
+        if library == "-lzstd"
+            || path.is_absolute()
+                && matches!(archive, Some("libzstd.a" | "libzstd.so" | "libzstd.dylib"))
+        {
+            // The workspace zstd-sys supplies the Zstd C API used by these archives.
+            continue;
+        }
         if let Some(name) = library.strip_prefix("-l") {
-            if name == "zstd" {
-                continue;
-            } // The workspace zstd-sys already supplies this C API statically.
             println!("cargo:rustc-link-lib={name}");
         } else if !library.ends_with("libz3.dylib") && !library.ends_with("libz3.so") {
             return Err(format!("unsupported LLVM system link input: {library}").into());

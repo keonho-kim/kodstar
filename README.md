@@ -11,6 +11,14 @@ analysis, and SQLite stores source history and the analysis index.
 
 ## Quick start
 
+Download the archive for Apple Silicon or Linux x86-64 from the [latest release](https://github.com/keonho-kim/kodstar/releases/latest) and check it against `SHA256SUMS`. Extract it, then run this command from the extracted directory.
+
+```bash
+./install.sh --binary ./kodstar
+```
+
+### Build from source
+
 Source builds run on macOS or Linux and require the pinned Rust toolchain, C/C++ build tools,
 and LLVM/Clang development headers and static libraries. Follow the [build requirements](docs/development.md#개발-환경).
 
